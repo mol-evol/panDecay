@@ -1,0 +1,2 @@
+lset nst=6 basefreq=empirical rates=gamma(categories=8) shape=estimate pinv=0.1;
+hsearch nreps=50 swap=tbr addseq=random hold=1 multrees=yes;
