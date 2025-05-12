@@ -16,7 +16,7 @@ import time
 import datetime
 from pathlib import Path
 
-VERSION = "0.2.0" # Updated version after refactoring
+VERSION = "1.0.0" # Updated version after refactoring
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(message)s')
 logger = logging.getLogger(__name__)
@@ -670,7 +670,8 @@ class MLDecayIndices:
             logger.error(f"Constraint tree generation/scoring failed for index {tree_idx}: {e}")
             return None, None
 
-    def calculate_decay_indices(self):
+    def calculate_decay_indices(self, perform_site_analysis=False):
+        """Calculate ML decay indices for all internal branches of the ML tree."""
         if not self.ml_tree:
             logger.info("ML tree not available. Attempting to build it first...")
             try:
@@ -716,7 +717,8 @@ class MLDecayIndices:
                     'taxa': clade_taxa_names,
                     'paup_tree_index': len(all_tree_files_rel), # 1-based index for PAUP*
                     'constrained_lnl': constr_lnl,
-                    'lnl_diff': lnl_diff
+                    'lnl_diff': lnl_diff,
+                    'tree_filename': rel_constr_tree_fn  # Store tree filename for site analysis
                 }
             else:
                 logger.warning(f"Failed to generate/score constraint tree for branch {clade_log_idx}. It will be excluded.")
@@ -725,6 +727,29 @@ class MLDecayIndices:
             logger.warning("No valid constraint trees were generated. Skipping AU test.")
             self.decay_indices = {}
             return self.decay_indices
+
+        # Perform site-specific likelihood analysis if requested
+        if perform_site_analysis:
+            logger.info("Performing site-specific likelihood analysis for each branch...")
+
+            for clade_id, cdata in list(constraint_info_map.items()):
+                rel_constr_tree_fn = cdata.get('tree_filename')
+
+                if rel_constr_tree_fn:
+                    tree_files = [ML_TREE_FN, rel_constr_tree_fn]
+                    site_analysis_result = self._calculate_site_likelihoods(tree_files, clade_id)
+
+                    if site_analysis_result:
+                        # Store all site analysis data
+                        constraint_info_map[clade_id].update(site_analysis_result)
+
+                        # Log key results
+                        supporting = site_analysis_result.get('supporting_sites', 0)
+                        conflicting = site_analysis_result.get('conflicting_sites', 0)
+                        ratio = site_analysis_result.get('support_ratio', 0.0)
+                        weighted = site_analysis_result.get('weighted_support_ratio', 0.0)
+
+                        logger.info(f"Branch {clade_id}: {supporting} supporting sites, {conflicting} conflicting sites, ratio: {ratio:.2f}, weighted ratio: {weighted:.2f}")
 
         logger.info(f"Running AU test on {len(all_tree_files_rel)} trees (1 ML + {len(constraint_info_map)} constrained).")
         au_test_results = self.run_au_test(all_tree_files_rel)
@@ -736,8 +761,18 @@ class MLDecayIndices:
                 'taxa': cdata['taxa'],
                 'lnl_diff': cdata['lnl_diff'],
                 'constrained_lnl': cdata['constrained_lnl'],
-                'AU_pvalue': None, 'significant_AU': None
+                'AU_pvalue': None,
+                'significant_AU': None
             }
+
+            # Add site analysis data if available
+            if 'site_data' in cdata:
+                # Copy all the site analysis fields
+                for key in ['site_data', 'supporting_sites', 'conflicting_sites', 'neutral_sites',
+                           'support_ratio', 'sum_supporting_delta', 'sum_conflicting_delta',
+                           'weighted_support_ratio']:
+                    if key in cdata:
+                        self.decay_indices[cid][key] = cdata[key]
 
         if au_test_results:
             # Update ML likelihood if AU test scored it differently (should be rare)
@@ -758,14 +793,14 @@ class MLDecayIndices:
                     au_res_for_tree = au_test_results[paup_idx]
                     self.decay_indices[cid]['AU_pvalue'] = au_res_for_tree['AU_pvalue']
                     if au_res_for_tree['AU_pvalue'] is not None:
-                         self.decay_indices[cid]['significant_AU'] = au_res_for_tree['AU_pvalue'] < 0.05
+                        self.decay_indices[cid]['significant_AU'] = au_res_for_tree['AU_pvalue'] < 0.05
 
                     # Update constrained LNL from AU test if different
                     current_constr_lnl = self.decay_indices[cid]['constrained_lnl']
                     au_constr_lnl = au_res_for_tree['lnL']
                     if current_constr_lnl is None or abs(current_constr_lnl - au_constr_lnl) > 1e-3:
                         if current_constr_lnl is not None: # Log if it changed significantly
-                             logger.info(f"Constrained LNL for {cid} updated by AU test: {current_constr_lnl} -> {au_constr_lnl}")
+                            logger.info(f"Constrained LNL for {cid} updated by AU test: {current_constr_lnl} -> {au_constr_lnl}")
                         self.decay_indices[cid]['constrained_lnl'] = au_constr_lnl
                         if self.ml_likelihood is not None: # Recalculate diff
                             self.decay_indices[cid]['lnl_diff'] = au_constr_lnl - self.ml_likelihood
@@ -774,53 +809,319 @@ class MLDecayIndices:
         else:
             logger.warning("AU test failed or returned no results. Decay indices will lack AU p-values.")
 
-        if not self.decay_indices: logger.warning("No branch support values were calculated.")
-        else: logger.info(f"Calculated support values for {len(self.decay_indices)} branches.")
+        if not self.decay_indices:
+            logger.warning("No branch support values were calculated.")
+        else:
+            logger.info(f"Calculated support values for {len(self.decay_indices)} branches.")
+
         return self.decay_indices
 
-    def annotate_tree(self, output_path: Path, value_type="lnl"):
-        if not self.ml_tree or not self.decay_indices:
-            logger.warning("ML tree or decay indices missing. Cannot annotate.")
-            return
+    def _calculate_site_likelihoods(self, tree_files_list, branch_id):
+        """
+        Calculate site-specific likelihoods for ML tree vs constrained tree.
+
+        Args:
+            tree_files_list: List with [ml_tree_file, constrained_tree_file]
+            branch_id: Identifier for the branch being analyzed
+
+        Returns:
+            Dictionary with site-specific likelihood differences or None if failed
+        """
+        if len(tree_files_list) != 2:
+            logger.warning(f"Site analysis for branch {branch_id} requires exactly 2 trees (ML and constrained).")
+            return None
+
+        site_lnl_file = f"site_lnl_{branch_id}.txt"
+        site_script_file = f"site_analysis_{branch_id}.nex"
+        site_log_file = f"site_analysis_{branch_id}.log"
+
+        # Create PAUP* script for site likelihood calculation
+        script_cmds = [f"execute {NEXUS_ALIGNMENT_FN};", self._get_paup_model_setup_cmds()]
+
+        # Get both trees (ML and constrained)
+        script_cmds.append(f"gettrees file={tree_files_list[0]} mode=3 storebrlens=yes;")
+        script_cmds.append(f"gettrees file={tree_files_list[1]} mode=7 storebrlens=yes;")
+
+        # Calculate site likelihoods for both trees
+        script_cmds.append(f"lscores 1-2 / sitelikes=yes scorefile={site_lnl_file} replace=yes;")
+
+        # Write PAUP* script
+        paup_script_content = f"#NEXUS\nbegin paup;\n" + "\n".join(script_cmds) + "\nquit;\nend;\n"
+        script_path = self.temp_path / site_script_file
+        script_path.write_text(paup_script_content)
+        if self.debug:
+            logger.debug(f"Site analysis script for {branch_id}:\n{paup_script_content}")
+
         try:
-            # Work on a copy to avoid modifying self.ml_tree directly during annotation search
-            # Phylo.read(Phylo.write(self.ml_tree, StringIO(), "newick").getvalue(), "newick") is one way
-            # Or save/read from temp file if simpler
-            temp_tree_for_annot_path = self.temp_path / "ml_tree_for_annotation.nwk"
-            Phylo.write(self.ml_tree, str(temp_tree_for_annot_path), "newick")
-            annot_tree = Phylo.read(str(temp_tree_for_annot_path), "newick")
+            # Run PAUP* to calculate site likelihoods
+            self._run_paup_command_file(site_script_file, site_log_file, timeout_sec=600)
 
-            annotated_nodes_count = 0
-            for node in annot_tree.get_nonterminals():
-                if not node or not node.clades: continue # Skip leaves or empty internal nodes
-                node_taxa_set = set(leaf.name for leaf in node.get_terminals())
+            # Parse the site likelihood file
+            site_lnl_path = self.temp_path / site_lnl_file
+            if not site_lnl_path.exists():
+                logger.warning(f"Site likelihood file not found for branch {branch_id}.")
+                return None
 
-                # Find matching entry in self.decay_indices by taxa set
-                matched_data = None
-                for decay_id_str, decay_info in self.decay_indices.items():
-                    if 'taxa' in decay_info and set(decay_info['taxa']) == node_taxa_set:
-                        matched_data = decay_info
-                        break # Found the data for this phylogenetic node
+            # Read the site likelihoods file
+            site_lnl_content = site_lnl_path.read_text()
 
-                node.confidence = None # Default if no match or no value
-                if matched_data:
-                    val_to_set = None
-                    if value_type == "au" and 'AU_pvalue' in matched_data and matched_data['AU_pvalue'] is not None:
-                        val_to_set = matched_data['AU_pvalue']
-                    elif value_type == "lnl" and 'lnl_diff' in matched_data and matched_data['lnl_diff'] is not None:
-                        val_to_set = abs(matched_data['lnl_diff'])
+            # Initialize dictionaries for tree likelihoods
+            tree1_lnl = {}
+            tree2_lnl = {}
 
-                    if val_to_set is not None:
-                        try: node.confidence = float(val_to_set)
-                        except (ValueError, TypeError): logger.warning(f"Could not convert support '{val_to_set}' to float for annotation.")
-                        annotated_nodes_count +=1
+            # Define patterns to extract data from the file
+            # First pattern: Match the header line for each tree section
+            tree_header_pattern = r'(\d+)\t([-\d\.]+)\t-\t-'
 
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            Phylo.write(annot_tree, str(output_path), "newick")
-            logger.info(f"Annotated tree with {annotated_nodes_count} branch values written to {output_path} (type: {value_type}).")
+            # Second pattern: Match site and likelihood lines (indented with tabs)
+            site_lnl_pattern = r'\t\t(\d+)\t([-\d\.]+)'
+
+            # Find all tree headers
+            tree_headers = list(re.finditer(tree_header_pattern, site_lnl_content))
+
+            # Make sure we found at least 2 tree headers (Tree 1 and Tree 2)
+            if len(tree_headers) < 2:
+                logger.warning(f"Could not find enough tree headers in site likelihood file for branch {branch_id}")
+                if self.debug:
+                    logger.debug(f"Site likelihood file content (first 500 chars):\n{site_lnl_content[:500]}...")
+                return None
+
+            # Process each tree section
+            for i, header_match in enumerate(tree_headers[:2]):  # Only process the first two trees
+                tree_num = int(header_match.group(1))
+
+                # If there's a next header, read up to it; otherwise, read to the end
+                if i < len(tree_headers) - 1:
+                    section_text = site_lnl_content[header_match.end():tree_headers[i+1].start()]
+                else:
+                    section_text = site_lnl_content[header_match.end():]
+
+                # Find all site and likelihood entries
+                site_matches = re.finditer(site_lnl_pattern, section_text)
+
+                # Store data in appropriate dictionary
+                for site_match in site_matches:
+                    site_num = int(site_match.group(1))
+                    lnl_val = float(site_match.group(2))
+
+                    if tree_num == 1:
+                        tree1_lnl[site_num] = lnl_val
+                    else:
+                        tree2_lnl[site_num] = lnl_val
+
+            # Check if we have data for both trees
+            if not tree1_lnl:
+                logger.warning(f"No data found for Tree 1 in site likelihood file for branch {branch_id}")
+                return None
+
+            if not tree2_lnl:
+                logger.warning(f"No data found for Tree 2 in site likelihood file for branch {branch_id}")
+                return None
+
+            # Create the site_data dictionary with differences
+            site_data = {}
+            all_sites = sorted(set(tree1_lnl.keys()) & set(tree2_lnl.keys()))
+
+            for site_num in all_sites:
+                ml_lnl = tree1_lnl[site_num]
+                constrained_lnl = tree2_lnl[site_num]
+                delta_lnl = ml_lnl - constrained_lnl
+
+                site_data[site_num] = {
+                    'lnL_ML': ml_lnl,
+                    'lnL_constrained': constrained_lnl,
+                    'delta_lnL': delta_lnl,
+                    'supports_branch': delta_lnl < 0  # Negative delta means site supports ML branch
+                }
+
+            # Calculate summary statistics
+            if site_data:
+                deltas = [site_info['delta_lnL'] for site_info in site_data.values()]
+
+                supporting_sites = sum(1 for d in deltas if d < 0)
+                conflicting_sites = sum(1 for d in deltas if d > 0)
+                neutral_sites = sum(1 for d in deltas if abs(d) < 1e-6)
+
+                # Calculate sum of likelihood differences
+                sum_supporting_delta = sum(d for d in deltas if d < 0)  # Sum of negative deltas (supporting)
+                sum_conflicting_delta = sum(d for d in deltas if d > 0)  # Sum of positive deltas (conflicting)
+
+                # Calculate weighted support ratio
+                weighted_support_ratio = abs(sum_supporting_delta) / sum_conflicting_delta if sum_conflicting_delta > 0 else float('inf')
+
+                # Calculate standard support ratio
+                support_ratio = supporting_sites / conflicting_sites if conflicting_sites > 0 else float('inf')
+
+                logger.info(f"Extracted site likelihoods for {len(site_data)} sites for branch {branch_id}")
+                logger.info(f"Branch {branch_id}: {supporting_sites} supporting sites, {conflicting_sites} conflicting sites")
+                logger.info(f"Branch {branch_id}: {supporting_sites} supporting sites, {conflicting_sites} conflicting sites, ratio: {support_ratio:.2f}")
+                logger.info(f"Branch {branch_id}: Sum supporting delta: {sum_supporting_delta:.4f}, sum conflicting: {sum_conflicting_delta:.4f}, weighted ratio: {weighted_support_ratio:.2f}")
+
+                # Return a comprehensive dictionary with all info
+                return {
+                    'site_data': site_data,
+                    'supporting_sites': supporting_sites,
+                    'conflicting_sites': conflicting_sites,
+                    'neutral_sites': neutral_sites,
+                    'support_ratio': support_ratio,
+                    'sum_supporting_delta': sum_supporting_delta,
+                    'sum_conflicting_delta': sum_conflicting_delta,
+                    'weighted_support_ratio': weighted_support_ratio
+                }
+            else:
+                logger.warning(f"No comparable site likelihoods found for branch {branch_id}")
+                return None
+
         except Exception as e:
-            logger.error(f"Failed to annotate tree: {e}")
-            # raise # Optional: re-raise
+            logger.error(f"Failed to calculate site likelihoods for branch {branch_id}: {e}")
+            if self.debug:
+                import traceback
+                logger.debug(f"Traceback for site likelihood calculation error:\n{traceback.format_exc()}")
+            return None
+
+    def annotate_trees(self, output_dir: Path, base_filename: str = "annotated_tree"):
+        """
+        Create three annotated trees:
+        1. A tree with AU p-values as branch labels
+        2. A tree with log-likelihood differences as branch labels
+        3. A combined tree with both values as FigTree-compatible branch labels
+
+        Args:
+            output_dir: Directory to save the tree files
+            base_filename: Base name for the tree files (without extension)
+
+        Returns:
+            Dict with paths to the created tree files
+        """
+        if not self.ml_tree or not self.decay_indices:
+            logger.warning("ML tree or decay indices missing. Cannot annotate trees.")
+            return {}
+
+        output_dir.mkdir(parents=True, exist_ok=True)
+        tree_files = {}
+
+        try:
+            # Create AU p-value annotated tree
+            au_tree_path = output_dir / f"{base_filename}_au.nwk"
+            try:
+                # Work on a copy to avoid modifying self.ml_tree
+                temp_tree_for_au = self.temp_path / f"ml_tree_for_au_annotation.nwk"
+                Phylo.write(self.ml_tree, str(temp_tree_for_au), "newick")
+                au_tree = Phylo.read(str(temp_tree_for_au), "newick")
+
+                annotated_nodes_count = 0
+                for node in au_tree.get_nonterminals():
+                    if not node or not node.clades: continue
+                    node_taxa_set = set(leaf.name for leaf in node.get_terminals())
+
+                    # Find matching entry in decay_indices by taxa set
+                    matched_data = None
+                    for decay_id_str, decay_info in self.decay_indices.items():
+                        if 'taxa' in decay_info and set(decay_info['taxa']) == node_taxa_set:
+                            matched_data = decay_info
+                            break
+
+                    node.confidence = None  # Default
+                    if matched_data and 'AU_pvalue' in matched_data and matched_data['AU_pvalue'] is not None:
+                        node.confidence = float(matched_data['AU_pvalue'])
+                        annotated_nodes_count += 1
+
+                Phylo.write(au_tree, str(au_tree_path), "newick")
+                logger.info(f"Annotated tree with {annotated_nodes_count} branch values written to {au_tree_path} (type: au).")
+                tree_files['au'] = au_tree_path
+            except Exception as e:
+                logger.error(f"Failed to create AU tree: {e}")
+
+            # Create log-likelihood difference annotated tree
+            lnl_tree_path = output_dir / f"{base_filename}_lnl.nwk"
+            try:
+                temp_tree_for_lnl = self.temp_path / f"ml_tree_for_lnl_annotation.nwk"
+                Phylo.write(self.ml_tree, str(temp_tree_for_lnl), "newick")
+                lnl_tree = Phylo.read(str(temp_tree_for_lnl), "newick")
+
+                annotated_nodes_count = 0
+                for node in lnl_tree.get_nonterminals():
+                    if not node or not node.clades: continue
+                    node_taxa_set = set(leaf.name for leaf in node.get_terminals())
+
+                    matched_data = None
+                    for decay_id_str, decay_info in self.decay_indices.items():
+                        if 'taxa' in decay_info and set(decay_info['taxa']) == node_taxa_set:
+                            matched_data = decay_info
+                            break
+
+                    node.confidence = None  # Default
+                    if matched_data and 'lnl_diff' in matched_data and matched_data['lnl_diff'] is not None:
+                        node.confidence = abs(matched_data['lnl_diff'])
+                        annotated_nodes_count += 1
+
+                Phylo.write(lnl_tree, str(lnl_tree_path), "newick")
+                logger.info(f"Annotated tree with {annotated_nodes_count} branch values written to {lnl_tree_path} (type: lnl).")
+                tree_files['lnl'] = lnl_tree_path
+            except Exception as e:
+                logger.error(f"Failed to create LNL tree: {e}")
+
+            # Create combined annotation tree manually for FigTree
+            combined_tree_path = output_dir / f"{base_filename}_combined.nwk"
+            try:
+                # For the combined approach, we'll directly modify the Newick string
+                # First, get both trees as strings
+                temp_tree_for_combined = self.temp_path / f"ml_tree_for_combined_annotation.nwk"
+                Phylo.write(self.ml_tree, str(temp_tree_for_combined), "newick")
+
+                # Create a mapping from node taxa sets to combined annotation strings
+                node_annotations = {}
+                for node in self.ml_tree.get_nonterminals():
+                    if not node or not node.clades: continue
+                    node_taxa_set = frozenset(leaf.name for leaf in node.get_terminals())
+
+                    for decay_id_str, decay_info in self.decay_indices.items():
+                        if 'taxa' in decay_info and frozenset(decay_info['taxa']) == node_taxa_set:
+                            au_val = decay_info.get('AU_pvalue')
+                            lnl_val = decay_info.get('lnl_diff')
+                            if au_val is not None and lnl_val is not None:
+                                node_annotations[node_taxa_set] = f"AU:{au_val:.4f}|LnL:{abs(lnl_val):.4f}"
+                            break
+
+                # Now, we'll manually construct a combined Newick string
+                # Read the base tree without annotations
+                base_tree_str = temp_tree_for_combined.read_text()
+
+                # We'll create a combined tree by using string replacement on the base tree
+                # First, make a working copy of the ML tree
+                combined_tree = Phylo.read(str(temp_tree_for_combined), "newick")
+
+                # Add our custom annotations
+                annotated_nodes_count = 0
+                for node in combined_tree.get_nonterminals():
+                    if not node or not node.clades: continue
+                    node_taxa_set = frozenset(leaf.name for leaf in node.get_terminals())
+
+                    if node_taxa_set in node_annotations:
+                        # We need to use string values for combined annotation
+                        # Save our combined annotation as a string in .name instead of .confidence
+                        # This is a hack that works with some tree viewers including FigTree
+                        node.name = node_annotations[node_taxa_set]
+                        annotated_nodes_count += 1
+
+                # Write the modified tree
+                Phylo.write(combined_tree, str(combined_tree_path), "newick")
+
+                logger.info(f"Annotated tree with {annotated_nodes_count} branch values written to {combined_tree_path} (type: combined).")
+                tree_files['combined'] = combined_tree_path
+            except Exception as e:
+                logger.error(f"Failed to create combined tree: {e}")
+                import traceback
+                logger.debug(f"Traceback: {traceback.format_exc()}")
+
+            return tree_files
+
+        except Exception as e:
+            logger.error(f"Failed to annotate trees: {e}")
+            if hasattr(self, 'debug') and self.debug:
+                import traceback
+                logger.debug(f"Traceback: {traceback.format_exc()}")
+            return tree_files  # Return any successfully created files
 
     def write_results(self, output_path: Path):
         if not self.decay_indices:
@@ -941,6 +1242,189 @@ class MLDecayIndices:
             f.write("- **AU p-value**: P-value from the Approximately Unbiased test comparing the ML tree against the alternative (constrained) tree. Lower p-values (e.g., < 0.05) suggest the alternative tree (where the clade is broken) is significantly worse than the ML tree, thus supporting the clade.\n")
         logger.info(f"Detailed report written to {output_path}")
 
+    def write_site_analysis_results(self, output_dir: Path):
+        """
+        Write site-specific likelihood analysis results to files.
+
+        Args:
+            output_dir: Directory to save the site analysis files
+        """
+        if not self.decay_indices:
+            logger.warning("No decay indices available for site analysis output.")
+            return
+
+        # Check if any clade has site data
+        has_site_data = any('site_data' in data for data in self.decay_indices.values())
+        if not has_site_data:
+            logger.warning("No site-specific analysis data available to write.")
+            return
+
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Create a summary file for all branches
+        summary_path = output_dir / "site_analysis_summary.txt"
+        with summary_path.open('w') as f:
+            f.write("Branch Site Analysis Summary\n")
+            f.write("=========================\n\n")
+            f.write("Clade_ID\tSupporting_Sites\tConflicting_Sites\tNeutral_Sites\tSupport_Ratio\tSum_Supporting_Delta\tSum_Conflicting_Delta\tWeighted_Support_Ratio\n")
+
+            for clade_id, data in sorted(self.decay_indices.items()):
+                if 'site_data' not in data:
+                    continue
+
+                supporting = data.get('supporting_sites', 0)
+                conflicting = data.get('conflicting_sites', 0)
+                neutral = data.get('neutral_sites', 0)
+                ratio = data.get('support_ratio', 0.0)
+                sum_supporting = data.get('sum_supporting_delta', 0.0)
+                sum_conflicting = data.get('sum_conflicting_delta', 0.0)
+                weighted_ratio = data.get('weighted_support_ratio', 0.0)
+
+                if ratio == float('inf'):
+                    ratio_str = "Inf"
+                else:
+                    ratio_str = f"{ratio:.4f}"
+
+                if weighted_ratio == float('inf'):
+                    weighted_ratio_str = "Inf"
+                else:
+                    weighted_ratio_str = f"{weighted_ratio:.4f}"
+
+                f.write(f"{clade_id}\t{supporting}\t{conflicting}\t{neutral}\t{ratio_str}\t{sum_supporting:.4f}\t{sum_conflicting:.4f}\t{weighted_ratio_str}\n")
+
+        logger.info(f"Site analysis summary written to {summary_path}")
+
+        # For each branch, write detailed site data
+        for clade_id, data in self.decay_indices.items():
+            if 'site_data' not in data:
+                continue
+
+            site_data_path = output_dir / f"site_data_{clade_id}.txt"
+            with site_data_path.open('w') as f:
+                f.write(f"Site-Specific Likelihood Analysis for {clade_id}\n")
+                f.write("=" * 50 + "\n\n")
+                f.write(f"Supporting sites: {data.get('supporting_sites', 0)}\n")
+                f.write(f"Conflicting sites: {data.get('conflicting_sites', 0)}\n")
+                f.write(f"Neutral sites: {data.get('neutral_sites', 0)}\n")
+                f.write(f"Support ratio: {data.get('support_ratio', 0.0):.4f}\n")
+                f.write(f"Sum of supporting deltas: {data.get('sum_supporting_delta', 0.0):.4f}\n")
+                f.write(f"Sum of conflicting deltas: {data.get('sum_conflicting_delta', 0.0):.4f}\n")
+                f.write(f"Weighted support ratio: {data.get('weighted_support_ratio', 0.0):.4f}\n\n")
+                f.write("Site\tML_Tree_lnL\tConstrained_lnL\tDelta_lnL\tSupports_Branch\n")
+
+                # Make sure site_data is a dictionary with entries for each site
+                site_data = data.get('site_data', {})
+                if isinstance(site_data, dict) and site_data:
+                    for site_num, site_info in sorted(site_data.items()):
+                        # Safely access each field with a default
+                        ml_lnl = site_info.get('lnL_ML', 0.0)
+                        constrained_lnl = site_info.get('lnL_constrained', 0.0)
+                        delta_lnl = site_info.get('delta_lnL', 0.0)
+                        supports = site_info.get('supports_branch', False)
+
+                        f.write(f"{site_num}\t{ml_lnl:.6f}\t{constrained_lnl:.6f}\t{delta_lnl:.6f}\t{supports}\n")
+
+            logger.info(f"Detailed site data for {clade_id} written to {site_data_path}")
+
+        # Generate visualization if matplotlib/seaborn available
+        try:
+            import matplotlib.pyplot as plt
+            import seaborn as sns
+            import numpy as np
+
+            for clade_id, data in self.decay_indices.items():
+                if 'site_data' not in data:
+                    continue
+
+                # Extract data for plotting
+                site_data = data.get('site_data', {})
+                if not site_data:
+                    continue
+
+                site_nums = sorted(site_data.keys())
+                deltas = [site_data[site]['delta_lnL'] for site in site_nums if 'delta_lnL' in site_data[site]]
+
+                if not deltas:
+                    continue
+
+                # Create plot
+                plt.figure(figsize=(12, 6))
+
+                # Create a bar plot
+                bar_colors = ['green' if d < 0 else 'red' for d in deltas]
+                plt.bar(range(len(deltas)), deltas, color=bar_colors, alpha=0.7)
+
+                # Add x-axis ticks at reasonable intervals
+                if len(site_nums) > 50:
+                    # For many sites, show fewer ticks
+                    tick_interval = max(1, len(site_nums) // 20)
+                    tick_positions = range(0, len(site_nums), tick_interval)
+                    tick_labels = [site_nums[i] for i in tick_positions if i < len(site_nums)]
+                    plt.xticks(tick_positions, tick_labels, rotation=45)
+                else:
+                    # For fewer sites, show all or more ticks
+                    plt.xticks(range(len(site_nums)), site_nums, rotation=45)
+
+                # Add reference line at y=0
+                plt.axhline(y=0, color='black', linestyle='-', alpha=0.3)
+
+                # Add titles and labels
+                plt.title(f"Site-Specific Likelihood Differences for {clade_id}")
+                plt.xlabel("Site Position")
+                plt.ylabel("Delta lnL (ML - Constrained)")
+
+                # Add summary info text box
+                support_ratio = data.get('support_ratio', 0.0)
+                weighted_ratio = data.get('weighted_support_ratio', 0.0)
+
+                ratio_text = "Inf" if support_ratio == float('inf') else f"{support_ratio:.2f}"
+                weighted_text = "Inf" if weighted_ratio == float('inf') else f"{weighted_ratio:.2f}"
+
+                info_text = (
+                    f"Supporting sites: {data.get('supporting_sites', 0)}\n"
+                    f"Conflicting sites: {data.get('conflicting_sites', 0)}\n"
+                    f"Support ratio: {ratio_text}\n"
+                    f"Weighted ratio: {weighted_text}"
+                )
+
+                # Add text box with summary info
+                plt.text(
+                    0.02, 0.95, info_text,
+                    transform=plt.gca().transAxes,
+                    bbox=dict(boxstyle='round', facecolor='white', alpha=0.8)
+                )
+
+                plt.tight_layout()
+
+                # Save plot
+                plot_path = output_dir / f"site_plot_{clade_id}.png"
+                plt.savefig(str(plot_path), dpi=150)
+                plt.close()
+
+                logger.info(f"Site-specific likelihood plot for {clade_id} saved to {plot_path}")
+
+                # Optional: Create a histogram of delta values
+                plt.figure(figsize=(10, 5))
+                sns.histplot(deltas, kde=True, bins=30)
+                plt.axvline(x=0, color='black', linestyle='--')
+                plt.title(f"Distribution of Site Likelihood Differences for {clade_id}")
+                plt.xlabel("Delta lnL (ML - Constrained)")
+                plt.tight_layout()
+
+                hist_path = output_dir / f"site_hist_{clade_id}.png"
+                plt.savefig(str(hist_path), dpi=150)
+                plt.close()
+
+                logger.info(f"Site likelihood histogram for {clade_id} saved to {hist_path}")
+
+        except ImportError:
+            logger.warning("Matplotlib/seaborn not available for site analysis visualization.")
+        except Exception as e:
+            logger.error(f"Error creating site analysis visualizations: {e}")
+            if self.debug:
+                import traceback
+                logger.debug(f"Visualization error traceback: {traceback.format_exc()}")
+
     def visualize_support_distribution(self, output_path: Path, value_type="au", **kwargs):
         if not self.decay_indices: logger.warning("No data for support distribution plot."); return
         try:
@@ -970,10 +1454,6 @@ class MLDecayIndices:
             logger.info(f"Support distribution plot saved to {output_path}")
         except ImportError: logger.error("Matplotlib/Seaborn not found for visualization.")
         except Exception as e: logger.error(f"Failed support distribution plot: {e}")
-
-    # visualize_support_heatmap and visualize_tree would follow similar pattern:
-    # check decay_indices, import libs, extract data, plot, save, handle errors.
-    # For brevity, I'll skip their full refactor here but they should use Path for output.
 
     @staticmethod
     def read_paup_block(paup_block_file_path: Path):
@@ -1021,7 +1501,7 @@ def print_runtime_parameters(args_ns, model_str_for_print):
     output_p = Path(args_ns.output) # Use Path for consistent name generation
     print("\nOUTPUT SETTINGS:")
     print(f"  Results file:       {output_p}")
-    print(f"  Annotated tree:     {args_ns.tree} (type: {args_ns.annotation})")
+    print(f"  Annotated trees:    {args_ns.tree}_au.nwk, {args_ns.tree}_lnl.nwk, {args_ns.tree}_combined.nwk")
     print(f"  Detailed report:    {output_p.with_suffix('.md')}")
 
     if args_ns.temp: print(f"  Temp directory:     {args_ns.temp}")
@@ -1034,6 +1514,7 @@ def print_runtime_parameters(args_ns, model_str_for_print):
         print(f"  Tree plot:          {output_p.parent / (output_p.stem + '_tree.' + args_ns.viz_format)}")
 
     print("\n" + "=" * 80 + "\n")
+
 
 
 def main():
@@ -1050,9 +1531,8 @@ def main():
 
     parser.add_argument("--paup", default="paup", help="Path to PAUP* executable.")
     parser.add_argument("--output", default="ml_decay_indices.txt", help="Output file for summary results.")
-    parser.add_argument("--tree", default="annotated_tree.nwk", help="Output file for Newick tree annotated with support values.")
-    parser.add_argument("--annotation", default="au", choices=["au", "lnl"], help="Value for tree annotation: 'au' (AU p-value) or 'lnl' (abs log-likelihood diff).")
-
+    parser.add_argument("--tree", default="annotated_tree", help="Base name for annotated tree files. Three trees will be generated with suffixes: _au.nwk (AU p-values), _lnl.nwk (likelihood differences), and _combined.nwk (both values).")
+    parser.add_argument("--site-analysis", action="store_true", help="Perform site-specific likelihood analysis to identify supporting/conflicting sites for each branch.")
     parser.add_argument("--data-type", default="dna", choices=["dna", "protein", "discrete"], help="Type of sequence data.")
     # Model parameter overrides
     mparams = parser.add_argument_group('Model Parameter Overrides (optional)')
@@ -1139,7 +1619,16 @@ def main():
         decay_calc.build_ml_tree() # Can raise exceptions
 
         if decay_calc.ml_tree and decay_calc.ml_likelihood is not None:
-            decay_calc.calculate_decay_indices()
+            decay_calc.calculate_decay_indices(perform_site_analysis=args.site_analysis)
+
+            # Add this new code snippet here
+            if hasattr(decay_calc, 'decay_indices') and decay_calc.decay_indices:
+                for clade_id, data in decay_calc.decay_indices.items():
+                    if 'site_data' in data:
+                        site_output_dir = Path(args.output).parent / f"{Path(args.output).stem}_site_analysis"
+                        decay_calc.write_site_analysis_results(site_output_dir)
+                        logger.info(f"Site-specific analysis results written to {site_output_dir}")
+                        break  # Only need to do this once if any site_data exists
 
             output_main_path = Path(args.output)
             decay_calc.write_results(output_main_path)
@@ -1147,8 +1636,16 @@ def main():
             report_path = output_main_path.with_suffix(".md")
             decay_calc.generate_detailed_report(report_path)
 
-            annot_tree_path = Path(args.tree)
-            decay_calc.annotate_tree(annot_tree_path, value_type=args.annotation)
+            output_dir = output_main_path.resolve().parent
+            tree_base_name = args.tree  # Use the tree argument directly as the base name
+            tree_files = decay_calc.annotate_trees(output_dir, tree_base_name)
+
+            if tree_files:
+                logger.info(f"Successfully created {len(tree_files)} annotated trees.")
+                for tree_type, path in tree_files.items():
+                    logger.info(f"  - {tree_type} tree: {path}")
+            else:
+                logger.warning("Failed to create annotated trees.")
 
             if args.visualize:
                 viz_out_dir = output_main_path.resolve().parent # Ensure absolute path for parent
@@ -1165,6 +1662,11 @@ def main():
                     decay_calc.visualize_support_distribution(
                         viz_out_dir / f"{viz_base_name}_dist_{args.annotation}.{args.viz_format}",
                         value_type=args.annotation, **viz_kwargs)
+
+                if args.site_analysis:
+                    site_output_dir = output_main_path.parent / f"{output_main_path.stem}_site_analysis"
+                    decay_calc.write_site_analysis_results(site_output_dir)
+                    logger.info(f"Site-specific analysis results written to {site_output_dir}")
 
             logger.info("MLDecay analysis completed successfully.")
         else:
