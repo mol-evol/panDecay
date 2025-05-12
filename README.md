@@ -152,7 +152,7 @@ usage: MLDecay.py [-h] [--format FORMAT] [--model MODEL] [--gamma] [--invariable
                   [--viz-format {png,pdf,svg}] [-v]
                   alignment
 
-MLDecay v0.2.1: Calculate ML-based phylogenetic decay indices using PAUP*.
+MLDecay v1.0.0: Calculate ML-based phylogenetic decay indices using PAUP*.
 
 positional arguments:
   alignment             Input alignment file path.
@@ -348,7 +348,7 @@ If `--debug` or `--keep-files` is used, a temporary directory (usually in `debug
 
 ## Examples & Recipes
 
-Let `alignment.fas` be a FASTA DNA alignment and `proteins.phy` be a PHYLIP protein alignment.
+Let [alignment.fas](alignment.fas) be a FASTA DNA alignment, [proteins.phy](./proteins.phy) be a PHYLIP protein alignment and [morpho.nex](./morpho.nex) be a morphological dataset..
 
 ### Example 1: Basic DNA Analysis
 Analyze a DNA alignment with GTR+G+I model, automatically estimating parameters.
