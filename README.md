@@ -1,5 +1,4 @@
-
-![Python 3.8+](https://img.shields.io/badge/python-3.8%2B-blue.svg) ![Version](https://img.shields.io/badge/version-0.2.0-orange.svg) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+![Python 3.8+](https://img.shields.io/badge/python-3.8%2B-blue.svg) ![Version](https://img.shields.io/badge/version-1.0.0-orange.svg) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 # MLDecay: Maximum Likelihood-based Phylogenetic Decay Indices
 
@@ -23,8 +22,9 @@ MLDecay is a Python command-line tool for calculating Maximum Likelihood (ML)-ba
     *   [Optional PAUP\* Block File](#optional-paup-block-file)
 6.  [Output Files](#output-files)
     *   [Main Results File (`ml_decay_indices.txt`)](#main-results-file-ml_decay_indicestxt)
-    *   [Annotated Tree (`annotated_tree.nwk`)](#annotated-tree-annotated_treenwk)
+    *   [Annotated Trees](#annotated-trees)
     *   [Detailed Markdown Report (`_detailed.md`)](#detailed-markdown-report-_detailedmd)
+    *   [Site-Specific Analysis (Optional)](#site-specific-analysis-optional)
     *   [Visualizations (Optional)](#visualizations-optional)
     *   [Temporary Files (Debug/Keep)](#temporary-files-debugkeep)
 7.  [Examples & Recipes](#examples--recipes)
@@ -33,6 +33,7 @@ MLDecay is a Python command-line tool for calculating Maximum Likelihood (ML)-ba
     *   [Example 3: Discrete Morphological Data](#example-3-discrete-morphological-data)
     *   [Example 4: Using a Starting Tree](#example-4-using-a-starting-tree)
     *   [Example 5: Advanced Control with PAUP\* Block](#example-5-advanced-control-with-paup-block)
+    *   [Example 6: Site-Specific Analysis](#example-6-site-specific-analysis)
 8.  [Interpreting Results](#interpreting-results)
 9.  [Troubleshooting](#troubleshooting)
 10. [Citations](#citations)
@@ -65,16 +66,18 @@ A significantly worse likelihood for the constrained tree (and a low AU test p-v
 *   Calculates ML-based decay values using log-likelihood differences.
 *   Performs the Approximately Unbiased (AU) test for statistical assessment of branch support.
 *   Supports DNA, Protein, and binary discrete morphological data.
+*   Optional site-specific likelihood analysis to identify which alignment positions support or conflict with each branch.
 *   Flexible model specification (e.g., GTR, HKY, JTT, WAG, Mk) with options for gamma-distributed rate heterogeneity (+G) and proportion of invariable sites (+I).
 *   Allows fine-grained control over model parameters (gamma shape, pinvar, base frequencies, etc.).
 *   Option to provide a custom PAUP\* block for complex model or search strategy definitions.
 *   Option to provide a starting tree for the initial ML search.
 *   Generates comprehensive output:
     *   Tab-delimited results file.
-    *   Newick tree annotated with support values (AU p-values or log-likelihood differences).
+    *   Multiple Newick trees annotated with different support values.
     *   Detailed Markdown report summarizing the analysis and results.
 *   Optional static visualization (requires `matplotlib` and `seaborn`):
     *   Distribution of support values.
+    *   Site-specific support visualizations.
 *   Multi-threaded PAUP\* execution (configurable).
 *   Debug mode and option to keep temporary files.
 
@@ -130,8 +133,6 @@ MLDecay requires Python 3.8 or higher and has several dependencies that can be e
    ln -s $(pwd)/MLDecay.py ~/.local/bin/mldecay
    ```
 
-
-
 ## Usage
 
 ### Basic Command
@@ -143,14 +144,15 @@ python3 MLDecay.py <alignment_file> --model <model_name> [options...]
 ### Command-Line Arguments
 
 ```
-usage: MLDecay.py [-h] [--format FORMAT] [--model MODEL] [--gamma] [--invariable] [--paup PAUP] [--output OUTPUT] [--tree TREE] [--annotation {au,lnl}]
-                  [--data-type {dna,protein,discrete}] [--gamma-shape GAMMA_SHAPE] [--prop-invar PROP_INVAR] [--base-freq {equal,estimate,empirical}]
-                  [--rates {equal,gamma}] [--protein-model PROTEIN_MODEL] [--nst {1,2,6}] [--parsmodel | --no-parsmodel] [--threads THREADS]
-                  [--starting-tree STARTING_TREE] [--paup-block PAUP_BLOCK] [--temp TEMP] [--keep-files] [--debug] [--visualize]
+usage: MLDecay.py [-h] [--format FORMAT] [--model MODEL] [--gamma] [--invariable] [--paup PAUP] [--output OUTPUT] [--tree TREE]
+                  [--data-type {dna,protein,discrete}] [--gamma-shape GAMMA_SHAPE] [--prop-invar PROP_INVAR] 
+                  [--base-freq {equal,estimate,empirical}] [--rates {equal,gamma}] [--protein-model PROTEIN_MODEL] 
+                  [--nst {1,2,6}] [--parsmodel | --no-parsmodel] [--threads THREADS] [--starting-tree STARTING_TREE] 
+                  [--paup-block PAUP_BLOCK] [--temp TEMP] [--keep-files] [--debug] [--site-analysis] [--visualize]
                   [--viz-format {png,pdf,svg}] [-v]
                   alignment
 
-MLDecay v0.2.0: Calculate ML-based phylogenetic decay indices using PAUP*.
+MLDecay v0.2.1: Calculate ML-based phylogenetic decay indices using PAUP*.
 
 positional arguments:
   alignment             Input alignment file path.
@@ -163,11 +165,11 @@ options:
   --invariable          Add invariable sites (+I) to model. (default: False)
   --paup PAUP           Path to PAUP* executable. (default: paup)
   --output OUTPUT       Output file for summary results. (default: ml_decay_indices.txt)
-  --tree TREE           Output file for Newick tree annotated with support values. (default: annotated_tree.nwk)
-  --annotation {au,lnl}
-                        Value for tree annotation: 'au' (AU p-value) or 'lnl' (abs log-likelihood diff). (default: au)
+  --tree TREE           Base name for annotated tree files. Three trees will be generated with suffixes: _au.nwk (AU p-values), 
+                        _lnl.nwk (likelihood differences), and _combined.nwk (both values). (default: annotated_tree)
   --data-type {dna,protein,discrete}
                         Type of sequence data. (default: dna)
+  --site-analysis       Perform site-specific likelihood analysis to identify supporting/conflicting sites for each branch. (default: False)
   -v, --version         show program's version number and exit
 
 Model Parameter Overrides (optional):
@@ -244,19 +246,29 @@ A tab-delimited text file containing:
     *   `Significant_AU (p<0.05)`: "Yes" if AU p-value < 0.05, "No" otherwise.
     *   `Taxa_List`: A comma-separated list of taxa in the clade.
 
-### Annotated Tree (`annotated_tree.nwk` by default)
-A Newick tree file where internal nodes (branches) are annotated with support values.
-*   The type of annotation is controlled by `--annotation`:
-    *   `au` (default): Nodes are annotated with AU test p-values.
-    *   `lnl`: Nodes are annotated with the absolute difference in log-likelihood.
-*   This tree can be visualized in standard tree viewers like FigTree, Dendroscope, iTOL, etc.
+### Annotated Trees
+MLDecay now generates three different annotated tree files:
+* `<tree_base>_au.nwk`: Tree with AU test p-values as branch labels
+* `<tree_base>_lnl.nwk`: Tree with log-likelihood differences as branch labels
+* `<tree_base>_combined.nwk`: Tree with both values as branch labels in the format "AU:0.95|LnL:2.34"
 
-### Detailed Markdown Report (`<output_stem>_detailed.md`)
+These trees can be visualized in standard tree viewers like FigTree, Dendroscope, iTOL, etc. The combined tree is particularly suited for FigTree which handles string labels well.
+
+### Detailed Markdown Report (`<output_stem>.md`)
 A Markdown file providing a more human-readable summary of the analysis parameters, summary statistics, and detailed branch support results in a table format. It also includes a brief interpretation guide.
+
+### Site-Specific Analysis (Optional)
+If `--site-analysis` is used, additional output files are generated in a directory named `<output_stem>_site_analysis/`:
+
+1. **`site_analysis_summary.txt`**: A summary of supporting vs. conflicting sites for each branch.
+2. **`site_data_Clade_X.txt`**: For each branch, detailed site-by-site likelihood differences.
+3. **`site_plot_Clade_X.png`**: Visualization of site-specific support/conflict (if matplotlib is available).
+
+This feature allows you to identify which alignment positions support or conflict with each branch in the tree.
 
 ### Visualizations (Optional)
 If `--visualize` is used, static plots are generated (requires `matplotlib` and `seaborn`):
-*   **Support Distribution Plot** (`<output_stem>_dist_<annotation_type>.<viz_format>`): A histogram showing the distribution of the chosen support values (AU p-values or LNL differences) across all tested branches.
+*   **Support Distribution Plot** (`<output_stem>_dist_au.<viz_format>` and `<output_stem>_dist_lnl.<viz_format>`): Histograms showing the distribution of AU p-values and LNL differences across all tested branches.
 
 ### Temporary Files (Debug/Keep)
 If `--debug` or `--keep-files` is used, a temporary directory (usually in `debug_runs/mldecay_<timestamp>/` or a user-specified path) will be retained. This directory contains:
@@ -267,6 +279,7 @@ If `--debug` or `--keep-files` is used, a temporary directory (usually in `debug
 *   `constraint_tree_*.tre`, `constraint_score_*.txt`: Constrained trees and their score files.
 *   `au_test.nex`, `paup_au.log`: PAUP\* script and log for the AU test.
 *   `au_test_results.txt`: Score file from the AU test (though the log is primarily parsed).
+*   `site_analysis_*.nex`, `site_lnl_*.txt` (if `--site-analysis` used): Site-specific likelihood files.
 *   `mldecay_debug.log` (in the main execution directory if `--debug` is on): Detailed script execution log.
 
 ## Examples & Recipes
@@ -278,7 +291,7 @@ Analyze a DNA alignment with GTR+G+I model, automatically estimating parameters.
 
 ```bash
 python3 MLDecay.py alignment.fas --model GTR --gamma --invariable --data-type dna \
-    --output dna_decay.txt --tree dna_annotated.nwk
+    --output dna_decay.txt --tree dna_annotated
 ```
 
 ### Example 2: Protein Data with Specific Model
@@ -287,7 +300,7 @@ Analyze a protein alignment using the WAG model, fixed gamma shape, and estimati
 ```bash
 python3 MLDecay.py proteins.phy --format phylip --data-type protein \
     --protein-model WAG --gamma --gamma-shape 0.85 --invariable \
-    --output protein_decay.txt --tree protein_annotated.nwk --threads 8
+    --output protein_decay.txt --tree protein_annotated --threads 8
 ```
 
 ### Example 3: Discrete Morphological Data
@@ -296,7 +309,7 @@ Analyze a binary (0/1) discrete morphological dataset (e.g., in NEXUS format `mo
 ```bash
 python3 MLDecay.py morpho.nex --format nexus --data-type discrete \
     --model Mk --gamma \
-    --output morpho_decay.txt --tree morpho_annotated.nwk
+    --output morpho_decay.txt --tree morpho_annotated
 ```
 *Note: For discrete data, ensure characters are '0' and '1'. `--parsmodel` (default for discrete) will use parsimony-like branch lengths.*
 
@@ -322,6 +335,16 @@ python3 MLDecay.py alignment.fas --paup-block my_paup_commands.txt \
 ```
 *(MLDecay will still handle the constraint generation and AU test logic around your block.)*
 
+### Example 6: Site-Specific Analysis
+Analyze which sites in the alignment support or conflict with each clade:
+
+```bash
+python3 MLDecay.py alignment.fas --model GTR --gamma --site-analysis --visualize \
+    --output site_analysis_results.txt
+```
+
+This will generate site-specific likelihood analyses in addition to the standard branch support results.
+
 ## Interpreting Results
 
 *   **ML Tree Log-Likelihood:** The baseline score for your optimal tree.
@@ -334,7 +357,12 @@ python3 MLDecay.py alignment.fas --paup-block my_paup_commands.txt \
     *   A **low p-value (e.g., < 0.05)** leads to rejecting the null hypothesis. This means the constrained tree is significantly worse, providing statistical support for the original clade's monophyly.
     *   A **high p-value (e.g., > 0.05)** means we cannot reject the null hypothesis; the data do not provide strong statistical evidence to prefer the ML tree (with the clade) over the alternative (clade broken). This implies weaker support for that specific clade.
 
-Generally, clades with large positive `LnL_Diff_from_ML` values and low `AU_p-value`s are considered well-supported.
+**Site-Specific Analysis Interpretation:**
+* **Negative delta lnL values** indicate sites that support the branch (they become less likely when the branch is constrained to be absent).
+* **Positive delta lnL values** indicate sites that conflict with the branch (they become more likely when the branch is removed).
+* **Values near zero** indicate sites that are neutral regarding this branch.
+
+Generally, clades with large positive `LnL_Diff_from_ML` values, low `AU_p-value`s, and many supporting sites are considered well-supported.
 
 ## Troubleshooting
 
@@ -347,6 +375,7 @@ Generally, clades with large positive `LnL_Diff_from_ML` values and low `AU_p-va
     *   The heuristic search in PAUP\* (`hsearch`) may not always find the global optimum. More intensive search settings (e.g., more `nreps`, different `swap` algorithms) might be needed, potentially by using a custom `--paup-block`.
     *   The data itself may not contain strong signal for certain relationships.
 *   **Python Errors**: Ensure all Python dependencies (BioPython, NumPy) are correctly installed for the Python interpreter you are using.
+*   **Site-specific analysis errors**: If the site analysis fails but the main analysis succeeds, try running the analysis again with `--keep-files` and check the site-specific likelihood files in the temporary directory.
 
 ## Citations
 
@@ -361,6 +390,8 @@ If you use MLDecay in your research, please cite this GitHub repository. Additio
     *   Shimodaira, H. (2002). An approximately unbiased test of phylogenetic tree selection. *Systematic Biology*, 51(3), 492-508.
 *   **General ML Phylogenetics**:
     *   Felsenstein, J. (1981). Evolutionary trees from DNA sequences: a maximum likelihood approach. *Journal of Molecular Evolution*, 17(6), 368-376.
+*   **Site-specific likelihood methods**:
+    *   Goldman, N., Anderson, J. P., & Rodrigo, A. G. (2000). Likelihood-based tests of topologies in phylogenetics. *Systematic Biology*, 49(4), 652-670.
 
 ## License
 
@@ -376,4 +407,3 @@ Contributions, bug reports, and feature requests are welcome! Please feel free t
 
 For questions or support, please open an issue on the GitHub repository.
 Project Maintainer: James McInerney
-
