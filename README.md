@@ -256,7 +256,7 @@ These trees can be visualized in standard tree viewers like [FigTree](https://gi
 ![FigTree.png](./FigTree.png)
 
 ### Detailed Markdown Report (`<output_stem>.md`)
-A Markdown file providing a more human-readable summary of the analysis parameters, summary statistics, and detailed branch support results in a table format. It also includes a brief interpretation guide. A good markdown viwer is [Joplin](https://joplinapp.org/) or [MarkdownLivePreview](https://markdownlivepreview.com/).
+A Markdown file providing a more human-readable summary of the analysis parameters, summary statistics, and detailed branch support results in a table format. It also includes a brief interpretation guide. A good markdown viewer is [Joplin](https://joplinapp.org/) or [MarkdownLivePreview](https://markdownlivepreview.com/).
 
 ### Site-Specific Analysis (Optional)
 If `--site-analysis` is used, additional output files are generated in a directory named `<output_stem>_site_analysis/`:
