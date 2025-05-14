@@ -55,7 +55,7 @@ MLDecay automates this process by:
 1.  Finding the optimal ML tree and its likelihood score.
 2.  For each internal branch in the ML tree:
     a.  Defining a constraint that forces the taxa in that clade to *not* form a monophyletic group (using PAUP\*'s `converse=yes` constraint).
-    b.  Searching for the best ML tree under this "anti-constraint" and recording its likelihood.
+    b.  Searching for the best ML tree under this reverse-constraint and recording its likelihood.
 3.  Calculating the difference in log-likelihood between the unconstrained ML tree and each constrained tree.
 4.  Performing an Approximately Unbiased (AU) test (Shimodaira, 2002) to statistically compare the unconstrained ML tree against all the constrained alternative trees. The p-value from the AU test indicates the significance of the support for the original clade.
 
@@ -256,7 +256,7 @@ These trees can be visualized in standard tree viewers like [FigTree](https://gi
 ![FigTree.png](./FigTree.png)
 
 ### Detailed Markdown Report (`<output_stem>.md`)
-A Markdown file providing a more human-readable summary of the analysis parameters, summary statistics, and detailed branch support results in a table format. It also includes a brief interpretation guide.
+A Markdown file providing a more human-readable summary of the analysis parameters, summary statistics, and detailed branch support results in a table format. It also includes a brief interpretation guide. A good markdown viwer is [Joplin](https://joplinapp.org/) or [MarkdownLivePreview](https://markdownlivepreview.com/).
 
 ### Site-Specific Analysis (Optional)
 If `--site-analysis` is used, additional output files are generated in a directory named `<output_stem>_site_analysis/`:
