@@ -5,7 +5,6 @@ import sys
 import argparse
 import numpy as np
 from Bio import Phylo, AlignIO, SeqIO
-# from Bio.Phylo.PAML.chi2 import cdf_chi2 # Not used in the AU test path
 import tempfile
 import shutil
 import subprocess
@@ -16,7 +15,7 @@ import time
 import datetime
 from pathlib import Path
 
-VERSION = "1.0.0" # Updated version after refactoring
+VERSION = "1.0.0"
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(message)s')
 logger = logging.getLogger(__name__)
@@ -29,7 +28,6 @@ ML_SEARCH_NEX_FN = "ml_search.nex"
 ML_LOG_FN = "paup_ml.log"
 
 AU_TEST_NEX_FN = "au_test.nex"
-# PAUP* scorefile for AU test (though we primarily parse the log)
 AU_TEST_SCORE_FN = "au_test_results.txt"
 AU_LOG_FN = "paup_au.log"
 
@@ -55,8 +53,6 @@ class MLDecayIndices:
         self.starting_tree = starting_tree # Already a Path or None from main
         self.debug = debug
         self.keep_files = keep_files or debug
-        # self.test_method = test_method # Hardcoded to "au" in original main call
-
         self.gamma_shape_arg = gamma_shape
         self.prop_invar_arg = prop_invar
         self.base_freq_arg = base_freq
@@ -205,7 +201,6 @@ class MLDecayIndices:
             if base_freq: cmd_parts.append(f"basefreq={base_freq}")
             else: cmd_parts.append("basefreq=equal") # Default for Mk
 
-            # self.parsmodel is an attribute of the class, _convert_model_to_paup sets it based on user intent
             if parsmodel_user_intent is None: # If user didn't specify, default to True for discrete
                 self.parsmodel = True
             else:
@@ -485,7 +480,9 @@ class MLDecayIndices:
 
             ml_tree_path = self.temp_path / ML_TREE_FN
             if ml_tree_path.exists() and ml_tree_path.stat().st_size > 0:
-                self.ml_tree = Phylo.read(str(ml_tree_path), "newick")
+                # Clean the tree file if it has metadata after semicolon
+                cleaned_tree_path = self._clean_newick_tree(ml_tree_path)
+                self.ml_tree = Phylo.read(str(cleaned_tree_path), "newick")
                 logger.info(f"Successfully built ML tree. Log-likelihood: {self.ml_likelihood if self.ml_likelihood is not None else 'N/A'}")
                 if self.ml_likelihood is None:
                     logger.error("ML tree built, but likelihood could not be determined. Analysis may be compromised.")
@@ -559,6 +556,132 @@ class MLDecayIndices:
 
         except Exception as e:
             logger.error(f"General error parsing AU results from {paup_au_log_path}: {e}")
+            return None
+
+    def _clean_newick_tree(self, tree_path):
+        """
+        Clean Newick tree files that may have metadata after the semicolon.
+
+        Args:
+            tree_path: Path to the tree file
+
+        Returns:
+            Path to a cleaned tree file or the original path if no cleaning was needed
+        """
+        try:
+            content = Path(tree_path).read_text()
+
+            # Check if there's any text after a semicolon (including whitespace)
+            semicolon_match = re.search(r';(.+)', content, re.DOTALL)
+            if semicolon_match:
+                # Get everything up to the first semicolon
+                clean_content = content.split(';')[0] + ';'
+
+                # Write the cleaned tree to a new file
+                cleaned_path = Path(str(tree_path) + '.cleaned')
+                cleaned_path.write_text(clean_content)
+
+                if self.debug:
+                    logger.debug(f"Original tree content: '{content}'")
+                    logger.debug(f"Cleaned tree content: '{clean_content}'")
+
+                logger.info(f"Cleaned tree file {tree_path} - removed metadata after semicolon")
+                return cleaned_path
+
+            return tree_path  # No cleaning needed
+        except Exception as e:
+            logger.warning(f"Error cleaning Newick tree {tree_path}: {e}")
+            if self.debug:
+                import traceback
+                logger.debug(f"Traceback for tree cleaning error: {traceback.format_exc()}")
+            return tree_path  # Return original path if cleaning fails
+
+    def run_bootstrap_analysis(self, num_replicates=100):
+        """
+        Run bootstrap analysis with PAUP* to calculate support values.
+
+        Args:
+            num_replicates: Number of bootstrap replicates to perform
+
+        Returns:
+            The bootstrap consensus tree with support values, or None if analysis failed
+        """
+        # Define bootstrap constants
+        BOOTSTRAP_NEX_FN = "bootstrap_search.nex"
+        BOOTSTRAP_LOG_FN = "paup_bootstrap.log"
+        BOOTSTRAP_TREE_FN = "bootstrap_trees.tre"
+
+        logger.info(f"Running bootstrap analysis with {num_replicates} replicates...")
+
+        script_cmds = [f"execute {NEXUS_ALIGNMENT_FN};", self._get_paup_model_setup_cmds()]
+
+        # Add bootstrap commands
+        script_cmds.extend([
+            f"bootstrap nreps={num_replicates} search=heuristic keepall=no treefile={BOOTSTRAP_TREE_FN} replace=yes / start=stepwise addseq=random nreps=1;",
+            f"savetrees file={BOOTSTRAP_TREE_FN} format=newick brlens=yes replace=yes supportValues=nodeLabels;"
+        ])
+
+        # Create and execute PAUP script
+        paup_script_content = f"#NEXUS\nbegin paup;\n" + "\n".join(script_cmds) + "\nquit;\nend;\n"
+        bootstrap_cmd_path = self.temp_path / BOOTSTRAP_NEX_FN
+        bootstrap_cmd_path.write_text(paup_script_content)
+
+        if self.debug: logger.debug(f"Bootstrap PAUP* script ({bootstrap_cmd_path}):\n{paup_script_content}")
+
+        try:
+            # Run the bootstrap analysis - timeout based on number of replicates
+            self._run_paup_command_file(BOOTSTRAP_NEX_FN, BOOTSTRAP_LOG_FN,
+                                      timeout_sec=max(3600, 60 * num_replicates))
+
+            # Get the bootstrap tree
+            bootstrap_tree_path = self.temp_path / BOOTSTRAP_TREE_FN
+
+            if bootstrap_tree_path.exists() and bootstrap_tree_path.stat().st_size > 0:
+                # Log the bootstrap tree file content for debugging
+                if self.debug:
+                    bootstrap_content = bootstrap_tree_path.read_text()
+                    logger.debug(f"Bootstrap tree file content:\n{bootstrap_content}")
+
+                # Clean the tree file if it has metadata after semicolon
+                cleaned_tree_path = self._clean_newick_tree(bootstrap_tree_path)
+
+                # Log the cleaned bootstrap tree file for debugging
+                if self.debug:
+                    cleaned_content = cleaned_tree_path.read_text() if Path(cleaned_tree_path).exists() else "Cleaning failed"
+                    logger.debug(f"Cleaned bootstrap tree file content:\n{cleaned_content}")
+
+                try:
+                    # Parse bootstrap values from tree file
+                    bootstrap_tree = Phylo.read(str(cleaned_tree_path), "newick")
+                    self.bootstrap_tree = bootstrap_tree
+
+                    # Verify that bootstrap values are present
+                    has_bootstrap_values = False
+                    for node in bootstrap_tree.get_nonterminals():
+                        if node.confidence is not None:
+                            has_bootstrap_values = True
+                            break
+
+                    if has_bootstrap_values:
+                        logger.info(f"Bootstrap analysis complete with {num_replicates} replicates and bootstrap values")
+                    else:
+                        logger.warning(f"Bootstrap tree found, but no bootstrap values detected. Check PAUP* output format.")
+
+                    return bootstrap_tree
+                except Exception as parse_error:
+                    logger.error(f"Error parsing bootstrap tree: {parse_error}")
+                    if self.debug:
+                        import traceback
+                        logger.debug(f"Traceback for bootstrap parse error: {traceback.format_exc()}")
+                    return None
+            else:
+                logger.error(f"Bootstrap tree file not found or empty: {bootstrap_tree_path}")
+                return None
+        except Exception as e:
+            logger.error(f"Bootstrap analysis failed: {e}")
+            if self.debug:
+                import traceback
+                logger.debug(f"Traceback: {traceback.format_exc()}")
             return None
 
     def run_au_test(self, tree_filenames_relative: list):
@@ -981,10 +1104,12 @@ class MLDecayIndices:
 
     def annotate_trees(self, output_dir: Path, base_filename: str = "annotated_tree"):
         """
-        Create three annotated trees:
+        Create annotated trees with different support values:
         1. A tree with AU p-values as branch labels
         2. A tree with log-likelihood differences as branch labels
         3. A combined tree with both values as FigTree-compatible branch labels
+        4. A tree with bootstrap values if bootstrap analysis was performed
+        5. A comprehensive tree with bootstrap, AU, and LnL values if bootstrap was performed
 
         Args:
             output_dir: Directory to save the tree files
@@ -1007,7 +1132,8 @@ class MLDecayIndices:
                 # Work on a copy to avoid modifying self.ml_tree
                 temp_tree_for_au = self.temp_path / f"ml_tree_for_au_annotation.nwk"
                 Phylo.write(self.ml_tree, str(temp_tree_for_au), "newick")
-                au_tree = Phylo.read(str(temp_tree_for_au), "newick")
+                cleaned_tree_path = self._clean_newick_tree(temp_tree_for_au)
+                au_tree = Phylo.read(str(cleaned_tree_path), "newick")
 
                 annotated_nodes_count = 0
                 for node in au_tree.get_nonterminals():
@@ -1037,7 +1163,8 @@ class MLDecayIndices:
             try:
                 temp_tree_for_lnl = self.temp_path / f"ml_tree_for_lnl_annotation.nwk"
                 Phylo.write(self.ml_tree, str(temp_tree_for_lnl), "newick")
-                lnl_tree = Phylo.read(str(temp_tree_for_lnl), "newick")
+                cleaned_tree_path = self._clean_newick_tree(temp_tree_for_lnl)
+                lnl_tree = Phylo.read(str(cleaned_tree_path), "newick")
 
                 annotated_nodes_count = 0
                 for node in lnl_tree.get_nonterminals():
@@ -1071,17 +1198,43 @@ class MLDecayIndices:
 
                 # Create a mapping from node taxa sets to combined annotation strings
                 node_annotations = {}
+
+                # If bootstrap analysis was performed, get bootstrap values first
+                bootstrap_values = {}
+                if hasattr(self, 'bootstrap_tree') and self.bootstrap_tree:
+                    for node in self.bootstrap_tree.get_nonterminals():
+                        if node.confidence is not None:
+                            taxa_set = frozenset(leaf.name for leaf in node.get_terminals())
+                            bootstrap_values[taxa_set] = node.confidence
+
                 for node in self.ml_tree.get_nonterminals():
                     if not node or not node.clades: continue
                     node_taxa_set = frozenset(leaf.name for leaf in node.get_terminals())
 
+                    # Initialize annotation parts
+                    annotation_parts = []
+
+                    # Add bootstrap value if available
+                    if bootstrap_values and node_taxa_set in bootstrap_values:
+                        bs_val = bootstrap_values[node_taxa_set]
+                        annotation_parts.append(f"BS:{int(bs_val)}")
+
+                    # Add AU and LnL values if available
                     for decay_id_str, decay_info in self.decay_indices.items():
                         if 'taxa' in decay_info and frozenset(decay_info['taxa']) == node_taxa_set:
                             au_val = decay_info.get('AU_pvalue')
                             lnl_val = decay_info.get('lnl_diff')
-                            if au_val is not None and lnl_val is not None:
-                                node_annotations[node_taxa_set] = f"AU:{au_val:.4f}|LnL:{abs(lnl_val):.4f}"
+
+                            if au_val is not None:
+                                annotation_parts.append(f"AU:{au_val:.4f}")
+
+                            if lnl_val is not None:
+                                annotation_parts.append(f"LnL:{abs(lnl_val):.4f}")
                             break
+
+                    # Only add to annotations if we have at least one value
+                    if annotation_parts:
+                        node_annotations[node_taxa_set] = "|".join(annotation_parts)
 
                 # Now, we'll manually construct a combined Newick string
                 # Read the base tree without annotations
@@ -1089,7 +1242,8 @@ class MLDecayIndices:
 
                 # We'll create a combined tree by using string replacement on the base tree
                 # First, make a working copy of the ML tree
-                combined_tree = Phylo.read(str(temp_tree_for_combined), "newick")
+                cleaned_tree_path = self._clean_newick_tree(temp_tree_for_combined)
+                combined_tree = Phylo.read(str(cleaned_tree_path), "newick")
 
                 # Add our custom annotations
                 annotated_nodes_count = 0
@@ -1113,6 +1267,87 @@ class MLDecayIndices:
                 logger.error(f"Failed to create combined tree: {e}")
                 import traceback
                 logger.debug(f"Traceback: {traceback.format_exc()}")
+
+            # Handle bootstrap tree if bootstrap analysis was performed
+            if hasattr(self, 'bootstrap_tree') and self.bootstrap_tree:
+                # 1. Save the bootstrap tree directly
+                bootstrap_tree_path = output_dir / f"{base_filename}_bootstrap.nwk"
+                try:
+                    Phylo.write(self.bootstrap_tree, str(bootstrap_tree_path), "newick")
+                    logger.info(f"Bootstrap tree written to {bootstrap_tree_path}")
+                    tree_files['bootstrap'] = bootstrap_tree_path
+                except Exception as e:
+                    logger.error(f"Failed to write bootstrap tree: {e}")
+
+                # 2. Create a comprehensive tree with bootstrap, AU and LnL values
+                comprehensive_tree_path = output_dir / f"{base_filename}_comprehensive.nwk"
+                try:
+                    temp_tree_for_comprehensive = self.temp_path / f"ml_tree_for_comprehensive_annotation.nwk"
+                    Phylo.write(self.ml_tree, str(temp_tree_for_comprehensive), "newick")
+                    cleaned_tree_path = self._clean_newick_tree(temp_tree_for_comprehensive)
+                    comprehensive_tree = Phylo.read(str(cleaned_tree_path), "newick")
+
+                    # Get bootstrap values for each clade
+                    bootstrap_values = {}
+                    for node in self.bootstrap_tree.get_nonterminals():
+                        if node.confidence is not None:
+                            taxa_set = frozenset(leaf.name for leaf in node.get_terminals())
+                            bootstrap_values[taxa_set] = node.confidence
+
+                    # Create comprehensive annotations
+                    node_annotations = {}
+                    for node in self.ml_tree.get_nonterminals():
+                        if not node or not node.clades: continue
+                        node_taxa_set = frozenset(leaf.name for leaf in node.get_terminals())
+
+                        # Find matching decay info
+                        matched_data = None
+                        for decay_id_str, decay_info in self.decay_indices.items():
+                            if 'taxa' in decay_info and frozenset(decay_info['taxa']) == node_taxa_set:
+                                matched_data = decay_info
+                                break
+
+                        # Combine all values
+                        annotation_parts = []
+
+                        # Add bootstrap value if available
+                        if node_taxa_set in bootstrap_values:
+                            bs_val = bootstrap_values[node_taxa_set]
+                            annotation_parts.append(f"BS:{int(bs_val)}")
+
+                        # Add AU and LnL values if available
+                        if matched_data:
+                            au_val = matched_data.get('AU_pvalue')
+                            lnl_val = matched_data.get('lnl_diff')
+
+                            if au_val is not None:
+                                annotation_parts.append(f"AU:{au_val:.4f}")
+
+                            if lnl_val is not None:
+                                annotation_parts.append(f"LnL:{abs(lnl_val):.4f}")
+
+                        if annotation_parts:
+                            node_annotations[node_taxa_set] = "|".join(annotation_parts)
+
+                    # Apply annotations to tree
+                    annotated_nodes_count = 0
+                    for node in comprehensive_tree.get_nonterminals():
+                        if not node or not node.clades: continue
+                        node_taxa_set = frozenset(leaf.name for leaf in node.get_terminals())
+
+                        if node_taxa_set in node_annotations:
+                            node.name = node_annotations[node_taxa_set]
+                            annotated_nodes_count += 1
+
+                    # Write the tree
+                    Phylo.write(comprehensive_tree, str(comprehensive_tree_path), "newick")
+                    logger.info(f"Comprehensive tree with {annotated_nodes_count} branch values written to {comprehensive_tree_path}")
+                    tree_files['comprehensive'] = comprehensive_tree_path
+                except Exception as e:
+                    logger.error(f"Failed to create comprehensive tree: {e}")
+                    if self.debug:
+                        import traceback
+                        logger.debug(f"Traceback: {traceback.format_exc()}")
 
             return tree_files
 
@@ -1138,6 +1373,8 @@ class MLDecayIndices:
                 logger.error(f"Failed to write empty results file {output_path}: {e_write}")
                 return
 
+        # Check if bootstrap analysis was performed
+        has_bootstrap = hasattr(self, 'bootstrap_tree') and self.bootstrap_tree
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with output_path.open('w') as f:
@@ -1146,13 +1383,28 @@ class MLDecayIndices:
             ml_l = self.ml_likelihood if self.ml_likelihood is not None else "N/A"
             if isinstance(ml_l, float): ml_l = f"{ml_l:.6f}"
             f.write(f"ML tree log-likelihood: {ml_l}\n\n")
-            f.write("Branch Support Values (AU test based):\n")
+            f.write("Branch Support Values:\n")
             f.write("-" * 80 + "\n")
-            f.write("Clade_ID\tNum_Taxa\tConstrained_lnL\tLnL_Diff_from_ML\tAU_p-value\tSignificant_AU (p<0.05)\tTaxa_List\n")
+
+            # Header - add bootstrap column if bootstrap analysis was performed
+            header = "Clade_ID\tNum_Taxa\tConstrained_lnL\tLnL_Diff_from_ML\tAU_p-value\tSignificant_AU (p<0.05)"
+            if has_bootstrap:
+                header += "\tBootstrap"
+            header += "\tTaxa_List\n"
+            f.write(header)
+
+            # Create mapping of taxa sets to bootstrap values if bootstrap analysis was performed
+            bootstrap_values = {}
+            if has_bootstrap:
+                for node in self.bootstrap_tree.get_nonterminals():
+                    if node.confidence is not None:
+                        taxa_set = frozenset(leaf.name for leaf in node.get_terminals())
+                        bootstrap_values[taxa_set] = node.confidence
 
             for clade_id, data in sorted(self.decay_indices.items()): # Sort for consistent output
-                taxa_str = ",".join(sorted(data.get('taxa', [])))
-                num_taxa = len(data.get('taxa', []))
+                taxa_list = sorted(data.get('taxa', []))
+                taxa_str = ",".join(taxa_list)
+                num_taxa = len(taxa_list)
 
                 c_lnl = data.get('constrained_lnl', 'N/A')
                 if isinstance(c_lnl, float): c_lnl = f"{c_lnl:.4f}"
@@ -1166,7 +1418,19 @@ class MLDecayIndices:
                 sig_au = data.get('significant_AU', 'N/A')
                 if isinstance(sig_au, bool): sig_au = "Yes" if sig_au else "No"
 
-                f.write(f"{clade_id}\t{num_taxa}\t{c_lnl}\t{lnl_d}\t{au_p}\t{sig_au}\t{taxa_str}\n")
+                row = f"{clade_id}\t{num_taxa}\t{c_lnl}\t{lnl_d}\t{au_p}\t{sig_au}"
+
+                # Add bootstrap value if available
+                if has_bootstrap:
+                    taxa_set = frozenset(taxa_list)
+                    bs_val = bootstrap_values.get(taxa_set, "N/A")
+                    if isinstance(bs_val, (int, float)):
+                        bs_val = f"{int(bs_val)}"
+                    row += f"\t{bs_val}"
+
+                row += f"\t{taxa_str}\n"
+                f.write(row)
+
         logger.info(f"Results written to {output_path}")
 
     def generate_detailed_report(self, output_path: Path):
@@ -1181,6 +1445,8 @@ class MLDecayIndices:
                  logger.error(f"Failed to write empty detailed report {output_path}: {e_write}")
                  return
 
+        # Check if bootstrap analysis was performed
+        has_bootstrap = hasattr(self, 'bootstrap_tree') and self.bootstrap_tree
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with output_path.open('w') as f:
@@ -1195,6 +1461,8 @@ class MLDecayIndices:
             else:
                 f.write(f"- Model string: `{self.model_str}`\n")
                 f.write(f"- PAUP* `lset` command: `{self.paup_model_cmds}`\n")
+            if has_bootstrap:
+                f.write("- Bootstrap analysis: Performed\n")
 
             ml_l = self.ml_likelihood if self.ml_likelihood is not None else "N/A"
             if isinstance(ml_l, float): ml_l = f"{ml_l:.6f}"
@@ -1215,8 +1483,28 @@ class MLDecayIndices:
                     f.write(f"- Branches with significant AU support (p < 0.05): {sig_au_count} / {len(au_pvals)} evaluated\n")
 
             f.write("\n## Detailed Branch Support Results\n\n")
-            f.write("| Clade ID | Taxa Count | Constrained lnL | LnL Diff from ML | AU p-value | Significant (AU) | Included Taxa (sample) |\n")
-            f.write("|----------|------------|-----------------|------------------|------------|--------------------|--------------------------|\n")
+
+            # Table header - add bootstrap column if needed
+            header = "| Clade ID | Taxa Count | Constrained lnL | LnL Diff from ML | AU p-value | Significant (AU) "
+            if has_bootstrap:
+                header += "| Bootstrap "
+            header += "| Included Taxa (sample) |\n"
+            f.write(header)
+
+            # Table separator - add extra cell for bootstrap if needed
+            separator = "|----------|------------|-----------------|------------------|------------|-------------------- "
+            if has_bootstrap:
+                separator += "|----------- "
+            separator += "|--------------------------|\n"
+            f.write(separator)
+
+            # Get bootstrap values if bootstrap analysis was performed
+            bootstrap_values = {}
+            if has_bootstrap:
+                for node in self.bootstrap_tree.get_nonterminals():
+                    if node.confidence is not None:
+                        taxa_set = frozenset(leaf.name for leaf in node.get_terminals())
+                        bootstrap_values[taxa_set] = node.confidence
 
             for clade_id, data in sorted(self.decay_indices.items()):
                 taxa_list = sorted(data.get('taxa', []))
@@ -1235,11 +1523,25 @@ class MLDecayIndices:
                 sig_au = data.get('significant_AU', 'N/A')
                 if isinstance(sig_au, bool): sig_au = "**Yes**" if sig_au else "No"
 
-                f.write(f"| {clade_id} | {taxa_count} | {c_lnl} | {lnl_d} | {au_p} | {sig_au} | {taxa_sample} |\n")
+                # Build the table row
+                row = f"| {clade_id} | {taxa_count} | {c_lnl} | {lnl_d} | {au_p} | {sig_au} "
+
+                # Add bootstrap column if available
+                if has_bootstrap:
+                    taxa_set = frozenset(taxa_list)
+                    bs_val = bootstrap_values.get(taxa_set, "N/A")
+                    if isinstance(bs_val, (int, float)):
+                        bs_val = f"{int(bs_val)}"
+                    row += f"| {bs_val} "
+
+                row += f"| {taxa_sample} |\n"
+                f.write(row)
 
             f.write("\n## Interpretation Guide\n\n")
             f.write("- **LnL Diff from ML**: Log-likelihood of the best tree *without* the clade minus ML tree's log-likelihood. More negative (larger absolute difference) implies stronger support for the clade's presence in the ML tree.\n")
             f.write("- **AU p-value**: P-value from the Approximately Unbiased test comparing the ML tree against the alternative (constrained) tree. Lower p-values (e.g., < 0.05) suggest the alternative tree (where the clade is broken) is significantly worse than the ML tree, thus supporting the clade.\n")
+            if has_bootstrap:
+                f.write("- **Bootstrap**: Bootstrap support value (percentage of bootstrap replicates in which the clade appears). Higher values (e.g., > 70) suggest stronger support for the clade.\n")
         logger.info(f"Detailed report written to {output_path}")
 
     def write_site_analysis_results(self, output_dir: Path):
@@ -1552,6 +1854,11 @@ def main():
     run_ctrl.add_argument("--keep-files", action="store_true", help="Keep temporary files after analysis.")
     run_ctrl.add_argument("--debug", action="store_true", help="Enable detailed debug logging (implies --keep-files).")
 
+    # Add bootstrap options
+    bootstrap_opts = parser.add_argument_group('Bootstrap Analysis (optional)')
+    bootstrap_opts.add_argument("--bootstrap", action="store_true", help="Perform bootstrap analysis to calculate support values.")
+    bootstrap_opts.add_argument("--bootstrap-reps", type=int, default=100, help="Number of bootstrap replicates (default: 100)")
+
     viz_opts = parser.add_argument_group('Visualization Output (optional)')
     viz_opts.add_argument("--visualize", action="store_true", help="Generate static visualization plots (requires matplotlib, seaborn).")
     viz_opts.add_argument("--viz-format", default="png", choices=["png", "pdf", "svg"], help="Format for static visualizations.")
@@ -1619,6 +1926,11 @@ def main():
         decay_calc.build_ml_tree() # Can raise exceptions
 
         if decay_calc.ml_tree and decay_calc.ml_likelihood is not None:
+            # Run bootstrap analysis if requested
+            if args.bootstrap:
+                logger.info(f"Running bootstrap analysis with {args.bootstrap_reps} replicates...")
+                decay_calc.run_bootstrap_analysis(num_replicates=args.bootstrap_reps)
+
             decay_calc.calculate_decay_indices(perform_site_analysis=args.site_analysis)
 
             # Add this new code snippet here
