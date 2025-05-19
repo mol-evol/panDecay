@@ -2,7 +2,7 @@
 
 # MLDecay: Maximum Likelihood-based Phylogenetic Decay Indices
 
-MLDecay is a Python command-line tool for calculating Maximum Likelihood (ML)-based phylogenetic decay indices, also known as ML-Bremer support or ML branch support. It leverages the phylogenetic software PAUP* to assess the robustness of clades in a phylogenetic tree by comparing the likelihood of the optimal ML tree with trees where specific clades are constrained to be non-monophyletic. The primary statistical measure used is the Approximately Unbiased (AU) test.
+MLDecay is a Python command-line tool for calculating Maximum Likelihood (ML)-based phylogenetic decay indices, also known as ML-Bremer support or ML branch support. It leverages the phylogenetic software PAUP*   
 
 ## Table of Contents
 
@@ -34,6 +34,7 @@ MLDecay is a Python command-line tool for calculating Maximum Likelihood (ML)-ba
     *   [Example 4: Using a Starting Tree](#example-4-using-a-starting-tree)
     *   [Example 5: Advanced Control with PAUP\* Block](#example-5-advanced-control-with-paup-block)
     *   [Example 6: Site-Specific Analysis](#example-6-site-specific-analysis)
+    *   [Example 7: Bootstrap Analysis](#example-7-bootstrap-analysis)
 8.  [Interpreting Results](#interpreting-results)
 9.  [Troubleshooting](#troubleshooting)
 10. [Citations](#citations)
@@ -66,6 +67,7 @@ A significantly worse likelihood for the constrained tree (and a low AU test p-v
 *   Calculates ML-based decay values using log-likelihood differences.
 *   Performs the Approximately Unbiased (AU) test for statistical assessment of branch support.
 *   Supports DNA, Protein, and binary discrete morphological data.
+*   Optional bootstrap analysis to calculate standard bootstrap support values alongside ML decay indices.
 *   Optional site-specific likelihood analysis to identify which alignment positions support or conflict with each branch.
 *   Flexible model specification (e.g., GTR, HKY, JTT, WAG, Mk) with options for gamma-distributed rate heterogeneity (+G) and proportion of invariable sites (+I).
 *   Allows fine-grained control over model parameters (gamma shape, pinvar, base frequencies, etc.).
@@ -75,6 +77,7 @@ A significantly worse likelihood for the constrained tree (and a low AU test p-v
     *   Tab-delimited results file.
     *   Multiple Newick trees annotated with different support values.
     *   Detailed Markdown report summarizing the analysis and results.
+    *   Comprehensive trees with bootstrap and ML decay values combined when bootstrap analysis is performed.
 *   Optional static visualization (requires `matplotlib` and `seaborn`):
     *   Distribution of support values.
     *   Site-specific support visualizations.
@@ -148,8 +151,8 @@ usage: MLDecay.py [-h] [--format FORMAT] [--model MODEL] [--gamma] [--invariable
                   [--data-type {dna,protein,discrete}] [--gamma-shape GAMMA_SHAPE] [--prop-invar PROP_INVAR] 
                   [--base-freq {equal,estimate,empirical}] [--rates {equal,gamma}] [--protein-model PROTEIN_MODEL] 
                   [--nst {1,2,6}] [--parsmodel | --no-parsmodel] [--threads THREADS] [--starting-tree STARTING_TREE] 
-                  [--paup-block PAUP_BLOCK] [--temp TEMP] [--keep-files] [--debug] [--site-analysis] [--visualize]
-                  [--viz-format {png,pdf,svg}] [-v]
+                  [--paup-block PAUP_BLOCK] [--temp TEMP] [--keep-files] [--debug] [--site-analysis] [--bootstrap]
+                  [--bootstrap-reps BOOTSTRAP_REPS] [--visualize] [--viz-format {png,pdf,svg}] [-v]
                   alignment
 
 MLDecay v1.0.0: Calculate ML-based phylogenetic decay indices using PAUP*.
@@ -198,6 +201,11 @@ Runtime Control:
   --keep-files          Keep temporary files after analysis. (default: False)
   --debug               Enable detailed debug logging (implies --keep-files). (default: False)
 
+Bootstrap Analysis (optional):
+  --bootstrap           Perform bootstrap analysis to calculate support values. (default: False)
+  --bootstrap-reps BOOTSTRAP_REPS
+                        Number of bootstrap replicates (default: 100)
+
 Visualization Output (optional):
   --visualize           Generate static visualization plots (requires matplotlib, seaborn). (default: False)
   --viz-format {png,pdf,svg}
@@ -244,13 +252,18 @@ A tab-delimited text file containing:
     *   `LnL_Diff_from_ML`: Difference between `Constrained_lnL` and the ML tree's likelihood.
     *   `AU_p-value`: The p-value from the Approximately Unbiased test.
     *   `Significant_AU (p<0.05)`: "Yes" if AU p-value < 0.05, "No" otherwise.
+    *   `Bootstrap` (if bootstrap analysis performed): Bootstrap support value for the clade.
     *   `Taxa_List`: A comma-separated list of taxa in the clade.
 
 ### Annotated Trees
-MLDecay now generates three different annotated tree files:
+MLDecay generates several different annotated tree files:
 * `<tree_base>_au.nwk`: Tree with AU test p-values as branch labels
 * `<tree_base>_lnl.nwk`: Tree with log-likelihood differences as branch labels
 * `<tree_base>_combined.nwk`: Tree with both values as branch labels in the format "AU:0.95|LnL:2.34"
+
+If bootstrap analysis is performed, additional tree files:
+* `<tree_base>_bootstrap.nwk`: Tree with bootstrap support values
+* `<tree_base>_comprehensive.nwk`: Tree with bootstrap values, AU test p-values, and log-likelihood differences combined in format "BS:80|AU:0.95|LnL:2.34"
 
 These trees can be visualized in standard tree viewers like [FigTree](https://github.com/rambaut/figtree/), [Dendroscope](https://github.com/husonlab/dendroscope3), [iTOL](https://itol.embl.de/), etc. The combined tree is particularly suited for FigTree which handles string labels well.
 ![FigTree.png](./FigTree.png)
@@ -264,6 +277,7 @@ If `--site-analysis` is used, additional output files are generated in a directo
 1. **`site_analysis_summary.txt`**: A summary of supporting vs. conflicting sites for each branch.
 2. **`site_data_Clade_X.txt`**: For each branch, detailed site-by-site likelihood differences.
 3. **`site_plot_Clade_X.png`**: Visualization of site-specific support/conflict (if matplotlib is available).
+4. **`site_hist_Clade_X.png`**: Histogram showing the distribution of site likelihood differences.
 
 This feature allows you to identify which alignment positions support or conflict with each branch in the tree.
 
@@ -340,6 +354,7 @@ If `--debug` or `--keep-files` is used, a temporary directory (usually in `debug
 *   `constraint_tree_*.tre`, `constraint_score_*.txt`: Constrained trees and their score files.
 *   `au_test.nex`, `paup_au.log`: PAUP\* script and log for the AU test.
 *   `au_test_results.txt`: Score file from the AU test (though the log is primarily parsed).
+*   `bootstrap_search.nex`, `paup_bootstrap.log`, `bootstrap_trees.tre` (if `--bootstrap` used): Bootstrap analysis files.
 *   `site_analysis_*.nex`, `site_lnl_*.txt` (if `--site-analysis` used): Site-specific likelihood files.
 *   `mldecay_debug.log` (in the main execution directory if `--debug` is on): Detailed script execution log.
 
@@ -406,6 +421,23 @@ python3 MLDecay.py alignment.fas --model GTR --gamma --site-analysis --visualize
 
 This will generate site-specific likelihood analyses in addition to the standard branch support results.
 
+### Example 7: Bootstrap Analysis
+Perform bootstrap analysis (100 replicates by default) alongside ML decay indices:
+
+```bash
+python3 MLDecay.py alignment.fas --model GTR --gamma --bootstrap \
+    --output with_bootstrap.txt
+```
+
+For more bootstrap replicates:
+
+```bash
+python3 MLDecay.py alignment.fas --model GTR --gamma --bootstrap --bootstrap-reps 500 \
+    --output bootstrap500.txt
+```
+
+This will produce additional tree files with bootstrap values and a comprehensive tree that combines bootstrap values with ML decay indices.
+
 ## Interpreting Results
 
 *   **ML Tree Log-Likelihood:** The baseline score for your optimal tree.
@@ -417,13 +449,17 @@ This will generate site-specific likelihood analyses in addition to the standard
     *   Tests the null hypothesis that the ML tree is not significantly better than the constrained alternative tree (where the clade is broken).
     *   A **low p-value (e.g., < 0.05)** leads to rejecting the null hypothesis. This means the constrained tree is significantly worse, providing statistical support for the original clade's monophyly.
     *   A **high p-value (e.g., > 0.05)** means we cannot reject the null hypothesis; the data do not provide strong statistical evidence to prefer the ML tree (with the clade) over the alternative (clade broken). This implies weaker support for that specific clade.
+*   **Bootstrap Value (if bootstrap analysis performed):**
+    *   Percentage of bootstrap replicates in which the clade appears.
+    *   Higher values (e.g., > 70%) indicate stronger support.
+    *   Bootstrap is a widely-used and well-understood method, providing a complementary measure of support to the AU test and LnL differences.
 
 **Site-Specific Analysis Interpretation:**
 * **Negative delta lnL values** indicate sites that support the branch (they become less likely when the branch is constrained to be absent).
 * **Positive delta lnL values** indicate sites that conflict with the branch (they become more likely when the branch is removed).
 * **Values near zero** indicate sites that are neutral regarding this branch.
 
-Generally, clades with large positive `LnL_Diff_from_ML` values, low `AU_p-value`s, and many supporting sites are considered well-supported.
+Generally, clades with large positive `LnL_Diff_from_ML` values, low `AU_p-value`s, high bootstrap values, and many supporting sites are considered well-supported.
 
 ## Troubleshooting
 
@@ -437,6 +473,7 @@ Generally, clades with large positive `LnL_Diff_from_ML` values, low `AU_p-value
     *   The data itself may not contain strong signal for certain relationships.
 *   **Python Errors**: Ensure all Python dependencies (BioPython, NumPy) are correctly installed for the Python interpreter you are using.
 *   **Site-specific analysis errors**: If the site analysis fails but the main analysis succeeds, try running the analysis again with `--keep-files` and check the site-specific likelihood files in the temporary directory.
+*   **Bootstrap fails but ML analysis succeeds**: Bootstrap analysis can be computationally intensive. Try using fewer bootstrap replicates (`--bootstrap-reps 50`) or allocate more processing time by increasing the timeout value in the code.
 
 ## Citations
 
@@ -447,12 +484,14 @@ If you use MLDecay in your research, please cite this GitHub repository. Additio
 *   **Bremer Support (Decay Index) - Original Concept (Parsimony)**:
     *   Bremer, K. (1988). The limits of amino acid sequence data in angiosperm phylogenetic reconstruction. *Evolution*, 42(4), 795-803.
     *   Bremer, K. (1994). Branch support and tree stability. *Cladistics*, 10(3), 295-304.
-*   **Approximately Unbiased (AU) Test**:
+*  **Approximately Unbiased (AU) Test**:
     *   Shimodaira, H. (2002). An approximately unbiased test of phylogenetic tree selection. *Systematic Biology*, 51(3), 492-508.
 *   **General ML Phylogenetics**:
     *   Felsenstein, J. (1981). Evolutionary trees from DNA sequences: a maximum likelihood approach. *Journal of Molecular Evolution*, 17(6), 368-376.
 *   **Site-specific likelihood methods**:
     *   Goldman, N., Anderson, J. P., & Rodrigo, A. G. (2000). Likelihood-based tests of topologies in phylogenetics. *Systematic Biology*, 49(4), 652-670.
+*   **Bootstrap Methods**:
+    *   Felsenstein, J. (1985). Confidence limits on phylogenies: an approach using the bootstrap. *Evolution*, 39(4), 783-791.
 
 ## License
 
@@ -467,5 +506,5 @@ Contributions, bug reports, and feature requests are welcome! Please feel free t
 ## Contact
 
 For questions or support, please open an issue on the GitHub repository.
-Project Maintainer: James McInerney
+Project Maintainer: James McInerney to assess the robustness of clades in a phylogenetic tree by comparing the likelihood of the optimal ML tree with trees where specific clades are constrained to be non-monophyletic. The primary statistical measure used is the Approximately Unbiased (AU) test.
 
