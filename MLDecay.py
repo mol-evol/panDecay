@@ -2352,7 +2352,7 @@ def main():
     viz_opts = parser.add_argument_group('Visualization Output (optional)')
     viz_opts.add_argument("--visualize", action="store_true", help="Generate static visualization plots (requires matplotlib, seaborn).")
     viz_opts.add_argument("--viz-format", default="png", choices=["png", "pdf", "svg"], help="Format for static visualizations.")
-    viz_opts.add_argument("--annotation", default="au", choices=["au", "lnl"], help="Type of support values to visualize in distribution plots (au=AU p-values, lnl=likelihood differences).")
+    viz_opts.add_argument("--annotation", default="lnl", choices=["au", "lnl"], help="Type of support values to visualize in distribution plots (au=AU p-values, lnl=likelihood differences).")
     viz_opts.add_argument("--html-trees", action=argparse.BooleanOptionalAction, default=True, help="Generate interactive HTML tree visualizations (default: True)")
     viz_opts.add_argument("--js-cdn", action="store_true", default=True, help="Use CDN for JavaScript libraries (faster but requires internet connection)")
     viz_opts.add_argument("--keep-tree-files", action="store_true", default=False, help="Keep Newick tree files used for HTML visualization (default: False)")
