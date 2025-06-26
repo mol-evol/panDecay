@@ -626,38 +626,6 @@ class MLDecayIndices:
                 logger.debug(f"Traceback: {traceback.format_exc()}")
             return None
 
-    def run_au_test(self, tree_filenames_relative: list):
-        if not tree_filenames_relative:
-            logger.error("No tree files for AU test.")
-            return None
-        num_trees = len(tree_filenames_relative)
-        if num_trees < 2: # AU test is meaningful for comparing multiple trees
-            logger.warning(f"AU test needs >= 2 trees; {num_trees} provided. Skipping AU test.")
-            # If it's just the ML tree, we can return its own info conventionally
-            if num_trees == 1 and tree_filenames_relative[0] == ML_TREE_FN and self.ml_likelihood is not None:
-                return {1: {'lnL': self.ml_likelihood, 'AU_pvalue': 1.0}} # Best tree p-val = 1
-            return None
-
-        script_cmds = [f"execute {NEXUS_ALIGNMENT_FN};", self._get_paup_model_setup_cmds()]
-        script_cmds.append(f"gettrees file={tree_filenames_relative[0]} mode=3 storebrlens=yes;")
-        for rel_fn in tree_filenames_relative[1:]:
-            script_cmds.append(f"gettrees file={rel_fn} mode=7 storebrlens=yes;")
-
-        # AU_TEST_SCORE_FN is the file PAUP* writes scores to. We parse from AU_LOG_FN.
-        script_cmds.append(f"lscores 1-{num_trees} / autest=yes scorefile={AU_TEST_SCORE_FN} replace=yes;")
-
-        paup_script_content = f"#NEXUS\nbegin paup;\n" + "\n".join(script_cmds) + "\nquit;\nend;\n"
-        au_cmd_path = self.temp_path / AU_TEST_NEX_FN
-        au_cmd_path.write_text(paup_script_content)
-        if self.debug: logger.debug(f"AU test PAUP* script ({au_cmd_path}):\n{paup_script_content}")
-
-        try:
-            self._run_paup_command_file(AU_TEST_NEX_FN, AU_LOG_FN, timeout_sec=max(1800, 600 * num_trees / 10)) # Dynamic timeout
-            return self._parse_au_results(self.temp_path / AU_LOG_FN)
-        except Exception as e:
-            logger.error(f"AU test execution failed: {e}")
-            return None
-
     def _generate_and_score_constraint_tree(self, clade_taxa: list, tree_idx: int):
         # Returns (relative_tree_filename_str_or_None, likelihood_float_or_None)
         formatted_clade_taxa = [self._format_taxon_for_paup(t) for t in clade_taxa]
@@ -1044,6 +1012,319 @@ class MLDecayIndices:
                 logger.debug(f"Traceback for site likelihood calculation error:\n{traceback.format_exc()}")
             return None
 
+    def run_au_test(self, tree_filenames_relative: list):
+        """
+        Run the AU (Approximately Unbiased) test on multiple trees using PAUP*.
+
+        Args:
+            tree_filenames_relative: List of tree filenames (relative to self.temp_path)
+
+        Returns:
+            Dictionary mapping tree indices to results or None if test fails
+        """
+        if not tree_filenames_relative:
+            logger.error("No tree files for AU test.")
+            return None
+        num_trees = len(tree_filenames_relative)
+        if num_trees < 2: # AU test is meaningful for comparing multiple trees
+            logger.warning(f"AU test needs >= 2 trees; {num_trees} provided. Skipping AU test.")
+            # If it's just the ML tree, we can return its own info conventionally
+            if num_trees == 1 and tree_filenames_relative[0] == ML_TREE_FN and self.ml_likelihood is not None:
+                return {1: {'lnL': self.ml_likelihood, 'AU_pvalue': 1.0}} # Best tree p-val = 1
+            return None
+
+        script_cmds = [f"execute {NEXUS_ALIGNMENT_FN};", self._get_paup_model_setup_cmds()]
+
+        # Load all trees: first in mode=3 (reset tree buffer), rest in mode=7 (add to buffer)
+        first_tree = tree_filenames_relative[0]
+        script_cmds.append(f"gettrees file={first_tree} mode=3 storebrlens=yes;")
+
+        for rel_fn in tree_filenames_relative[1:]:
+            script_cmds.append(f"gettrees file={rel_fn} mode=7 storebrlens=yes;")
+
+        # Add debugging commands to see tree status
+        if self.debug:
+            script_cmds.append("treeinfo;")     # Show tree information
+
+        # Make sure tree indices match our expectations (1-based indexing)
+        if num_trees > 1:
+            script_cmds.append(f"lscores 1-{num_trees} / scorefile=all_tree_scores.txt replace=yes;")
+
+        # AU test command with additional options for improved reliability
+        script_cmds.append(f"lscores 1-{num_trees} / autest=yes scorefile={AU_TEST_SCORE_FN} replace=yes;")
+
+        # Save log with results and trees for reference
+        script_cmds.append("log file=au_test_detailed.log replace=yes;")
+
+        # FIX: Use explicit tree range instead of 'all'
+        script_cmds.append(f"describe 1-{num_trees} / plot=none;")  # Show tree descriptions
+        script_cmds.append(f"lscores 1-{num_trees};")              # Show scores again
+        script_cmds.append("log stop;")
+
+        paup_script_content = f"#NEXUS\nbegin paup;\n" + "\n".join(script_cmds) + "\nquit;\nend;\n"
+        au_cmd_path = self.temp_path / AU_TEST_NEX_FN
+        au_cmd_path.write_text(paup_script_content)
+        if self.debug: logger.debug(f"AU test PAUP* script ({au_cmd_path}):\n{paup_script_content}")
+
+        try:
+            self._run_paup_command_file(AU_TEST_NEX_FN, AU_LOG_FN, timeout_sec=max(1800, 600 * num_trees / 10)) # Dynamic timeout
+
+            # Parse results from the AU test results file
+            return self._parse_au_results(self.temp_path / AU_LOG_FN)
+        except Exception as e:
+            logger.error(f"AU test execution failed: {e}")
+            return None
+
+    def _parse_au_results(self, au_log_path: Path):
+        """
+        Parse the results of an Approximately Unbiased (AU) test from PAUP* log file.
+
+        Args:
+            au_log_path: Path to the PAUP* log file containing AU test results
+
+        Returns:
+            Dictionary mapping tree index to dict with 'lnL' and 'AU_pvalue' keys, or None if parsing failed
+        """
+        if not au_log_path.exists():
+            logger.warning(f"AU test log file not found: {au_log_path}")
+            return None
+
+        try:
+            log_content = au_log_path.read_text()
+            if self.debug: logger.debug(f"AU test log file content (excerpt):\n{log_content[:1000]}...")
+
+            # Look for the AU test results section
+            # First try to find the formatted table with header and rows that looks like:
+            #    Tree         -ln L    Diff -ln L      AU
+            # --------------------------------------------
+            #       1    6303.66091        (best)
+            #       7    6304.45629       0.79537  0.6069
+            # ...etc
+
+            au_results = {}
+
+            # Use a multi-line pattern to find the table with AU test results
+            au_table_pattern = r'Tree\s+-ln L\s+Diff[^-]*\n-+\n(.*?)(?=\n\s*\n|\n[^\d\s]|$)'
+            au_match = re.search(au_table_pattern, log_content, re.DOTALL)
+
+            if au_match:
+                table_text = au_match.group(1)
+                logger.debug(f"Found AU test table:\n{table_text}")
+
+                # Parse each line of the table
+                for line in table_text.strip().split('\n'):
+                    # Skip empty lines
+                    if not line.strip():
+                        continue
+
+                    # Format is typically: tree_num, -ln L, Diff -ln L, AU p-value
+                    # Example:       1    6303.66091        (best)
+                    #                7    6304.45629       0.79537  0.6069
+                    parts = line.strip().split()
+
+                    # Make sure we have at least the tree number and likelihood
+                    if len(parts) >= 2 and parts[0].isdigit():
+                        tree_idx = int(parts[0])
+                        ln_l = float(parts[1])
+
+                        # Get p-value - it might be "(best)" for the best tree or a number for others
+                        # The p-value is typically the last element in the line
+                        p_val = None
+                        if len(parts) >= 3:
+                            p_val_str = parts[-1]  # Take the last element as the p-value
+
+                            # Handle special cases
+                            if p_val_str == "(best)":
+                                p_val = 1.0  # Best tree has p-value of 1.0
+                            elif "~0" in p_val_str:
+                                # Values like "~0*" mean extremely small p-values
+                                p_val = 0.0001  # Use a small non-zero value
+                            else:
+                                # Normal p-values, remove any trailing asterisks
+                                p_val = float(p_val_str.rstrip("*"))
+
+                        au_results[tree_idx] = {
+                            'lnL': ln_l,
+                            'AU_pvalue': p_val
+                        }
+
+                if au_results:
+                    logger.info(f"Successfully parsed AU test results for {len(au_results)} trees.")
+                    for tree_idx, data in sorted(au_results.items()):
+                        logger.debug(f"Tree {tree_idx}: lnL={data['lnL']:.4f}, AU p-value={data['AU_pvalue']}")
+                    return au_results
+
+            # If we couldn't find the AU test table, try an alternative approach
+            # Look for the detailed AU test results in the log
+            detailed_pattern = r'P values for.*?Tree\s+(-ln L)\s+Diff.*?\n.*?\n(.*?)(?=\n\s*\n|\n[^\d\s]|$)'
+            detailed_match = re.search(detailed_pattern, log_content, re.DOTALL)
+
+            if detailed_match:
+                results_text = detailed_match.group(2)
+                logger.debug(f"Found detailed AU test results table:\n{results_text}")
+
+                for line in results_text.strip().split('\n'):
+                    parts = line.strip().split()
+                    if len(parts) >= 3 and parts[0].isdigit():
+                        tree_idx = int(parts[0])
+                        ln_l = float(parts[1])
+
+                        # AU p-value is typically at position 3 (index 2)
+                        p_val = None
+                        if len(parts) > 3:
+                            p_val_str = parts[3] if len(parts) > 3 else parts[-1]
+
+                            if p_val_str == "(best)":
+                                p_val = 1.0
+                            elif p_val_str.startswith("~"):
+                                p_val = 0.0001
+                            else:
+                                p_val = float(p_val_str.rstrip("*"))
+
+                        au_results[tree_idx] = {
+                            'lnL': ln_l,
+                            'AU_pvalue': p_val
+                        }
+
+                if au_results:
+                    logger.info(f"Successfully parsed detailed AU test results for {len(au_results)} trees.")
+                    return au_results
+
+            # Third approach: try to parse AU scores from the direct output in the log
+            # This pattern is more specific to the format observed in your logs
+            au_direct_pattern = r'Tree\s+.*?-ln L\s+Diff -ln L\s+AU\n-+\n(.*?)(?=\n\s*\n|\Z)'
+            direct_match = re.search(au_direct_pattern, log_content, re.DOTALL)
+
+            if direct_match:
+                direct_table = direct_match.group(1)
+                logger.debug(f"Found direct AU test table:\n{direct_table}")
+
+                for line in direct_table.strip().split('\n'):
+                    parts = line.strip().split()
+                    if len(parts) >= 3 and parts[0].isdigit():
+                        tree_idx = int(parts[0])
+                        ln_l = float(parts[1])
+
+                        # Handle the p-value which is in the last column
+                        p_val = None
+                        if len(parts) >= 4:  # We need at least 4 parts for tree, lnL, diff, and p-value
+                            p_val_str = parts[-1]
+
+                            if p_val_str == "(best)":
+                                p_val = 1.0
+                            elif "~0" in p_val_str:
+                                p_val = 0.0001
+                            else:
+                                try:
+                                    p_val = float(p_val_str.rstrip("*"))
+                                except ValueError:
+                                    # If conversion fails, check if it's just due to an asterisk
+                                    if p_val_str.endswith("*"):
+                                        try:
+                                            p_val = float(p_val_str[:-1])
+                                        except ValueError:
+                                            p_val = None
+
+                        au_results[tree_idx] = {
+                            'lnL': ln_l,
+                            'AU_pvalue': p_val
+                        }
+
+                if au_results:
+                    logger.info(f"Successfully parsed direct AU test results for {len(au_results)} trees.")
+                    return au_results
+
+            # Try to parse from scorefile if results not found in log
+            au_test_score_fn = "au_test_results.txt"
+            score_file_path = self.temp_path / au_test_score_fn
+            if score_file_path.exists():
+                return self._parse_au_results_from_scorefile(score_file_path)
+
+            logger.warning("Failed to find AU test results in log file formats. Checking for other sources.")
+            return None
+
+        except Exception as e:
+            logger.error(f"Error parsing AU test results: {e}")
+            if self.debug:
+                import traceback
+                logger.debug(f"AU test parsing traceback: {traceback.format_exc()}")
+            return None
+
+    def _parse_au_results_from_scorefile(self, score_file_path: Path):
+        """
+        Parse AU test results directly from the score file produced by PAUP*.
+        This serves as a backup to parsing the log file.
+
+        Args:
+            score_file_path: Path to the AU test score file
+
+        Returns:
+            Dictionary mapping tree index to dict with 'lnL' and 'AU_pvalue' keys, or None if parsing failed
+        """
+        if not score_file_path.exists():
+            logger.warning(f"AU test score file not found: {score_file_path}")
+            return None
+
+        try:
+            file_content = score_file_path.read_text()
+            if self.debug: logger.debug(f"AU test score file content (excerpt):\n{file_content[:1000]}...")
+
+            # AU test score files typically have headers like:
+            # Tree     -lnL     Diff    P-value
+            header_pattern = r'^\s*Tree\s+\-lnL\s+(?:Diff\s+)?P\-?value'
+
+            # Find where results start
+            lines = file_content.splitlines()
+            results_start = -1
+            for i, line in enumerate(lines):
+                if re.match(header_pattern, line, re.IGNORECASE):
+                    results_start = i + 1
+                    break
+
+            if results_start == -1:
+                logger.warning("Could not find AU test results header in score file.")
+                return None
+
+            # Parse results
+            au_results = {}
+            for i in range(results_start, len(lines)):
+                line = lines[i].strip()
+                if not line or 'tree' in line.lower():  # Skip empty lines or new headers
+                    continue
+
+                # Try to parse - expecting tree_num, lnL, [diff], p_value
+                parts = line.split()
+                if len(parts) < 3:  # Need at least tree, lnL, p-value
+                    continue
+
+                try:
+                    tree_idx = int(parts[0])
+                    lnl = float(parts[1])
+
+                    # The p-value is either the last or third column depending on format
+                    p_val = float(parts[-1]) if len(parts) >= 3 else None
+
+                    au_results[tree_idx] = {
+                        'lnL': lnl,
+                        'AU_pvalue': p_val
+                    }
+                except (ValueError, IndexError) as e:
+                    logger.debug(f"Failed to parse AU result line '{line}': {e}")
+
+            if au_results:
+                logger.info(f"Successfully parsed {len(au_results)} AU test results from score file.")
+                return au_results
+            else:
+                logger.warning("No AU test results could be parsed from score file.")
+                return None
+
+        except Exception as e:
+            logger.error(f"Error parsing AU test score file: {e}")
+            if self.debug:
+                import traceback
+                logger.debug(f"Score file parsing error: {traceback.format_exc()}")
+            return None
+
     def annotate_trees(self, output_dir: Path, base_filename: str = "annotated_tree"):
         """
         Create annotated trees with different support values:
@@ -1084,14 +1365,18 @@ class MLDecayIndices:
 
                     # Find matching entry in decay_indices by taxa set
                     matched_data = None
+                    matched_clade_id = None
                     for decay_id_str, decay_info in self.decay_indices.items():
                         if 'taxa' in decay_info and set(decay_info['taxa']) == node_taxa_set:
                             matched_data = decay_info
+                            matched_clade_id = decay_id_str
                             break
 
                     node.confidence = None  # Default
                     if matched_data and 'AU_pvalue' in matched_data and matched_data['AU_pvalue'] is not None:
                         node.confidence = float(matched_data['AU_pvalue'])
+                        # Add the clade ID to the node name
+                        node.name = matched_clade_id
                         annotated_nodes_count += 1
 
                 Phylo.write(au_tree, str(au_tree_path), "newick")
@@ -1114,14 +1399,18 @@ class MLDecayIndices:
                     node_taxa_set = set(leaf.name for leaf in node.get_terminals())
 
                     matched_data = None
+                    matched_clade_id = None
                     for decay_id_str, decay_info in self.decay_indices.items():
                         if 'taxa' in decay_info and set(decay_info['taxa']) == node_taxa_set:
                             matched_data = decay_info
+                            matched_clade_id = decay_id_str
                             break
 
                     node.confidence = None  # Default
                     if matched_data and 'lnl_diff' in matched_data and matched_data['lnl_diff'] is not None:
                         node.confidence = abs(matched_data['lnl_diff'])
+                        # Add the clade ID to the node name
+                        node.name = matched_clade_id
                         annotated_nodes_count += 1
 
                 Phylo.write(lnl_tree, str(lnl_tree_path), "newick")
@@ -1130,7 +1419,7 @@ class MLDecayIndices:
             except Exception as e:
                 logger.error(f"Failed to create LNL tree: {e}")
 
-            # Create combined annotation tree manually for FigTree
+            # Create combined annotation tree for FigTree
             combined_tree_path = output_dir / f"{base_filename}_combined.nwk"
             try:
                 # For the combined approach, we'll directly modify the Newick string
@@ -1155,6 +1444,7 @@ class MLDecayIndices:
 
                     # Initialize annotation parts
                     annotation_parts = []
+                    clade_id = None  # Store the matched clade_id
 
                     # Add bootstrap value if available
                     if bootstrap_values and node_taxa_set in bootstrap_values:
@@ -1164,6 +1454,7 @@ class MLDecayIndices:
                     # Add AU and LnL values if available
                     for decay_id_str, decay_info in self.decay_indices.items():
                         if 'taxa' in decay_info and frozenset(decay_info['taxa']) == node_taxa_set:
+                            clade_id = decay_id_str  # Save clade ID for later use
                             au_val = decay_info.get('AU_pvalue')
                             lnl_val = decay_info.get('lnl_diff')
 
@@ -1174,15 +1465,15 @@ class MLDecayIndices:
                                 annotation_parts.append(f"LnL:{abs(lnl_val):.4f}")
                             break
 
-                    # Only add to annotations if we have at least one value
-                    if annotation_parts:
+                    # Add the clade ID to the beginning of annotation if we have one
+                    if clade_id and annotation_parts:
+                        # Prepend the clade ID to make it more visible
+                        annotation_parts.insert(0, clade_id)
+                        node_annotations[node_taxa_set] = "|".join(annotation_parts)
+                    elif annotation_parts:
                         node_annotations[node_taxa_set] = "|".join(annotation_parts)
 
-                # Now, we'll manually construct a combined Newick string
-                # Read the base tree without annotations
-                base_tree_str = temp_tree_for_combined.read_text()
-
-                # We'll create a combined tree by using string replacement on the base tree
+                # Now, we'll manually construct a combined tree by using string replacement on the base tree
                 # First, make a working copy of the ML tree
                 cleaned_tree_path = self._clean_newick_tree(temp_tree_for_combined)
                 combined_tree = Phylo.read(str(cleaned_tree_path), "newick")
@@ -1244,13 +1535,19 @@ class MLDecayIndices:
 
                         # Find matching decay info
                         matched_data = None
+                        matched_clade_id = None
                         for decay_id_str, decay_info in self.decay_indices.items():
                             if 'taxa' in decay_info and frozenset(decay_info['taxa']) == node_taxa_set:
                                 matched_data = decay_info
+                                matched_clade_id = decay_id_str
                                 break
 
                         # Combine all values
                         annotation_parts = []
+
+                        # Add clade ID first if available
+                        if matched_clade_id:
+                            annotation_parts.append(matched_clade_id)
 
                         # Add bootstrap value if available
                         if node_taxa_set in bootstrap_values:
