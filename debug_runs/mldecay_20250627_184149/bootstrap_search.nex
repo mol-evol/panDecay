@@ -1,0 +1,12 @@
+#NEXUS
+begin paup;
+execute alignment.nex;
+    lset nthreads=14 nst=1 basefreq=empirical rates=equal pinvar=0;
+    set criterion=likelihood;
+set criterion=likelihood;
+hsearch;
+bootstrap nreps=25 search=heuristic keepall=no conlevel=50 / start=stepwise addseq=random nreps=1;
+describetrees 1 / brlens=yes;
+savetrees from=1 to=1 file=bootstrap_trees.tre format=newick brlens=yes replace=yes supportValues=nodeLabels;
+quit;
+end;

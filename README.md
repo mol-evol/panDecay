@@ -1,14 +1,15 @@
-![Python 3.8+](https://img.shields.io/badge/python-3.8%2B-blue.svg) ![Version](https://img.shields.io/badge/version-1.0.0-orange.svg) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+![Python 3.8+](https://img.shields.io/badge/python-3.8%2B-blue.svg) ![Version](https://img.shields.io/badge/version-1.0.3-orange.svg) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-# MLDecay: Maximum Likelihood-based Phylogenetic Decay Indices
+# MLDecay: Maximum Likelihood and Bayesian Phylogenetic Decay Indices
 
-MLDecay is a Python command-line tool for calculating Maximum Likelihood (ML)-based phylogenetic decay indices, also known as ML-Bremer support or ML branch support. It leverages the phylogenetic software PAUP*   
+MLDecay is a Python command-line tool for calculating both Maximum Likelihood (ML)-based and Bayesian phylogenetic decay indices. It can compute ML-Bremer support (using PAUP*) and Bayesian decay indices (using MrBayes or BEAST)   
 
 ## Table of Contents
 
 1.  [Background](#background)
     *   [What are Decay Indices / Bremer Support?](#what-are-decay-indices--bremer-support)
     *   [Why ML-based Decay Indices?](#why-ml-based-decay-indices)
+    *   [Bayesian Decay Indices](#bayesian-decay-indices)
 2.  [Features](#features)
 3.  [Installation](#installation)
     *   [Dependencies](#dependencies)
@@ -62,27 +63,61 @@ MLDecay automates this process by:
 
 A significantly worse likelihood for the constrained tree (and a low AU test p-value for that constrained tree) provides strong evidence in favor of the monophyly of the original clade.
 
+### Bayesian Decay Indices
+
+MLDecay now supports Bayesian phylogenetic decay indices, extending the decay index concept to Bayesian inference. Instead of comparing log-likelihoods, Bayesian decay indices compare marginal likelihoods between:
+1. An unconstrained Bayesian analysis where all topologies are explored
+2. Constrained analyses where specific clades are forced to be non-monophyletic
+
+The Bayesian decay index for a clade is calculated as:
+- **Bayesian Decay = ln(ML_unconstrained) - ln(ML_constrained)**
+- **Bayes Factor = exp(Bayesian Decay)**
+
+Where ML represents the marginal likelihood (not to be confused with maximum likelihood). A positive Bayesian decay value indicates support for the clade, with larger values indicating stronger support. The Bayes Factor provides an interpretable measure where values >10 indicate strong support and >100 indicate decisive support for the clade.
+
+MLDecay can perform Bayesian analyses using:
+- **MrBayes**: Currently supported with harmonic mean marginal likelihood estimation
+- **BEAST**: Support planned for future versions
+
 ## Features
 
-*   Calculates ML-based decay values using log-likelihood differences.
-*   Performs the Approximately Unbiased (AU) test for statistical assessment of branch support.
-*   Supports DNA, Protein, and binary discrete morphological data.
-*   Optional bootstrap analysis to calculate standard bootstrap support values alongside ML decay indices.
-*   Optional site-specific likelihood analysis to identify which alignment positions support or conflict with each branch.
-*   Flexible model specification (e.g., GTR, HKY, JTT, WAG, Mk) with options for gamma-distributed rate heterogeneity (+G) and proportion of invariable sites (+I).
-*   Allows fine-grained control over model parameters (gamma shape, pinvar, base frequencies, etc.).
-*   Option to provide a custom PAUP\* block for complex model or search strategy definitions.
-*   Option to provide a starting tree for the initial ML search.
-*   Generates comprehensive output:
-    *   Tab-delimited results file.
-    *   Multiple Newick trees annotated with different support values.
-    *   Detailed Markdown report summarizing the analysis and results.
-    *   Comprehensive trees with bootstrap and ML decay values combined when bootstrap analysis is performed.
+### Analysis Types
+*   **ML Analysis**: Calculates ML-based decay values using log-likelihood differences
+*   **Bayesian Analysis**: Calculates Bayesian decay indices using marginal likelihood comparisons
+*   **Combined Analysis**: Performs both ML and Bayesian analyses in a single run
+*   **Bootstrap Analysis**: Optional bootstrap support values alongside decay indices
+
+### Core Capabilities
+*   Performs the Approximately Unbiased (AU) test for statistical assessment of ML branch support
+*   Supports DNA, Protein, and binary discrete morphological data
+*   Optional site-specific likelihood analysis to identify which alignment positions support or conflict with each branch
+*   Flexible model specification (e.g., GTR, HKY, JTT, WAG, Mk) with options for gamma-distributed rate heterogeneity (+G) and proportion of invariable sites (+I)
+*   Allows fine-grained control over model parameters (gamma shape, pinvar, base frequencies, etc.)
+*   Option to provide a custom PAUP\* block for complex model or search strategy definitions
+*   Option to provide a starting tree for the initial ML search
+
+### Bayesian Features
+*   Support for MrBayes with automatic constraint generation
+*   Marginal likelihood estimation using harmonic mean
+*   Bayes Factor calculation for interpretable support values
+*   Flexible MCMC parameters (generations, chains, burnin, sampling frequency)
+*   **MPI support**: Run chains in parallel with MPI-enabled MrBayes
+*   **BEAGLE support**: GPU/CPU acceleration for likelihood calculations
+
+### Output Files
+*   Tab-delimited results file with ML and/or Bayesian support values
+*   Multiple Newick trees annotated with different support values
+*   Detailed Markdown report summarizing the analysis and results
+*   Comprehensive trees combining all support metrics when multiple analyses are performed
 *   Optional static visualization (requires `matplotlib` and `seaborn`):
-    *   Distribution of support values.
-    *   Site-specific support visualizations.
-*   Multi-threaded PAUP\* execution (configurable).
-*   Debug mode and option to keep temporary files.
+    *   Distribution of support values
+    *   Site-specific support visualizations
+
+### Technical Features
+*   Multi-threaded PAUP\* execution (configurable)
+*   Parallel execution of constraint analyses
+*   Debug mode and option to keep temporary files
+*   Robust error handling and recovery
 
 ## Installation
 
@@ -90,9 +125,11 @@ A significantly worse likelihood for the constrained tree (and a low AU test p-v
 
 MLDecay requires Python 3.8 or higher and has several dependencies that can be easily installed using pip.
 
-1. **PAUP\***: You must have a working PAUP\* command-line executable installed and accessible in your system's PATH, or provide the full path to it. PAUP\* can be obtained from [phylosolutions.com](http://phylosolutions.com/paup-test/).
+1. **PAUP\***: Required for ML analysis. You must have a working PAUP\* command-line executable installed and accessible in your system's PATH, or provide the full path to it. PAUP\* can be obtained from [phylosolutions.com](http://phylosolutions.com/paup-test/).
 
-2. **Python Dependencies**: All Python dependencies can be installed using the provided `requirements.txt` file:
+2. **MrBayes** (optional): Required for Bayesian analysis. Install MrBayes and ensure it's accessible as `mb` in your PATH, or specify the path with `--mrbayes-path`. MrBayes can be obtained from [nbisweden.github.io/MrBayes/](https://nbisweden.github.io/MrBayes/).
+
+3. **Python Dependencies**: All Python dependencies can be installed using the provided `requirements.txt` file:
 
    ```bash
    pip install -r requirements.txt
@@ -151,11 +188,16 @@ usage: MLDecay.py [-h] [--format FORMAT] [--model MODEL] [--gamma] [--invariable
                   [--data-type {dna,protein,discrete}] [--gamma-shape GAMMA_SHAPE] [--prop-invar PROP_INVAR] 
                   [--base-freq {equal,estimate,empirical}] [--rates {equal,gamma}] [--protein-model PROTEIN_MODEL] 
                   [--nst {1,2,6}] [--parsmodel | --no-parsmodel] [--threads THREADS] [--starting-tree STARTING_TREE] 
-                  [--paup-block PAUP_BLOCK] [--temp TEMP] [--keep-files] [--debug] [--site-analysis] [--bootstrap]
-                  [--bootstrap-reps BOOTSTRAP_REPS] [--visualize] [--viz-format {png,pdf,svg}] [-v]
+                  [--paup-block PAUP_BLOCK] [--temp TEMP] [--keep-files] [--debug] [--site-analysis] 
+                  [--analysis {ml,bayesian,both}] [-M] [-B] [-MB] [--bayesian-software {mrbayes,beast}]
+                  [--mrbayes-path MRBAYES_PATH] [--beast-path BEAST_PATH] [--bayes-model BAYES_MODEL]
+                  [--bayes-ngen BAYES_NGEN] [--bayes-burnin BAYES_BURNIN] [--bayes-chains BAYES_CHAINS]
+                  [--bayes-sample-freq BAYES_SAMPLE_FREQ] [--marginal-likelihood {ss,ps,hm}]
+                  [--ss-alpha SS_ALPHA] [--ss-nsteps SS_NSTEPS] [--bootstrap] [--bootstrap-reps BOOTSTRAP_REPS] 
+                  [--visualize] [--viz-format {png,pdf,svg}] [-v]
                   alignment
 
-MLDecay v1.0.0: Calculate ML-based phylogenetic decay indices using PAUP*.
+MLDecay v1.0.3: Calculate ML and/or Bayesian phylogenetic decay indices.
 
 positional arguments:
   alignment             Input alignment file path.
@@ -201,6 +243,35 @@ Runtime Control:
   --keep-files          Keep temporary files after analysis. (default: False)
   --debug               Enable detailed debug logging (implies --keep-files). (default: False)
 
+Analysis Mode:
+  --analysis {ml,bayesian,both}
+                        Analysis type to perform (default: ml)
+  -M, --ml-only         Perform ML analysis only (default)
+  -B, --bayesian-only   Perform Bayesian analysis only
+  -MB, --both           Perform both ML and Bayesian analyses
+
+Bayesian Analysis Options:
+  --bayesian-software {mrbayes,beast}
+                        Bayesian software to use (required if analysis includes Bayesian)
+  --mrbayes-path MRBAYES_PATH
+                        Path to MrBayes executable (default: mb)
+  --beast-path BEAST_PATH
+                        Path to BEAST executable (default: beast)
+  --bayes-model BAYES_MODEL
+                        Model for Bayesian analysis (if different from ML model)
+  --bayes-ngen BAYES_NGEN
+                        Number of MCMC generations (default: 1000000)
+  --bayes-burnin BAYES_BURNIN
+                        Burnin fraction (0-1) (default: 0.25)
+  --bayes-chains BAYES_CHAINS
+                        Number of MCMC chains (default: 4)
+  --bayes-sample-freq BAYES_SAMPLE_FREQ
+                        Sample frequency for MCMC (default: 1000)
+  --marginal-likelihood {ss,ps,hm}
+                        Marginal likelihood estimation method: ss=stepping-stone, ps=path sampling, hm=harmonic mean (default: ss)
+  --ss-alpha SS_ALPHA   Alpha parameter for stepping-stone sampling (default: 0.4)
+  --ss-nsteps SS_NSTEPS Number of steps for stepping-stone sampling (default: 50)
+
 Bootstrap Analysis (optional):
   --bootstrap           Perform bootstrap analysis to calculate support values. (default: False)
   --bootstrap-reps BOOTSTRAP_REPS
@@ -244,14 +315,18 @@ Unless specified with `--output`, `--tree`, etc., output files are created in th
 
 ### Main Results File (`ml_decay_indices.txt` by default)
 A tab-delimited text file containing:
-*   The log-likelihood of the best ML tree found.
+*   The log-likelihood of the best ML tree found (for ML analyses).
 *   For each internal branch tested:
     *   `Clade_ID`: An internal identifier for the branch.
     *   `Num_Taxa`: Number of taxa in the clade defined by this branch.
-    *   `Constrained_lnL`: Log-likelihood of the best tree found when this clade was constrained to be non-monophyletic.
-    *   `LnL_Diff_from_ML`: Difference between `Constrained_lnL` and the ML tree's likelihood.
-    *   `AU_p-value`: The p-value from the Approximately Unbiased test.
-    *   `Significant_AU (p<0.05)`: "Yes" if AU p-value < 0.05, "No" otherwise.
+    *   **ML Metrics** (when ML analysis is performed):
+        *   `Constrained_lnL`: Log-likelihood of the best tree found when this clade was constrained to be non-monophyletic.
+        *   `LnL_Diff_from_ML`: Difference between `Constrained_lnL` and the ML tree's likelihood.
+        *   `AU_p-value`: The p-value from the Approximately Unbiased test.
+        *   `Significant_AU (p<0.05)`: "Yes" if AU p-value < 0.05, "No" otherwise.
+    *   **Bayesian Metrics** (when Bayesian analysis is performed):
+        *   `Bayes_ML_Diff`: Marginal likelihood difference (unconstrained - constrained).
+        *   `Bayes_Factor`: Exponential of the Bayes_ML_Diff, indicating support strength.
     *   `Bootstrap` (if bootstrap analysis performed): Bootstrap support value for the clade.
     *   `Taxa_List`: A comma-separated list of taxa in the clade.
 
@@ -438,6 +513,85 @@ python3 MLDecay.py alignment.fas --model GTR --gamma --bootstrap --bootstrap-rep
 
 This will produce additional tree files with bootstrap values and a comprehensive tree that combines bootstrap values with ML decay indices.
 
+### Example 8: Bayesian Analysis Only
+Perform only Bayesian decay analysis using MrBayes:
+
+```bash
+python3 MLDecay.py alignment.fas --analysis bayesian --bayesian-software mrbayes \
+    --bayes-model GTR --bayes-ngen 500000 --output bayesian_only.txt
+```
+
+### Example 9: Combined ML and Bayesian Analysis
+Run both ML and Bayesian analyses:
+
+```bash
+python3 MLDecay.py alignment.fas --model GTR --gamma -C --bayesian-software mrbayes \
+    --bayes-ngen 1000000 --output combined_analysis.txt
+```
+
+### Example 10: Using MPI for Parallel MrBayes
+If you have MPI-enabled MrBayes installed:
+
+```bash
+python3 MLDecay.py alignment.fas -B --bayesian-software mrbayes --use-mpi \
+    --mpi-processors 8 --bayes-chains 4 --bayes-ngen 2000000
+```
+
+This runs 4 chains across 8 processors (2 chains per processor for better mixing).
+
+### Example 11: Using BEAGLE for GPU Acceleration
+If MrBayes is compiled with BEAGLE support:
+
+```bash
+python3 MLDecay.py alignment.fas -C --bayesian-software mrbayes --use-beagle \
+    --beagle-device gpu --beagle-precision single --bayes-ngen 5000000
+```
+
+For CPU-based BEAGLE acceleration:
+
+```bash
+python3 MLDecay.py alignment.fas -C --bayesian-software mrbayes --use-beagle \
+    --beagle-device cpu --beagle-precision double
+```
+
+### Example 12: Combined MPI and BEAGLE
+For maximum performance with both MPI and BEAGLE:
+
+```bash
+python3 MLDecay.py large_alignment.fas -B --bayesian-software mrbayes \
+    --use-mpi --mpi-processors 16 --use-beagle --beagle-device gpu \
+    --bayes-chains 4 --bayes-ngen 10000000 --bayes-sample-freq 5000
+```
+
+## Installation Requirements for Parallel Processing
+
+### For MPI Support
+To use `--use-mpi`, you need MrBayes compiled with MPI support. Follow the MrBayes manual instructions to compile with `--enable-mpi=yes`.
+
+### For BEAGLE Support  
+To use `--use-beagle`, you need:
+1. BEAGLE library installed (GPU or CPU version)
+2. MrBayes compiled with `--with-beagle` flag
+
+Example installation on macOS:
+```bash
+# Install BEAGLE
+brew install beagle-lib
+
+# Compile MrBayes with BEAGLE and MPI
+./configure --with-beagle --enable-mpi=yes
+make && sudo make install
+```
+
+## Example 13: Quick Bayesian Test
+For a quick test with minimal MCMC generations:
+
+```bash
+python3 MLDecay.py alignment.fas --both --bayesian-software mrbayes \
+    --bayes-ngen 10000 --bayes-sample-freq 100 \
+    --output quick_test.txt
+```
+
 ## Interpreting Results
 
 *   **ML Tree Log-Likelihood:** The baseline score for your optimal tree.
@@ -453,6 +607,19 @@ This will produce additional tree files with bootstrap values and a comprehensiv
     *   Percentage of bootstrap replicates in which the clade appears.
     *   Higher values (e.g., > 70%) indicate stronger support.
     *   Bootstrap is a widely-used and well-understood method, providing a complementary measure of support to the AU test and LnL differences.
+*   **Bayesian Decay (Bayes_ML_Diff):**
+    *   The difference in marginal log-likelihood between unconstrained and constrained analyses.
+    *   **Positive values** indicate the unconstrained tree (with the clade) has better marginal likelihood, supporting the clade.
+    *   **Negative values** indicate the constrained tree (without the clade) has better marginal likelihood, suggesting weak support.
+    *   Larger absolute values indicate stronger evidence.
+*   **Bayes Factor:**
+    *   The exponential of the Bayesian decay value, providing an interpretable ratio of model support.
+    *   Common interpretations:
+        *   BF < 1: Evidence against the clade
+        *   1 < BF < 3: Weak evidence for the clade
+        *   3 < BF < 10: Moderate evidence for the clade
+        *   10 < BF < 100: Strong evidence for the clade
+        *   BF > 100: Decisive evidence for the clade
 
 **Site-Specific Analysis Interpretation:**
 * **Negative delta lnL values** indicate sites that support the branch (they become less likely when the branch is constrained to be absent).
@@ -474,6 +641,47 @@ Generally, clades with large positive `LnL_Diff_from_ML` values, low `AU_p-value
 *   **Python Errors**: Ensure all Python dependencies (BioPython, NumPy) are correctly installed for the Python interpreter you are using.
 *   **Site-specific analysis errors**: If the site analysis fails but the main analysis succeeds, try running the analysis again with `--keep-files` and check the site-specific likelihood files in the temporary directory.
 *   **Bootstrap fails but ML analysis succeeds**: Bootstrap analysis can be computationally intensive. Try using fewer bootstrap replicates (`--bootstrap-reps 50`) or allocate more processing time by increasing the timeout value in the code.
+*   **MrBayes errors**:
+    *   "Command not found": Ensure MrBayes is installed and accessible. Use `--mrbayes-path /path/to/mb` if it's not in your PATH.
+    *   "Error in command 'Ss'": Your version of MrBayes doesn't support stepping-stone sampling. The program will automatically use harmonic mean estimation instead.
+    *   Path errors with spaces: MLDecay handles paths with spaces automatically by using relative paths for MrBayes execution.
+    *   No Bayesian output: Check the debug log for specific errors. Ensure your alignment is compatible with MrBayes (e.g., taxon names without special characters).
+*   **Bayesian analysis takes too long**: Reduce the number of generations (`--bayes-ngen 50000`) or increase sampling frequency (`--bayes-sample-freq 500`) for testing. Production runs typically need at least 1 million generations.
+
+## Conservative Nature of Bayes Factors in Phylogenetics
+
+Bayes factors are generally considered more conservative than likelihood ratio tests or other frequentist tests. Here's why:
+
+### Why Bayes Factors are Conservative
+
+1. **Integration vs. Maximization**
+   - Likelihood ratio tests compare the *best* tree vs. the *best* constrained tree (point estimates)
+   - Bayes factors average over *all possible* trees weighted by their posterior probability
+   - This averaging includes many suboptimal trees, making it harder to show strong support
+
+2. **Occam's Razor Built In**
+   - Bayes factors automatically penalize model complexity through the prior
+   - A clade needs to improve the fit enough to overcome this inherent penalty
+   - Likelihood ratio tests don't have this automatic complexity penalty
+
+3. **Uncertainty Incorporation**
+   - Bayes factors include uncertainty about all parameters (branch lengths, substitution rates, tree topology)
+   - Likelihood tests use point estimates, ignoring parameter uncertainty
+   - More uncertainty = more conservative support values
+
+### Simple Analogy
+
+Think of it like rating a restaurant:
+- **Likelihood test**: "What's the best meal they can make?" (optimistic)
+- **Bayes factor**: "What's the average meal like, considering all possibilities?" (realistic)
+
+### In Practice
+
+- A clade with likelihood ratio test p-value < 0.01 might only have BF = 3 (moderate support)
+- Clades need substantially stronger evidence to achieve high Bayes factors
+- This conservatism helps avoid overconfidence in phylogenetic conclusions
+
+This is why phylogeneticists often trust Bayes factors more - they're less likely to give false confidence in weakly supported clades. The Bayesian decay index inherits this conservative property, providing a more cautious assessment of clade support compared to ML-based measures.
 
 ## Citations
 

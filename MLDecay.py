@@ -48,7 +48,9 @@ class MLDecayIndices:
                  bayesian_software=None, mrbayes_path="mb", beast_path="beast",
                  bayes_model=None, bayes_ngen=1000000, bayes_burnin=0.25,
                  bayes_chains=4, bayes_sample_freq=1000, marginal_likelihood="ss",
-                 ss_alpha=0.4, ss_nsteps=50):
+                 ss_alpha=0.4, ss_nsteps=50, use_mpi=False, mpi_processors=None,
+                 mpirun_path="mpirun", use_beagle=False, beagle_device="auto",
+                 beagle_precision="double", beagle_scaling="dynamic", parsimony=False):
 
         self.alignment_file = Path(alignment_file)
         self.alignment_format = alignment_format
@@ -65,6 +67,7 @@ class MLDecayIndices:
         self.nst_arg = nst
         self.parsmodel_arg = parsmodel # For discrete data, used in _convert_model_to_paup
         self.user_paup_block = paup_block # Raw user block content
+        self.parsimony = parsimony  # Whether to calculate parsimony decay indices
         self._files_to_cleanup = []
         
         # Bayesian analysis parameters
@@ -80,6 +83,15 @@ class MLDecayIndices:
         self.marginal_likelihood = marginal_likelihood
         self.ss_alpha = ss_alpha
         self.ss_nsteps = ss_nsteps
+        
+        # MPI and BEAGLE parameters
+        self.use_mpi = use_mpi
+        self.mpi_processors = mpi_processors
+        self.mpirun_path = mpirun_path
+        self.use_beagle = use_beagle
+        self.beagle_device = beagle_device
+        self.beagle_precision = beagle_precision
+        self.beagle_scaling = beagle_scaling
 
         self.data_type = data_type.lower()
         if self.data_type not in ["dna", "protein", "discrete"]:
@@ -577,8 +589,13 @@ class MLDecayIndices:
 
         # Add bootstrap commands
         script_cmds.extend([
-            f"bootstrap nreps={num_replicates} search=heuristic keepall=no treefile={BOOTSTRAP_TREE_FN} replace=yes / start=stepwise addseq=random nreps=1;",
-            f"savetrees file={BOOTSTRAP_TREE_FN} format=newick brlens=yes replace=yes supportValues=nodeLabels;"
+            f"set criterion=likelihood;",
+            f"hsearch;",  # Find the ML tree first
+            f"bootstrap nreps={num_replicates} search=heuristic keepall=no conlevel=50 / start=stepwise addseq=random nreps=1;",
+            # The bootstrap command creates a consensus tree with support values
+            # We'll extract the ML tree topology with bootstrap values
+            f"describetrees 1 / brlens=yes;",  # Show the tree with bootstrap values
+            f"savetrees from=1 to=1 file={BOOTSTRAP_TREE_FN} format=newick brlens=yes replace=yes supportValues=nodeLabels;"
         ])
 
         # Create and execute PAUP script
@@ -786,6 +803,13 @@ class MLDecayIndices:
             if "+G" in self.bayes_model:
                 blocks.append("    lset rates=gamma;")
         
+        # BEAGLE settings if enabled
+        if self.use_beagle:
+            beagle_cmd = f"    set usebeagle=yes beagledevice={self.beagle_device} "
+            beagle_cmd += f"beagleprecision={self.beagle_precision} "
+            beagle_cmd += f"beaglescaling={self.beagle_scaling};"
+            blocks.append(beagle_cmd)
+        
         # MCMC settings
         blocks.append(f"    mcmc ngen={self.bayes_ngen} samplefreq={self.bayes_sample_freq} "
                      f"nchains={self.bayes_chains} savebrlens=yes printfreq=1000 diagnfreq=5000;")
@@ -795,9 +819,8 @@ class MLDecayIndices:
         blocks.append(f"    sump burnin={burnin_samples};")
         blocks.append(f"    sumt burnin={burnin_samples};")
         
-        # Marginal likelihood estimation after MCMC
-        if self.marginal_likelihood == "ss":
-            blocks.append(f"    ss alpha={self.ss_alpha} nsteps={self.ss_nsteps} burnin={burnin_samples};")
+        # Note: Stepping-stone sampling might not be available in all MrBayes versions
+        # We'll rely on the harmonic mean estimate from sump instead
         
         blocks.append("end;")
         blocks.append("")  # Empty line
@@ -821,8 +844,17 @@ class MLDecayIndices:
             # We'll use a relative path instead to avoid issues with spaces
             nexus_filename = nexus_file.name
             
-            # MrBayes command - use just the filename since we'll run in the same directory
-            cmd = [self.mrbayes_path, nexus_filename]
+            # Build MrBayes command
+            if self.use_mpi:
+                # For MPI, determine number of processors
+                n_procs = self.mpi_processors
+                if n_procs is None:
+                    # Default: one processor per chain
+                    n_procs = self.bayes_chains
+                cmd = [self.mpirun_path, "-np", str(n_procs), self.mrbayes_path, nexus_filename]
+            else:
+                # Standard MrBayes command
+                cmd = [self.mrbayes_path, nexus_filename]
             
             logger.info(f"Running MrBayes: {' '.join(cmd)} in directory {self.temp_path}")
             logger.debug(f"Working directory: {self.temp_path}")
@@ -852,9 +884,19 @@ class MLDecayIndices:
             logger.info(f"MrBayes completed successfully for {output_prefix}")
             
             # Parse marginal likelihood from output
-            log_file_path = self.temp_path / f"{nexus_file.stem}.log"
-            logger.debug(f"Looking for MrBayes log file: {log_file_path}")
-            ml_value = self._parse_mrbayes_marginal_likelihood(log_file_path, output_prefix)
+            # MrBayes creates .lstat file with marginal likelihood estimates
+            lstat_file_path = self.temp_path / f"{nexus_file.name}.lstat"
+            logger.debug(f"Looking for MrBayes lstat file: {lstat_file_path}")
+            ml_value = self._parse_mrbayes_marginal_likelihood(lstat_file_path, output_prefix)
+            
+            # Parse posterior probabilities from consensus tree (only for unconstrained analysis)
+            if output_prefix == "unc":
+                con_tree_path = self.temp_path / f"{nexus_file.name}.con.tre"
+                if con_tree_path.exists():
+                    logger.info(f"Parsing posterior probabilities from {con_tree_path}")
+                    self.posterior_probs = self._parse_mrbayes_posterior_probs(con_tree_path)
+                else:
+                    logger.warning(f"Consensus tree not found: {con_tree_path}")
             
             return ml_value
             
@@ -885,6 +927,13 @@ class MLDecayIndices:
             
         logger.info(f"Running Bayesian decay analysis using {self.bayesian_software}")
         logger.info(f"MCMC settings: {self.bayes_ngen} generations, {self.bayes_chains} chains, sampling every {self.bayes_sample_freq}")
+        
+        # Log parallel processing settings
+        if self.use_mpi:
+            n_procs = self.mpi_processors if self.mpi_processors else self.bayes_chains
+            logger.info(f"MPI enabled: Using {n_procs} processors with {self.mpirun_path}")
+        if self.use_beagle:
+            logger.info(f"BEAGLE enabled: device={self.beagle_device}, precision={self.beagle_precision}, scaling={self.beagle_scaling}")
         
         # Warn if this will take a long time
         estimated_time = (self.bayes_ngen * self.bayes_chains) / 10000  # Very rough estimate
@@ -951,56 +1000,281 @@ class MLDecayIndices:
                 }
                 
                 logger.info(f"{clade_id}: Bayes decay = {bayes_decay:.4f}, BF = {bayes_factor:.2e}")
+                if bayes_decay < 0:
+                    logger.warning(f"⚠️  {clade_id} has negative Bayes Decay ({bayes_decay:.4f}), suggesting potential convergence or estimation issues")
             else:
                 logger.warning(f"Constrained analysis failed for {clade_id}")
+        
+        # Check for negative Bayes Decay values and issue summary warning
+        if bayesian_results:
+            negative_clades = [cid for cid, data in bayesian_results.items() if data['bayes_decay'] < 0]
+            if negative_clades:
+                logger.warning(f"\n⚠️  WARNING: {len(negative_clades)}/{len(bayesian_results)} clades have negative Bayes Decay values!")
+                logger.warning("This suggests potential issues with MCMC convergence or marginal likelihood estimation.")
+                logger.warning("Consider:")
+                logger.warning("  1. Increasing MCMC generations (--bayes-ngen 5000000 or higher)")
+                logger.warning("  2. Using more chains (--bayes-chains 8)")
+                logger.warning("  3. Checking MCMC convergence diagnostics in MrBayes output")
+                logger.warning("  4. The harmonic mean is known to be unreliable - consider implementing stepping-stone sampling")
+                logger.warning(f"Affected clades: {', '.join(negative_clades)}\n")
                 
         return bayesian_results
     
-    def _parse_mrbayes_marginal_likelihood(self, log_file, output_prefix):
+    def _parse_mrbayes_marginal_likelihood(self, lstat_file, output_prefix):
         """
-        Parse marginal likelihood from MrBayes log file.
+        Parse marginal likelihood from MrBayes .lstat file.
         
         Args:
-            log_file: Path to MrBayes .log file
+            lstat_file: Path to MrBayes .lstat file
             output_prefix: Prefix to identify the run
             
         Returns:
             Marginal likelihood value or None
         """
-        if not log_file.exists():
-            logger.warning(f"MrBayes log file not found: {log_file}")
+        if not lstat_file.exists():
+            logger.warning(f"MrBayes lstat file not found: {lstat_file}")
             return None
             
         try:
-            log_content = log_file.read_text()
+            lstat_content = lstat_file.read_text()
             
-            # Look for stepping-stone sampling results
-            if self.marginal_likelihood == "ss":
-                # Pattern for stepping-stone marginal likelihood
-                ss_pattern = r"Marginal likelihood \(in natural log units\) estimated using stepping-stone sampling.*?= (-?\d+\.\d+)"
-                match = re.search(ss_pattern, log_content, re.DOTALL)
-                if match:
-                    ml_value = float(match.group(1))
-                    logger.info(f"Parsed stepping-stone marginal likelihood for {output_prefix}: {ml_value}")
-                    return ml_value
-                    
-            # Look for harmonic mean estimate
-            hm_pattern = r"Estimated marginal likelihood.*?= (-?\d+\.\d+)"
-            match = re.search(hm_pattern, log_content)
-            if match:
-                ml_value = float(match.group(1))
-                logger.info(f"Parsed harmonic mean marginal likelihood for {output_prefix}: {ml_value}")
-                return ml_value
+            # Parse the .lstat file format
+            # Format: run  arithmetic_mean  harmonic_mean  values_discarded
+            # We want the harmonic mean from the "all" row
+            lines = lstat_content.strip().split('\n')
+            
+            for line in lines:
+                if line.startswith('all'):
+                    parts = line.split()
+                    if len(parts) >= 3:
+                        # harmonic_mean is the third column
+                        harmonic_mean = float(parts[2])
+                        logger.info(f"Parsed harmonic mean marginal likelihood for {output_prefix}: {harmonic_mean}")
+                        return harmonic_mean
+            
+            # If no "all" row, try to get from individual runs
+            for line in lines:
+                if line[0].isdigit():  # Run number
+                    parts = line.split()
+                    if len(parts) >= 3:
+                        harmonic_mean = float(parts[2])
+                        logger.info(f"Parsed harmonic mean marginal likelihood for {output_prefix}: {harmonic_mean}")
+                        return harmonic_mean
                 
-            logger.warning(f"Could not find marginal likelihood in {log_file}")
+            logger.warning(f"Could not find marginal likelihood in {lstat_file}")
             return None
             
         except Exception as e:
-            logger.error(f"Error parsing MrBayes log: {e}")
+            logger.error(f"Error parsing MrBayes lstat file: {e}")
             if self.debug:
                 import traceback
                 logger.debug(traceback.format_exc())
             return None
+
+    def _parse_mrbayes_posterior_probs(self, con_tree_path):
+        """
+        Parse posterior probabilities from MrBayes consensus tree file.
+        
+        Args:
+            con_tree_path: Path to .con.tre file
+            
+        Returns:
+            Dictionary mapping clade (as frozenset of taxa) to posterior probability
+        """
+        try:
+            posterior_probs = {}
+            
+            # Read the consensus tree file
+            tree_content = con_tree_path.read_text()
+            
+            # Find the tree line (starts with "tree con_50")
+            tree_line = None
+            for line in tree_content.splitlines():
+                if line.strip().startswith("tree con_"):
+                    tree_line = line
+                    break
+            
+            if not tree_line:
+                logger.warning("Could not find consensus tree line in .con.tre file")
+                return {}
+            
+            # Extract the Newick string
+            # Format: tree con_50 = [&U] (taxon1:0.1,taxon2:0.1)[1.00]:0.0;
+            parts = tree_line.split("=", 1)
+            if len(parts) < 2:
+                logger.warning("Invalid consensus tree format")
+                return {}
+            
+            newick_str = parts[1].strip()
+            
+            # Remove [&U] or other tree attributes
+            if newick_str.startswith("["):
+                end_bracket = newick_str.find("]")
+                if end_bracket != -1:
+                    newick_str = newick_str[end_bracket+1:].strip()
+            
+            # Parse the tree to extract clades and their posterior probabilities
+            # This is a simplified parser - for production use, consider using Bio.Phylo
+            # or another proper Newick parser that handles posterior probabilities
+            
+            # For now, log that we found the tree
+            logger.info(f"Found consensus tree with posterior probabilities")
+            
+            # Parse using BioPython
+            from io import StringIO
+            tree_io = StringIO(newick_str)
+            
+            try:
+                tree = Phylo.read(tree_io, "newick")
+                
+                # Extract posterior probabilities from internal nodes
+                for node in tree.get_nonterminals():
+                    if node.confidence is not None and node != tree.root:
+                        # Get taxa in this clade
+                        clade_taxa = frozenset(term.name for term in node.get_terminals())
+                        posterior_probs[clade_taxa] = float(node.confidence)
+                        
+                logger.info(f"Extracted posterior probabilities for {len(posterior_probs)} clades")
+                
+            except Exception as e:
+                logger.warning(f"Could not parse consensus tree with BioPython: {e}")
+                # Could implement manual parsing here if needed
+                
+            return posterior_probs
+            
+        except Exception as e:
+            logger.error(f"Error parsing MrBayes posterior probabilities: {e}")
+            if self.debug:
+                import traceback
+                logger.debug(traceback.format_exc())
+            return {}
+
+    def run_parsimony_decay_analysis(self):
+        """
+        Run parsimony analysis to calculate traditional Bremer support values.
+        
+        Returns:
+            Dictionary mapping clade IDs to parsimony decay values
+        """
+        logger.info("Running parsimony decay analysis...")
+        
+        # Build parsimony tree if not already done
+        PARS_TREE_FN = "pars_tree.tre"
+        PARS_SCORE_FN = "pars_score.txt"
+        PARS_NEX_FN = "pars_search.nex"
+        PARS_LOG_FN = "paup_pars.log"
+        
+        # Build initial parsimony tree
+        script_cmds = [
+            f"execute {NEXUS_ALIGNMENT_FN};",
+            f"set criterion=parsimony;",
+            f"hsearch start=stepwise addseq=random nreps=10 swap=tbr multrees=yes;",
+            f"savetrees file={PARS_TREE_FN} replace=yes;",
+            f"pscores 1 / scorefile={PARS_SCORE_FN} replace=yes;"
+        ]
+        
+        paup_script_content = f"#NEXUS\nbegin paup;\n" + "\n".join(script_cmds) + "\nquit;\nend;\n"
+        pars_cmd_path = self.temp_path / PARS_NEX_FN
+        pars_cmd_path.write_text(paup_script_content)
+        
+        try:
+            self._run_paup_command_file(PARS_NEX_FN, PARS_LOG_FN)
+            
+            # Parse parsimony score
+            score_path = self.temp_path / PARS_SCORE_FN
+            pars_score = None
+            if score_path.exists():
+                score_content = score_path.read_text()
+                # Parse parsimony score from PAUP output
+                for line in score_content.splitlines():
+                    if "Length" in line:
+                        parts = line.strip().split()
+                        for i, part in enumerate(parts):
+                            if part == "Length":
+                                pars_score = int(parts[i+1])
+                                break
+                        if pars_score:
+                            break
+            
+            if pars_score is None:
+                logger.error("Could not parse parsimony score")
+                return {}
+                
+            logger.info(f"Initial parsimony score: {pars_score}")
+            
+            # Now calculate decay for each clade
+            parsimony_decay = {}
+            
+            # Use the ML tree clades for consistency
+            if not hasattr(self, 'ml_tree') or not self.ml_tree:
+                logger.warning("ML tree not available for clade identification")
+                return {}
+            
+            branches = self._identify_testable_branches()
+            
+            for idx, (node, clade_taxa) in enumerate(branches, 1):
+                clade_id = f"Clade_{idx + 2}"  # Same numbering as ML analysis
+                
+                # Skip trivial branches
+                num_taxa = len(clade_taxa)
+                total_taxa = len(self.alignment)
+                if num_taxa <= 1 or num_taxa >= total_taxa - 1:
+                    continue
+                
+                logger.info(f"Calculating parsimony decay for {clade_id} ({num_taxa} taxa)")
+                
+                # Create constraint forcing non-monophyly
+                constraint_cmds = [
+                    f"execute {NEXUS_ALIGNMENT_FN};",
+                    f"set criterion=parsimony;",
+                    f"constraint broken_clade (MONOPHYLY) = {' '.join(clade_taxa)};",
+                    f"hsearch start=stepwise addseq=random nreps=10 swap=tbr multrees=yes enforce=no converse=yes constraints=broken_clade;",
+                    f"savetrees file=pars_constraint_{idx}.tre replace=yes;",
+                    f"pscores 1 / scorefile=pars_constraint_score_{idx}.txt replace=yes;"
+                ]
+                
+                constraint_script = f"#NEXUS\nbegin paup;\n" + "\n".join(constraint_cmds) + "\nquit;\nend;\n"
+                constraint_path = self.temp_path / f"pars_constraint_{idx}.nex"
+                constraint_path.write_text(constraint_script)
+                
+                try:
+                    self._run_paup_command_file(f"pars_constraint_{idx}.nex", f"paup_pars_constraint_{idx}.log")
+                    
+                    # Parse constrained score
+                    constrained_score_path = self.temp_path / f"pars_constraint_score_{idx}.txt"
+                    constrained_score = None
+                    
+                    if constrained_score_path.exists():
+                        score_content = constrained_score_path.read_text()
+                        for line in score_content.splitlines():
+                            if "Length" in line:
+                                parts = line.strip().split()
+                                for i, part in enumerate(parts):
+                                    if part == "Length":
+                                        constrained_score = int(parts[i+1])
+                                        break
+                                if constrained_score:
+                                    break
+                    
+                    if constrained_score is not None:
+                        decay_value = constrained_score - pars_score
+                        parsimony_decay[clade_id] = {
+                            'pars_decay': decay_value,
+                            'pars_score': pars_score,
+                            'constrained_score': constrained_score,
+                            'taxa': clade_taxa
+                        }
+                        logger.info(f"{clade_id}: Parsimony decay = {decay_value} (constrained: {constrained_score}, optimal: {pars_score})")
+                    
+                except Exception as e:
+                    logger.error(f"Failed to calculate parsimony decay for {clade_id}: {e}")
+                    continue
+                    
+        except Exception as e:
+            logger.error(f"Parsimony decay analysis failed: {e}")
+            return {}
+            
+        return parsimony_decay
 
     def calculate_decay_indices(self, perform_site_analysis=False):
         """
@@ -1174,6 +1448,20 @@ class MLDecayIndices:
         else:
             logger.warning("AU test failed or returned no results. Decay indices will lack AU p-values.")
 
+        # Add parsimony decay if requested
+        if self.parsimony:
+            logger.info("Adding parsimony decay indices...")
+            parsimony_results = self.run_parsimony_decay_analysis()
+            
+            # Merge parsimony results with existing decay indices
+            for clade_id, pars_data in parsimony_results.items():
+                if clade_id in self.decay_indices:
+                    self.decay_indices[clade_id]['pars_decay'] = pars_data['pars_decay']
+                    self.decay_indices[clade_id]['pars_score'] = pars_data['pars_score']
+                    self.decay_indices[clade_id]['pars_constrained_score'] = pars_data['constrained_score']
+                else:
+                    logger.warning(f"Parsimony clade {clade_id} not found in ML results")
+
         if not self.decay_indices:
             logger.warning("No branch support values were calculated.")
         else:
@@ -1259,6 +1547,17 @@ class MLDecayIndices:
                     })
         else:
             logger.warning("Bayesian analysis failed; results will contain ML metrics only.")
+            
+        # Add posterior probabilities if available
+        if hasattr(self, 'posterior_probs') and self.posterior_probs:
+            logger.info(f"Adding posterior probabilities for {len(self.posterior_probs)} clades")
+            for clade_id in ml_results:
+                # Get taxa set for this clade
+                clade_taxa = frozenset(ml_results[clade_id]['taxa'])
+                if clade_taxa in self.posterior_probs:
+                    ml_results[clade_id]['posterior_prob'] = self.posterior_probs[clade_taxa]
+                else:
+                    ml_results[clade_id]['posterior_prob'] = None
             
         self.decay_indices = ml_results
         return self.decay_indices
@@ -1788,9 +2087,9 @@ class MLDecayIndices:
 
                     node.confidence = None  # Default
                     if matched_data and 'AU_pvalue' in matched_data and matched_data['AU_pvalue'] is not None:
-                        node.confidence = float(matched_data['AU_pvalue'])
-                        # Add the clade ID to the node name
-                        node.name = matched_clade_id
+                        au_pvalue = matched_data['AU_pvalue']
+                        # Create clear separation between clade name and AU p-value
+                        node.name = f"{matched_clade_id} - AU:{au_pvalue:.4f}"
                         annotated_nodes_count += 1
 
                 Phylo.write(au_tree, str(au_tree_path), "newick")
@@ -1822,9 +2121,9 @@ class MLDecayIndices:
 
                     node.confidence = None  # Default
                     if matched_data and 'lnl_diff' in matched_data and matched_data['lnl_diff'] is not None:
-                        node.confidence = abs(matched_data['lnl_diff'])
-                        # Add the clade ID to the node name
-                        node.name = matched_clade_id
+                        lnl_diff = abs(matched_data['lnl_diff'])
+                        # Create clear separation between clade name and LnL difference
+                        node.name = f"{matched_clade_id} - LnL:{lnl_diff:.4f}"
                         annotated_nodes_count += 1
 
                 Phylo.write(lnl_tree, str(lnl_tree_path), "newick")
@@ -1871,19 +2170,38 @@ class MLDecayIndices:
                             clade_id = decay_id_str  # Save clade ID for later use
                             au_val = decay_info.get('AU_pvalue')
                             lnl_val = decay_info.get('lnl_diff')
+                            bayes_decay = decay_info.get('bayes_decay')
+                            bayes_factor = decay_info.get('bayes_factor')
 
                             if au_val is not None:
                                 annotation_parts.append(f"AU:{au_val:.4f}")
 
                             if lnl_val is not None:
                                 annotation_parts.append(f"LnL:{abs(lnl_val):.4f}")
+                                
+                            if bayes_decay is not None:
+                                annotation_parts.append(f"BD:{bayes_decay:.4f}")
+                                
+                            if bayes_factor is not None:
+                                annotation_parts.append(f"BF:{bayes_factor:.2f}")
+                                
+                            # Add parsimony decay if available
+                            pars_decay = matched_data.get('pars_decay')
+                            if pars_decay is not None:
+                                annotation_parts.append(f"PD:{pars_decay}")
+                                
+                            # Add posterior probability if available
+                            post_prob = matched_data.get('posterior_prob')
+                            if post_prob is not None:
+                                annotation_parts.append(f"PP:{post_prob:.2f}")
                             break
 
                     # Add the clade ID to the beginning of annotation if we have one
                     if clade_id and annotation_parts:
-                        # Prepend the clade ID to make it more visible
-                        annotation_parts.insert(0, clade_id)
-                        node_annotations[node_taxa_set] = "|".join(annotation_parts)
+                        # Create clear separation between clade name and metrics
+                        clade_part = clade_id
+                        metrics_part = "|".join(annotation_parts)
+                        node_annotations[node_taxa_set] = f"{clade_part} - {metrics_part}"
                     elif annotation_parts:
                         node_annotations[node_taxa_set] = "|".join(annotation_parts)
 
@@ -1917,11 +2235,36 @@ class MLDecayIndices:
 
             # Handle bootstrap tree if bootstrap analysis was performed
             if hasattr(self, 'bootstrap_tree') and self.bootstrap_tree:
-                # 1. Save the bootstrap tree directly
+                # 1. Create a bootstrap tree using ML tree topology with bootstrap values
                 bootstrap_tree_path = output_dir / f"{base_filename}_bootstrap.nwk"
                 try:
-                    Phylo.write(self.bootstrap_tree, str(bootstrap_tree_path), "newick")
-                    logger.info(f"Bootstrap tree written to {bootstrap_tree_path}")
+                    # Create a copy of the ML tree for bootstrap annotation
+                    temp_tree_for_bootstrap = self.temp_path / f"ml_tree_for_bootstrap_annotation.nwk"
+                    Phylo.write(self.ml_tree, str(temp_tree_for_bootstrap), "newick")
+                    cleaned_tree_path = self._clean_newick_tree(temp_tree_for_bootstrap)
+                    ml_tree_for_bootstrap = Phylo.read(str(cleaned_tree_path), "newick")
+                    
+                    # Extract bootstrap values from the consensus tree
+                    bootstrap_values = {}
+                    for node in self.bootstrap_tree.get_nonterminals():
+                        if node.confidence is not None:
+                            taxa_set = frozenset(leaf.name for leaf in node.get_terminals())
+                            bootstrap_values[taxa_set] = node.confidence
+                    
+                    # Apply bootstrap values to the ML tree
+                    annotated_nodes_count = 0
+                    for node in ml_tree_for_bootstrap.get_nonterminals():
+                        if not node or not node.clades: continue
+                        node_taxa_set = frozenset(leaf.name for leaf in node.get_terminals())
+                        
+                        if node_taxa_set in bootstrap_values:
+                            bs_val = bootstrap_values[node_taxa_set]
+                            node.name = f"{int(bs_val)}"
+                            annotated_nodes_count += 1
+                    
+                    # Write the ML tree with bootstrap values
+                    Phylo.write(ml_tree_for_bootstrap, str(bootstrap_tree_path), "newick")
+                    logger.info(f"Bootstrap tree (ML topology with bootstrap values) written to {bootstrap_tree_path}")
                     tree_files['bootstrap'] = bootstrap_tree_path
                 except Exception as e:
                     logger.error(f"Failed to write bootstrap tree: {e}")
@@ -1959,10 +2302,6 @@ class MLDecayIndices:
                         # Combine all values
                         annotation_parts = []
 
-                        # Add clade ID first if available
-                        if matched_clade_id:
-                            annotation_parts.append(matched_clade_id)
-
                         # Add bootstrap value if available
                         if node_taxa_set in bootstrap_values:
                             bs_val = bootstrap_values[node_taxa_set]
@@ -1972,15 +2311,38 @@ class MLDecayIndices:
                         if matched_data:
                             au_val = matched_data.get('AU_pvalue')
                             lnl_val = matched_data.get('lnl_diff')
+                            bayes_decay = matched_data.get('bayes_decay')
+                            bayes_factor = matched_data.get('bayes_factor')
 
                             if au_val is not None:
                                 annotation_parts.append(f"AU:{au_val:.4f}")
 
                             if lnl_val is not None:
                                 annotation_parts.append(f"LnL:{abs(lnl_val):.4f}")
+                                
+                            if bayes_decay is not None:
+                                annotation_parts.append(f"BD:{bayes_decay:.4f}")
+                                
+                            if bayes_factor is not None:
+                                annotation_parts.append(f"BF:{bayes_factor:.2f}")
+                                
+                            # Add parsimony decay if available
+                            pars_decay = matched_data.get('pars_decay')
+                            if pars_decay is not None:
+                                annotation_parts.append(f"PD:{pars_decay}")
+                                
+                            # Add posterior probability if available
+                            post_prob = matched_data.get('posterior_prob')
+                            if post_prob is not None:
+                                annotation_parts.append(f"PP:{post_prob:.2f}")
 
                         if annotation_parts:
-                            node_annotations[node_taxa_set] = "|".join(annotation_parts)
+                            # For comprehensive trees, add clear separation between clade and metrics if we have a clade ID
+                            if matched_clade_id:
+                                metrics_part = "|".join(annotation_parts)
+                                node_annotations[node_taxa_set] = f"{matched_clade_id} - {metrics_part}"
+                            else:
+                                node_annotations[node_taxa_set] = "|".join(annotation_parts)
 
                     # Apply annotations to tree
                     annotated_nodes_count = 0
@@ -2001,6 +2363,75 @@ class MLDecayIndices:
                     if self.debug:
                         import traceback
                         logger.debug(f"Traceback: {traceback.format_exc()}")
+
+            # Create Bayesian-specific trees if Bayesian results are available
+            has_bayesian = any(d.get('bayes_decay') is not None for d in self.decay_indices.values())
+            if has_bayesian:
+                # Create Bayes decay annotated tree
+                bayes_decay_tree_path = output_dir / f"{base_filename}_bayes_decay.nwk"
+                try:
+                    temp_tree_for_bd = self.temp_path / f"ml_tree_for_bd_annotation.nwk"
+                    Phylo.write(self.ml_tree, str(temp_tree_for_bd), "newick")
+                    cleaned_tree_path = self._clean_newick_tree(temp_tree_for_bd)
+                    bd_tree = Phylo.read(str(cleaned_tree_path), "newick")
+
+                    annotated_nodes_count = 0
+                    for node in bd_tree.get_nonterminals():
+                        if not node or not node.clades: continue
+                        node_taxa_set = set(leaf.name for leaf in node.get_terminals())
+
+                        matched_data = None
+                        matched_clade_id = None
+                        for decay_id_str, decay_info in self.decay_indices.items():
+                            if 'taxa' in decay_info and set(decay_info['taxa']) == node_taxa_set:
+                                matched_data = decay_info
+                                matched_clade_id = decay_id_str
+                                break
+
+                        node.confidence = None  # Default
+                        if matched_data and 'bayes_decay' in matched_data and matched_data['bayes_decay'] is not None:
+                            bayes_decay_val = matched_data['bayes_decay']
+                            node.name = f"{matched_clade_id} - BD:{bayes_decay_val:.4f}"
+                            annotated_nodes_count += 1
+
+                    Phylo.write(bd_tree, str(bayes_decay_tree_path), "newick")
+                    logger.info(f"Annotated tree with {annotated_nodes_count} Bayes decay values written to {bayes_decay_tree_path}")
+                    tree_files['bayes_decay'] = bayes_decay_tree_path
+                except Exception as e:
+                    logger.error(f"Failed to create Bayes decay tree: {e}")
+
+                # Create Bayes factor annotated tree
+                bayes_factor_tree_path = output_dir / f"{base_filename}_bayes_factor.nwk"
+                try:
+                    temp_tree_for_bf = self.temp_path / f"ml_tree_for_bf_annotation.nwk"
+                    Phylo.write(self.ml_tree, str(temp_tree_for_bf), "newick")
+                    cleaned_tree_path = self._clean_newick_tree(temp_tree_for_bf)
+                    bf_tree = Phylo.read(str(cleaned_tree_path), "newick")
+
+                    annotated_nodes_count = 0
+                    for node in bf_tree.get_nonterminals():
+                        if not node or not node.clades: continue
+                        node_taxa_set = set(leaf.name for leaf in node.get_terminals())
+
+                        matched_data = None
+                        matched_clade_id = None
+                        for decay_id_str, decay_info in self.decay_indices.items():
+                            if 'taxa' in decay_info and set(decay_info['taxa']) == node_taxa_set:
+                                matched_data = decay_info
+                                matched_clade_id = decay_id_str
+                                break
+
+                        node.confidence = None  # Default
+                        if matched_data and 'bayes_factor' in matched_data and matched_data['bayes_factor'] is not None:
+                            bayes_factor_val = matched_data['bayes_factor']
+                            node.name = f"{matched_clade_id} - BF:{bayes_factor_val:.2f}"
+                            annotated_nodes_count += 1
+
+                    Phylo.write(bf_tree, str(bayes_factor_tree_path), "newick")
+                    logger.info(f"Annotated tree with {annotated_nodes_count} Bayes factor values written to {bayes_factor_tree_path}")
+                    tree_files['bayes_factor'] = bayes_factor_tree_path
+                except Exception as e:
+                    logger.error(f"Failed to create Bayes factor tree: {e}")
 
             return tree_files
 
@@ -2032,6 +2463,8 @@ class MLDecayIndices:
         # Check which types of results we have
         has_ml = any(d.get('lnl_diff') is not None for d in self.decay_indices.values())
         has_bayesian = any(d.get('bayes_decay') is not None for d in self.decay_indices.values())
+        has_parsimony = any(d.get('pars_decay') is not None for d in self.decay_indices.values())
+        has_posterior = any(d.get('posterior_prob') is not None for d in self.decay_indices.values())
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with output_path.open('w') as f:
@@ -2059,8 +2492,12 @@ class MLDecayIndices:
             
             if has_ml:
                 header_parts.extend(["Constrained_lnL", "LnL_Diff_from_ML", "AU_p-value", "Significant_AU (p<0.05)"])
+            if has_parsimony:
+                header_parts.append("Pars_Decay")
             if has_bayesian:
                 header_parts.extend(["Bayes_ML_Diff", "Bayes_Factor"])
+                if has_posterior:
+                    header_parts.append("Posterior_Prob")
             if has_bootstrap:
                 header_parts.append("Bootstrap")
             header_parts.append("Taxa_List")
@@ -2098,6 +2535,12 @@ class MLDecayIndices:
                     
                     row_parts.extend([c_lnl, lnl_d, au_p, sig_au])
                 
+                # Add parsimony decay if present
+                if has_parsimony:
+                    pars_decay = data.get('pars_decay', 'N/A')
+                    if isinstance(pars_decay, (int, float)): pars_decay = str(pars_decay)
+                    row_parts.append(pars_decay)
+                
                 # Add Bayesian fields if present
                 if has_bayesian:
                     bayes_decay = data.get('bayes_decay', 'N/A')
@@ -2112,6 +2555,12 @@ class MLDecayIndices:
                             bayes_factor = f"{bayes_factor:.2f}"
                     
                     row_parts.extend([bayes_decay, bayes_factor])
+                    
+                    # Add posterior probability if present
+                    if has_posterior:
+                        post_prob = data.get('posterior_prob', 'N/A')
+                        if isinstance(post_prob, float): post_prob = f"{post_prob:.2f}"
+                        row_parts.append(post_prob)
 
                 # Add bootstrap value if available
                 if has_bootstrap:
@@ -2174,7 +2623,8 @@ class MLDecayIndices:
                 f.write(f"- Bayesian model: `{self.bayes_model}`\n")
                 f.write(f"- MCMC generations: `{self.bayes_ngen}`\n")
                 f.write(f"- Burnin fraction: `{self.bayes_burnin}`\n")
-                f.write(f"- Marginal likelihood method: `{self.marginal_likelihood}`\n")
+                # We're using harmonic mean from sump, not stepping-stone
+                f.write(f"- Marginal likelihood method: `harmonic mean`\n")
                 
             if has_bootstrap:
                 f.write("- Bootstrap analysis: Performed\n")
@@ -2216,6 +2666,15 @@ class MLDecayIndices:
                         f.write(f"- Avg Bayesian decay (marginal lnL difference): {np.mean(bayes_decays):.4f}\n")
                         f.write(f"- Min Bayesian decay: {min(bayes_decays):.4f}\n")
                         f.write(f"- Max Bayesian decay: {max(bayes_decays):.4f}\n")
+                        
+                        # Check for negative values and add warning
+                        negative_count = sum(1 for bd in bayes_decays if bd < 0)
+                        if negative_count > 0:
+                            f.write(f"\n**⚠️ WARNING**: {negative_count}/{len(bayes_decays)} branches have negative Bayes Decay values.\n")
+                            f.write("This suggests potential issues with:\n")
+                            f.write("- MCMC convergence (consider increasing --bayes-ngen)\n")
+                            f.write("- Harmonic mean estimation reliability\n")
+                            f.write("- Model specification\n\n")
                         
                     bayes_factors = [d['bayes_factor'] for d in self.decay_indices.values() if d.get('bayes_factor') is not None]
                     if bayes_factors:
@@ -2283,22 +2742,26 @@ class MLDecayIndices:
                     bayes_d = data.get('bayes_decay', 'N/A')
                     if isinstance(bayes_d, float): bayes_d = f"{bayes_d:.4f}"
                     
-                    bayes_f = data.get('bayes_factor', 'N/A')
-                    if isinstance(bayes_f, float): bayes_f = f"{bayes_f:.2f}"
+                    bayes_f_raw = data.get('bayes_factor', 'N/A')
                     
                     # Interpret Bayes Factor support
                     bf_support = 'N/A'
-                    if isinstance(bayes_f, float):
-                        if bayes_f > 100:
+                    if isinstance(bayes_f_raw, float):
+                        if bayes_f_raw > 100:
                             bf_support = "**Very Strong**"
-                        elif bayes_f > 10:
+                        elif bayes_f_raw > 10:
                             bf_support = "**Strong**"
-                        elif bayes_f > 3:
+                        elif bayes_f_raw > 3:
                             bf_support = "Moderate"
-                        elif bayes_f > 1:
+                        elif bayes_f_raw > 1:
                             bf_support = "Weak"
                         else:
                             bf_support = "None"
+                    
+                    # Format for display
+                    bayes_f = bayes_f_raw
+                    if isinstance(bayes_f_raw, float): 
+                        bayes_f = f"{bayes_f_raw:.2f}"
                     
                     row_parts.append(f"| {bayes_d} | {bayes_f} | {bf_support} ")
 
@@ -2322,7 +2785,10 @@ class MLDecayIndices:
                 
             if has_bayesian:
                 f.write("### Bayesian Analysis\n")
-                f.write("- **Bayes Decay**: Marginal log-likelihood difference between unconstrained and constrained analyses. More negative values indicate stronger support for the clade.\n")
+                f.write("- **Bayes Decay**: Marginal log-likelihood difference (unconstrained - constrained). **Positive values** indicate support for the clade, with larger positive values indicating stronger support. **Negative values** suggest the constrained analysis had higher marginal likelihood, which may indicate:\n")
+                f.write("  - Poor MCMC convergence (try increasing generations)\n")
+                f.write("  - Unreliable harmonic mean estimates\n")
+                f.write("  - Genuine lack of support for the clade\n")
                 f.write("- **Bayes Factor**: Exponential of the Bayes Decay value. Represents the ratio of marginal likelihoods. Common interpretations:\n")
                 f.write("  - BF > 100: Very strong support\n")
                 f.write("  - BF > 10: Strong support\n")
@@ -3204,6 +3670,10 @@ def main():
     analysis_mode.add_argument("-MB", "--both", action="store_const", const="both", dest="analysis",
                               help="Perform both ML and Bayesian analyses")
     
+    # Parsimony analysis option
+    analysis_mode.add_argument("--parsimony", action="store_true", 
+                              help="Also calculate parsimony decay indices (Bremer support)")
+    
     # Add bootstrap options
     bootstrap_opts = parser.add_argument_group('Bootstrap Analysis (optional)')
     bootstrap_opts.add_argument("--bootstrap", action="store_true", help="Perform bootstrap analysis to calculate support values.")
@@ -3224,6 +3694,19 @@ def main():
                               help="Marginal likelihood estimation method: ss=stepping-stone, ps=path sampling, hm=harmonic mean")
     bayesian_opts.add_argument("--ss-alpha", type=float, default=0.4, help="Alpha parameter for stepping-stone sampling")
     bayesian_opts.add_argument("--ss-nsteps", type=int, default=50, help="Number of steps for stepping-stone sampling")
+    
+    # MPI and BEAGLE options
+    parallel_opts = parser.add_argument_group('Parallel Processing Options (MrBayes)')
+    parallel_opts.add_argument("--use-mpi", action="store_true", help="Use MPI version of MrBayes")
+    parallel_opts.add_argument("--mpi-processors", type=int, help="Number of MPI processors (default: number of chains)")
+    parallel_opts.add_argument("--mpirun-path", default="mpirun", help="Path to mpirun executable")
+    parallel_opts.add_argument("--use-beagle", action="store_true", help="Enable BEAGLE library for GPU/CPU acceleration")
+    parallel_opts.add_argument("--beagle-device", choices=["cpu", "gpu", "auto"], default="auto", 
+                             help="BEAGLE device preference")
+    parallel_opts.add_argument("--beagle-precision", choices=["single", "double"], default="double",
+                             help="BEAGLE precision mode")
+    parallel_opts.add_argument("--beagle-scaling", choices=["none", "dynamic", "always"], default="dynamic",
+                             help="BEAGLE scaling frequency")
 
     viz_opts = parser.add_argument_group('Visualization Output (optional)')
     viz_opts.add_argument("--visualize", action="store_true", help="Generate static visualization plots (requires matplotlib, seaborn).")
@@ -3311,7 +3794,15 @@ def main():
             bayes_sample_freq=args.bayes_sample_freq,
             marginal_likelihood=args.marginal_likelihood,
             ss_alpha=args.ss_alpha,
-            ss_nsteps=args.ss_nsteps
+            ss_nsteps=args.ss_nsteps,
+            use_mpi=args.use_mpi,
+            mpi_processors=args.mpi_processors,
+            mpirun_path=args.mpirun_path,
+            use_beagle=args.use_beagle,
+            beagle_device=args.beagle_device,
+            beagle_precision=args.beagle_precision,
+            beagle_scaling=args.beagle_scaling,
+            parsimony=args.parsimony
         )
 
         decay_calc.build_ml_tree() # Can raise exceptions

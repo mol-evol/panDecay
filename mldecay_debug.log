@@ -1,14 +1,15 @@
-2025-06-27 12:19:31,707 - __main__ - INFO - Debug logging enabled. Detailed log: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/mldecay_debug.log
-2025-06-27 12:19:31,707 - __main__ - INFO - PAUP* will be configured to use up to 12 thread(s).
-2025-06-27 12:19:31,708 - __main__ - INFO - Using temporary directory: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_121931
-2025-06-27 12:19:31,725 - __main__ - INFO - Loaded alignment: 12 sequences, 898 sites.
-2025-06-27 12:19:31,726 - __main__ - INFO - Converted alignment to NEXUS: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_121931/alignment.nex
-2025-06-27 12:19:31,726 - __main__ - INFO - Building maximum likelihood tree...
-2025-06-27 12:19:31,727 - __main__ - DEBUG - ML search PAUP* script (/Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_121931/ml_search.nex):
+2025-06-27 18:41:49,886 - __main__ - INFO - Debug logging enabled. Detailed log: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/mldecay_debug.log
+2025-06-27 18:41:49,886 - __main__ - INFO - Using 'auto' threads: PAUP* will be configured for 14 thread(s) (leaving some for system).
+2025-06-27 18:41:49,886 - __main__ - INFO - PAUP* will be configured to use up to 14 thread(s).
+2025-06-27 18:41:49,886 - __main__ - INFO - Using temporary directory: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149
+2025-06-27 18:41:49,902 - __main__ - INFO - Loaded alignment: 12 sequences, 898 sites.
+2025-06-27 18:41:49,903 - __main__ - INFO - Converted alignment to NEXUS: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/alignment.nex
+2025-06-27 18:41:49,903 - __main__ - INFO - Building maximum likelihood tree...
+2025-06-27 18:41:49,904 - __main__ - DEBUG - ML search PAUP* script (/Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/ml_search.nex):
 #NEXUS
 begin paup;
 execute alignment.nex;
-    lset nthreads=12 nst=6 rmatrix=estimate basefreq=estimate rates=equal pinvar=0;
+    lset nthreads=14 nst=1 basefreq=empirical rates=equal pinvar=0;
     set criterion=likelihood;
 hsearch start=stepwise addseq=random nreps=10;
 savetrees file=ml_tree.tre format=newick brlens=yes replace=yes;
@@ -16,13 +17,13 @@ lscores 1 / scorefile=ml_score.txt replace=yes;
 quit;
 end;
 
-2025-06-27 12:19:31,727 - __main__ - INFO - Running PAUP* command file: ml_search.nex (Log: paup_ml.log)
-2025-06-27 12:21:25,339 - __main__ - DEBUG - PAUP* output saved to: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_121931/paup_ml.log
-2025-06-27 12:21:25,339 - __main__ - DEBUG - PAUP* stdout sample (from capture):
+2025-06-27 18:41:49,904 - __main__ - INFO - Running PAUP* command file: ml_search.nex (Log: paup_ml.log)
+2025-06-27 18:41:51,516 - __main__ - DEBUG - PAUP* output saved to: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/paup_ml.log
+2025-06-27 18:41:51,516 - __main__ - DEBUG - PAUP* stdout sample (from capture):
 
 P A U P *
 Version 4.0a (build 168) for macOS (built on Aug  2 2020 at 06:41:30)
-Fri Jun 27 12:19:31 2025
+Fri Jun 27 18:41:50 2025
 
         -----------------------------NOTICE-----------------------------
           This is a test version that is still changing rapidly.
@@ -33,34 +34,71 @@ Running on Apple M3 Max
     16 CPU cores on 1 socket
     Executable built for Intel(R) 64 architecture
     Compiled using Int...
-2025-06-27 12:21:25,339 - __main__ - DEBUG - PAUP* stderr sample (from capture):
+2025-06-27 18:41:51,518 - __main__ - DEBUG - Score file (/Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/ml_score.txt) content:
+Tree	-lnL
+1	6303.66091072
 
-Saving trees...
-
-[##################################################] 100.0% 
-...
-2025-06-27 12:21:25,345 - __main__ - DEBUG - Score file (/Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_121931/ml_score.txt) content:
-Tree	-lnL	piA	piC	piG	piT	rAC	rAG	rAT	rCG	rCT	rGT
-1	5934.14700732	0.30518312	0.26960497	0.13253340	0.29267852	15.18367299	34.81865134	7.24545713	3.59780004	48.03881547	1.00000000
-
-2025-06-27 12:21:25,347 - __main__ - DEBUG - Found LNL column at index 1 in header: Tree	-lnL	piA	piC	piG	piT	rAC	rAG	rAT	rCG	rCT	rGT
-2025-06-27 12:21:25,347 - __main__ - INFO - Parsed log-likelihood from /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_121931/ml_score.txt: 5934.14700732
-2025-06-27 12:21:25,352 - __main__ - DEBUG - Original tree content: '(Lemur_catta:0,(((((((Homo_sapiens:0.040428,Pan_troglodytes:0.052735):0.017691,Gorilla_gorilla:0.054163):0.050949,Orangutan:0.090098):0.026958,Gibbon:0.110642):0.055869,(((Macaca_fuscata:0.014821,Macaca_mulatta:0.021488):0.029506,Macaca_fascicularis:0.047127):0.031461,Macaca_sylvanus:0.059087):0.119612):0.047370,Saimiri_sciureus:0.198635):0.095800,Tarsius_syrichta:0.201020):0.147980);
+2025-06-27 18:41:51,518 - __main__ - DEBUG - Found LNL column at index 1 in header: Tree	-lnL
+2025-06-27 18:41:51,518 - __main__ - INFO - Parsed log-likelihood from /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/ml_score.txt: 6303.66091072
+2025-06-27 18:41:51,522 - __main__ - DEBUG - Original tree content: '(Lemur_catta:0,(((((((Homo_sapiens:0.040412,Pan_troglodytes:0.053755):0.020013,Gorilla_gorilla:0.053398):0.051542,Orangutan:0.089475):0.029468,Gibbon:0.107202):0.051505,(((Macaca_fuscata:0.015066,Macaca_mulatta:0.021421):0.029812,Macaca_fascicularis:0.046434):0.031178,Macaca_sylvanus:0.058277):0.119258):0.051144,Saimiri_sciureus:0.177635):0.089180,Tarsius_syrichta:0.181970):0.134644);
 '
-2025-06-27 12:21:25,352 - __main__ - DEBUG - Cleaned tree content: '(Lemur_catta:0,(((((((Homo_sapiens:0.040428,Pan_troglodytes:0.052735):0.017691,Gorilla_gorilla:0.054163):0.050949,Orangutan:0.090098):0.026958,Gibbon:0.110642):0.055869,(((Macaca_fuscata:0.014821,Macaca_mulatta:0.021488):0.029506,Macaca_fascicularis:0.047127):0.031461,Macaca_sylvanus:0.059087):0.119612):0.047370,Saimiri_sciureus:0.198635):0.095800,Tarsius_syrichta:0.201020):0.147980);'
-2025-06-27 12:21:25,352 - __main__ - INFO - Cleaned tree file /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_121931/ml_tree.tre - removed metadata after semicolon
-2025-06-27 12:21:25,354 - __main__ - INFO - Successfully built ML tree. Log-likelihood: 5934.14700732
-2025-06-27 12:21:25,354 - __main__ - INFO - Calculating combined ML and Bayesian decay indices...
-2025-06-27 12:21:25,354 - __main__ - INFO - Calculating branch support (decay indices)...
-2025-06-27 12:21:25,355 - __main__ - INFO - ML tree has 11 internal branches to test.
-2025-06-27 12:21:25,355 - __main__ - INFO - Skipping trivial branch 1 (taxa: 12/12).
-2025-06-27 12:21:25,355 - __main__ - INFO - Skipping trivial branch 2 (taxa: 11/12).
-2025-06-27 12:21:25,355 - __main__ - INFO - Processing branch 3/11 (taxa: 10)
-2025-06-27 12:21:25,355 - __main__ - DEBUG - Constraint search 3 script (/Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_121931/constraint_search_3.nex):
+2025-06-27 18:41:51,522 - __main__ - DEBUG - Cleaned tree content: '(Lemur_catta:0,(((((((Homo_sapiens:0.040412,Pan_troglodytes:0.053755):0.020013,Gorilla_gorilla:0.053398):0.051542,Orangutan:0.089475):0.029468,Gibbon:0.107202):0.051505,(((Macaca_fuscata:0.015066,Macaca_mulatta:0.021421):0.029812,Macaca_fascicularis:0.046434):0.031178,Macaca_sylvanus:0.058277):0.119258):0.051144,Saimiri_sciureus:0.177635):0.089180,Tarsius_syrichta:0.181970):0.134644);'
+2025-06-27 18:41:51,522 - __main__ - INFO - Cleaned tree file /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/ml_tree.tre - removed metadata after semicolon
+2025-06-27 18:41:51,525 - __main__ - INFO - Successfully built ML tree. Log-likelihood: 6303.66091072
+2025-06-27 18:41:51,525 - __main__ - INFO - Running bootstrap analysis with 25 replicates...
+2025-06-27 18:41:51,525 - __main__ - INFO - Running bootstrap analysis with 25 replicates...
+2025-06-27 18:41:51,526 - __main__ - DEBUG - Bootstrap PAUP* script (/Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/bootstrap_search.nex):
 #NEXUS
 begin paup;
 execute alignment.nex;
-    lset nthreads=12 nst=6 rmatrix=estimate basefreq=estimate rates=equal pinvar=0;
+    lset nthreads=14 nst=1 basefreq=empirical rates=equal pinvar=0;
+    set criterion=likelihood;
+set criterion=likelihood;
+hsearch;
+bootstrap nreps=25 search=heuristic keepall=no conlevel=50 / start=stepwise addseq=random nreps=1;
+describetrees 1 / brlens=yes;
+savetrees from=1 to=1 file=bootstrap_trees.tre format=newick brlens=yes replace=yes supportValues=nodeLabels;
+quit;
+end;
+
+2025-06-27 18:41:51,526 - __main__ - INFO - Running PAUP* command file: bootstrap_search.nex (Log: paup_bootstrap.log)
+2025-06-27 18:42:09,658 - __main__ - DEBUG - PAUP* output saved to: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/paup_bootstrap.log
+2025-06-27 18:42:09,658 - __main__ - DEBUG - PAUP* stdout sample (from capture):
+
+P A U P *
+Version 4.0a (build 168) for macOS (built on Aug  2 2020 at 06:41:30)
+Fri Jun 27 18:41:51 2025
+
+        -----------------------------NOTICE-----------------------------
+          This is a test version that is still changing rapidly.
+          Please report bugs to dave@phylosolutions.com
+        ----------------------------------------------------------------
+
+Running on Apple M3 Max
+    16 CPU cores on 1 socket
+    Executable built for Intel(R) 64 architecture
+    Compiled using Int...
+2025-06-27 18:42:09,661 - __main__ - DEBUG - Bootstrap tree file content:
+(Lemur_catta,((((((Homo_sapiens,Pan_troglodytes)68,Gorilla_gorilla)100,Orangutan)88,Gibbon)100,(((Macaca_fuscata,Macaca_mulatta)96,Macaca_fascicularis)96,Macaca_sylvanus)100)100,Saimiri_sciureus)100,Tarsius_syrichta)100;
+
+2025-06-27 18:42:09,662 - __main__ - DEBUG - Original tree content: '(Lemur_catta,((((((Homo_sapiens,Pan_troglodytes)68,Gorilla_gorilla)100,Orangutan)88,Gibbon)100,(((Macaca_fuscata,Macaca_mulatta)96,Macaca_fascicularis)96,Macaca_sylvanus)100)100,Saimiri_sciureus)100,Tarsius_syrichta)100;
+'
+2025-06-27 18:42:09,662 - __main__ - DEBUG - Cleaned tree content: '(Lemur_catta,((((((Homo_sapiens,Pan_troglodytes)68,Gorilla_gorilla)100,Orangutan)88,Gibbon)100,(((Macaca_fuscata,Macaca_mulatta)96,Macaca_fascicularis)96,Macaca_sylvanus)100)100,Saimiri_sciureus)100,Tarsius_syrichta)100;'
+2025-06-27 18:42:09,662 - __main__ - INFO - Cleaned tree file /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/bootstrap_trees.tre - removed metadata after semicolon
+2025-06-27 18:42:09,663 - __main__ - DEBUG - Cleaned bootstrap tree file content:
+(Lemur_catta,((((((Homo_sapiens,Pan_troglodytes)68,Gorilla_gorilla)100,Orangutan)88,Gibbon)100,(((Macaca_fuscata,Macaca_mulatta)96,Macaca_fascicularis)96,Macaca_sylvanus)100)100,Saimiri_sciureus)100,Tarsius_syrichta)100;
+2025-06-27 18:42:09,664 - __main__ - INFO - Bootstrap analysis complete with 25 replicates and bootstrap values
+2025-06-27 18:42:09,664 - __main__ - INFO - Calculating combined ML and Bayesian decay indices...
+2025-06-27 18:42:09,664 - __main__ - INFO - Calculating branch support (decay indices)...
+2025-06-27 18:42:09,664 - __main__ - INFO - ML tree has 11 internal branches to test.
+2025-06-27 18:42:09,664 - __main__ - INFO - Skipping trivial branch 1 (taxa: 12/12).
+2025-06-27 18:42:09,664 - __main__ - INFO - Skipping trivial branch 2 (taxa: 11/12).
+2025-06-27 18:42:09,665 - __main__ - INFO - Processing branch 3/11 (taxa: 10)
+2025-06-27 18:42:09,665 - __main__ - DEBUG - Constraint search 3 script (/Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/constraint_search_3.nex):
+#NEXUS
+begin paup;
+execute alignment.nex;
+    lset nthreads=14 nst=1 basefreq=empirical rates=equal pinvar=0;
     set criterion=likelihood;
 constraints clade_constraint (MONOPHYLY) = ((Homo_sapiens, Pan_troglodytes, Gorilla_gorilla, Orangutan, Gibbon, Macaca_fuscata, Macaca_mulatta, Macaca_fascicularis, Macaca_sylvanus, Saimiri_sciureus));
 set maxtrees=100 increase=auto;
@@ -71,4 +109,594 @@ lscores 1 / scorefile=constraint_score_3.txt replace=yes;
 quit;
 end;
 
-2025-06-27 12:21:25,355 - __main__ - INFO - Running PAUP* command file: constraint_search_3.nex (Log: paup_constraint_3.log)
+2025-06-27 18:42:09,665 - __main__ - INFO - Running PAUP* command file: constraint_search_3.nex (Log: paup_constraint_3.log)
+2025-06-27 18:42:13,399 - __main__ - DEBUG - PAUP* output saved to: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/paup_constraint_3.log
+2025-06-27 18:42:13,399 - __main__ - DEBUG - PAUP* stdout sample (from capture):
+
+P A U P *
+Version 4.0a (build 168) for macOS (built on Aug  2 2020 at 06:41:30)
+Fri Jun 27 18:42:10 2025
+
+        -----------------------------NOTICE-----------------------------
+          This is a test version that is still changing rapidly.
+          Please report bugs to dave@phylosolutions.com
+        ----------------------------------------------------------------
+
+Running on Apple M3 Max
+    16 CPU cores on 1 socket
+    Executable built for Intel(R) 64 architecture
+    Compiled using Int...
+2025-06-27 18:42:13,404 - __main__ - DEBUG - Score file (/Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/constraint_score_3.txt) content:
+Tree	-lnL
+1	6337.53371970
+
+2025-06-27 18:42:13,404 - __main__ - DEBUG - Found LNL column at index 1 in header: Tree	-lnL
+2025-06-27 18:42:13,404 - __main__ - INFO - Parsed log-likelihood from /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/constraint_score_3.txt: 6337.5337197
+2025-06-27 18:42:13,405 - __main__ - INFO - Processing branch 4/11 (taxa: 9)
+2025-06-27 18:42:13,405 - __main__ - DEBUG - Constraint search 4 script (/Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/constraint_search_4.nex):
+#NEXUS
+begin paup;
+execute alignment.nex;
+    lset nthreads=14 nst=1 basefreq=empirical rates=equal pinvar=0;
+    set criterion=likelihood;
+constraints clade_constraint (MONOPHYLY) = ((Homo_sapiens, Pan_troglodytes, Gorilla_gorilla, Orangutan, Gibbon, Macaca_fuscata, Macaca_mulatta, Macaca_fascicularis, Macaca_sylvanus));
+set maxtrees=100 increase=auto;
+hsearch start=stepwise addseq=random nreps=1;
+hsearch start=1 enforce=yes converse=yes constraints=clade_constraint;
+savetrees file=constraint_tree_4.tre format=newick brlens=yes replace=yes;
+lscores 1 / scorefile=constraint_score_4.txt replace=yes;
+quit;
+end;
+
+2025-06-27 18:42:13,405 - __main__ - INFO - Running PAUP* command file: constraint_search_4.nex (Log: paup_constraint_4.log)
+2025-06-27 18:42:17,380 - __main__ - DEBUG - PAUP* output saved to: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/paup_constraint_4.log
+2025-06-27 18:42:17,381 - __main__ - DEBUG - PAUP* stdout sample (from capture):
+
+P A U P *
+Version 4.0a (build 168) for macOS (built on Aug  2 2020 at 06:41:30)
+Fri Jun 27 18:42:14 2025
+
+        -----------------------------NOTICE-----------------------------
+          This is a test version that is still changing rapidly.
+          Please report bugs to dave@phylosolutions.com
+        ----------------------------------------------------------------
+
+Running on Apple M3 Max
+    16 CPU cores on 1 socket
+    Executable built for Intel(R) 64 architecture
+    Compiled using Int...
+2025-06-27 18:42:17,382 - __main__ - DEBUG - Score file (/Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/constraint_score_4.txt) content:
+Tree	-lnL
+1	6315.69546821
+
+2025-06-27 18:42:17,382 - __main__ - DEBUG - Found LNL column at index 1 in header: Tree	-lnL
+2025-06-27 18:42:17,382 - __main__ - INFO - Parsed log-likelihood from /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/constraint_score_4.txt: 6315.69546821
+2025-06-27 18:42:17,383 - __main__ - INFO - Processing branch 5/11 (taxa: 5)
+2025-06-27 18:42:17,383 - __main__ - DEBUG - Constraint search 5 script (/Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/constraint_search_5.nex):
+#NEXUS
+begin paup;
+execute alignment.nex;
+    lset nthreads=14 nst=1 basefreq=empirical rates=equal pinvar=0;
+    set criterion=likelihood;
+constraints clade_constraint (MONOPHYLY) = ((Homo_sapiens, Pan_troglodytes, Gorilla_gorilla, Orangutan, Gibbon));
+set maxtrees=100 increase=auto;
+hsearch start=stepwise addseq=random nreps=1;
+hsearch start=1 enforce=yes converse=yes constraints=clade_constraint;
+savetrees file=constraint_tree_5.tre format=newick brlens=yes replace=yes;
+lscores 1 / scorefile=constraint_score_5.txt replace=yes;
+quit;
+end;
+
+2025-06-27 18:42:17,383 - __main__ - INFO - Running PAUP* command file: constraint_search_5.nex (Log: paup_constraint_5.log)
+2025-06-27 18:42:20,097 - __main__ - DEBUG - PAUP* output saved to: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/paup_constraint_5.log
+2025-06-27 18:42:20,097 - __main__ - DEBUG - PAUP* stdout sample (from capture):
+
+P A U P *
+Version 4.0a (build 168) for macOS (built on Aug  2 2020 at 06:41:30)
+Fri Jun 27 18:42:17 2025
+
+        -----------------------------NOTICE-----------------------------
+          This is a test version that is still changing rapidly.
+          Please report bugs to dave@phylosolutions.com
+        ----------------------------------------------------------------
+
+Running on Apple M3 Max
+    16 CPU cores on 1 socket
+    Executable built for Intel(R) 64 architecture
+    Compiled using Int...
+2025-06-27 18:42:20,099 - __main__ - DEBUG - Score file (/Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/constraint_score_5.txt) content:
+Tree	-lnL
+1	6327.78045034
+
+2025-06-27 18:42:20,099 - __main__ - DEBUG - Found LNL column at index 1 in header: Tree	-lnL
+2025-06-27 18:42:20,099 - __main__ - INFO - Parsed log-likelihood from /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/constraint_score_5.txt: 6327.78045034
+2025-06-27 18:42:20,099 - __main__ - INFO - Processing branch 6/11 (taxa: 4)
+2025-06-27 18:42:20,099 - __main__ - DEBUG - Constraint search 6 script (/Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/constraint_search_6.nex):
+#NEXUS
+begin paup;
+execute alignment.nex;
+    lset nthreads=14 nst=1 basefreq=empirical rates=equal pinvar=0;
+    set criterion=likelihood;
+constraints clade_constraint (MONOPHYLY) = ((Homo_sapiens, Pan_troglodytes, Gorilla_gorilla, Orangutan));
+set maxtrees=100 increase=auto;
+hsearch start=stepwise addseq=random nreps=1;
+hsearch start=1 enforce=yes converse=yes constraints=clade_constraint;
+savetrees file=constraint_tree_6.tre format=newick brlens=yes replace=yes;
+lscores 1 / scorefile=constraint_score_6.txt replace=yes;
+quit;
+end;
+
+2025-06-27 18:42:20,100 - __main__ - INFO - Running PAUP* command file: constraint_search_6.nex (Log: paup_constraint_6.log)
+2025-06-27 18:42:22,903 - __main__ - DEBUG - PAUP* output saved to: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/paup_constraint_6.log
+2025-06-27 18:42:22,903 - __main__ - DEBUG - PAUP* stdout sample (from capture):
+
+P A U P *
+Version 4.0a (build 168) for macOS (built on Aug  2 2020 at 06:41:30)
+Fri Jun 27 18:42:20 2025
+
+        -----------------------------NOTICE-----------------------------
+          This is a test version that is still changing rapidly.
+          Please report bugs to dave@phylosolutions.com
+        ----------------------------------------------------------------
+
+Running on Apple M3 Max
+    16 CPU cores on 1 socket
+    Executable built for Intel(R) 64 architecture
+    Compiled using Int...
+2025-06-27 18:42:22,905 - __main__ - DEBUG - Score file (/Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/constraint_score_6.txt) content:
+Tree	-lnL
+1	6314.34413429
+
+2025-06-27 18:42:22,905 - __main__ - DEBUG - Found LNL column at index 1 in header: Tree	-lnL
+2025-06-27 18:42:22,905 - __main__ - INFO - Parsed log-likelihood from /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/constraint_score_6.txt: 6314.34413429
+2025-06-27 18:42:22,906 - __main__ - INFO - Processing branch 7/11 (taxa: 3)
+2025-06-27 18:42:22,906 - __main__ - DEBUG - Constraint search 7 script (/Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/constraint_search_7.nex):
+#NEXUS
+begin paup;
+execute alignment.nex;
+    lset nthreads=14 nst=1 basefreq=empirical rates=equal pinvar=0;
+    set criterion=likelihood;
+constraints clade_constraint (MONOPHYLY) = ((Homo_sapiens, Pan_troglodytes, Gorilla_gorilla));
+set maxtrees=100 increase=auto;
+hsearch start=stepwise addseq=random nreps=1;
+hsearch start=1 enforce=yes converse=yes constraints=clade_constraint;
+savetrees file=constraint_tree_7.tre format=newick brlens=yes replace=yes;
+lscores 1 / scorefile=constraint_score_7.txt replace=yes;
+quit;
+end;
+
+2025-06-27 18:42:22,906 - __main__ - INFO - Running PAUP* command file: constraint_search_7.nex (Log: paup_constraint_7.log)
+2025-06-27 18:42:25,238 - __main__ - DEBUG - PAUP* output saved to: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/paup_constraint_7.log
+2025-06-27 18:42:25,239 - __main__ - DEBUG - PAUP* stdout sample (from capture):
+
+P A U P *
+Version 4.0a (build 168) for macOS (built on Aug  2 2020 at 06:41:30)
+Fri Jun 27 18:42:22 2025
+
+        -----------------------------NOTICE-----------------------------
+          This is a test version that is still changing rapidly.
+          Please report bugs to dave@phylosolutions.com
+        ----------------------------------------------------------------
+
+Running on Apple M3 Max
+    16 CPU cores on 1 socket
+    Executable built for Intel(R) 64 architecture
+    Compiled using Int...
+2025-06-27 18:42:25,240 - __main__ - DEBUG - Score file (/Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/constraint_score_7.txt) content:
+Tree	-lnL
+1	6349.15820447
+
+2025-06-27 18:42:25,240 - __main__ - DEBUG - Found LNL column at index 1 in header: Tree	-lnL
+2025-06-27 18:42:25,240 - __main__ - INFO - Parsed log-likelihood from /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/constraint_score_7.txt: 6349.15820447
+2025-06-27 18:42:25,240 - __main__ - INFO - Processing branch 8/11 (taxa: 2)
+2025-06-27 18:42:25,240 - __main__ - DEBUG - Constraint search 8 script (/Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/constraint_search_8.nex):
+#NEXUS
+begin paup;
+execute alignment.nex;
+    lset nthreads=14 nst=1 basefreq=empirical rates=equal pinvar=0;
+    set criterion=likelihood;
+constraints clade_constraint (MONOPHYLY) = ((Homo_sapiens, Pan_troglodytes));
+set maxtrees=100 increase=auto;
+hsearch start=stepwise addseq=random nreps=1;
+hsearch start=1 enforce=yes converse=yes constraints=clade_constraint;
+savetrees file=constraint_tree_8.tre format=newick brlens=yes replace=yes;
+lscores 1 / scorefile=constraint_score_8.txt replace=yes;
+quit;
+end;
+
+2025-06-27 18:42:25,240 - __main__ - INFO - Running PAUP* command file: constraint_search_8.nex (Log: paup_constraint_8.log)
+2025-06-27 18:42:27,803 - __main__ - DEBUG - PAUP* output saved to: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/paup_constraint_8.log
+2025-06-27 18:42:27,803 - __main__ - DEBUG - PAUP* stdout sample (from capture):
+
+P A U P *
+Version 4.0a (build 168) for macOS (built on Aug  2 2020 at 06:41:30)
+Fri Jun 27 18:42:25 2025
+
+        -----------------------------NOTICE-----------------------------
+          This is a test version that is still changing rapidly.
+          Please report bugs to dave@phylosolutions.com
+        ----------------------------------------------------------------
+
+Running on Apple M3 Max
+    16 CPU cores on 1 socket
+    Executable built for Intel(R) 64 architecture
+    Compiled using Int...
+2025-06-27 18:42:27,806 - __main__ - DEBUG - Score file (/Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/constraint_score_8.txt) content:
+Tree	-lnL
+1	6304.45628517
+
+2025-06-27 18:42:27,806 - __main__ - DEBUG - Found LNL column at index 1 in header: Tree	-lnL
+2025-06-27 18:42:27,806 - __main__ - INFO - Parsed log-likelihood from /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/constraint_score_8.txt: 6304.45628517
+2025-06-27 18:42:27,806 - __main__ - INFO - Processing branch 9/11 (taxa: 4)
+2025-06-27 18:42:27,807 - __main__ - DEBUG - Constraint search 9 script (/Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/constraint_search_9.nex):
+#NEXUS
+begin paup;
+execute alignment.nex;
+    lset nthreads=14 nst=1 basefreq=empirical rates=equal pinvar=0;
+    set criterion=likelihood;
+constraints clade_constraint (MONOPHYLY) = ((Macaca_fuscata, Macaca_mulatta, Macaca_fascicularis, Macaca_sylvanus));
+set maxtrees=100 increase=auto;
+hsearch start=stepwise addseq=random nreps=1;
+hsearch start=1 enforce=yes converse=yes constraints=clade_constraint;
+savetrees file=constraint_tree_9.tre format=newick brlens=yes replace=yes;
+lscores 1 / scorefile=constraint_score_9.txt replace=yes;
+quit;
+end;
+
+2025-06-27 18:42:27,807 - __main__ - INFO - Running PAUP* command file: constraint_search_9.nex (Log: paup_constraint_9.log)
+2025-06-27 18:42:31,043 - __main__ - DEBUG - PAUP* output saved to: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/paup_constraint_9.log
+2025-06-27 18:42:31,043 - __main__ - DEBUG - PAUP* stdout sample (from capture):
+
+P A U P *
+Version 4.0a (build 168) for macOS (built on Aug  2 2020 at 06:41:30)
+Fri Jun 27 18:42:27 2025
+
+        -----------------------------NOTICE-----------------------------
+          This is a test version that is still changing rapidly.
+          Please report bugs to dave@phylosolutions.com
+        ----------------------------------------------------------------
+
+Running on Apple M3 Max
+    16 CPU cores on 1 socket
+    Executable built for Intel(R) 64 architecture
+    Compiled using Int...
+2025-06-27 18:42:31,045 - __main__ - DEBUG - Score file (/Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/constraint_score_9.txt) content:
+Tree	-lnL
+1	6394.85555052
+
+2025-06-27 18:42:31,045 - __main__ - DEBUG - Found LNL column at index 1 in header: Tree	-lnL
+2025-06-27 18:42:31,045 - __main__ - INFO - Parsed log-likelihood from /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/constraint_score_9.txt: 6394.85555052
+2025-06-27 18:42:31,045 - __main__ - INFO - Processing branch 10/11 (taxa: 3)
+2025-06-27 18:42:31,046 - __main__ - DEBUG - Constraint search 10 script (/Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/constraint_search_10.nex):
+#NEXUS
+begin paup;
+execute alignment.nex;
+    lset nthreads=14 nst=1 basefreq=empirical rates=equal pinvar=0;
+    set criterion=likelihood;
+constraints clade_constraint (MONOPHYLY) = ((Macaca_fuscata, Macaca_mulatta, Macaca_fascicularis));
+set maxtrees=100 increase=auto;
+hsearch start=stepwise addseq=random nreps=1;
+hsearch start=1 enforce=yes converse=yes constraints=clade_constraint;
+savetrees file=constraint_tree_10.tre format=newick brlens=yes replace=yes;
+lscores 1 / scorefile=constraint_score_10.txt replace=yes;
+quit;
+end;
+
+2025-06-27 18:42:31,046 - __main__ - INFO - Running PAUP* command file: constraint_search_10.nex (Log: paup_constraint_10.log)
+2025-06-27 18:42:33,646 - __main__ - DEBUG - PAUP* output saved to: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/paup_constraint_10.log
+2025-06-27 18:42:33,646 - __main__ - DEBUG - PAUP* stdout sample (from capture):
+
+P A U P *
+Version 4.0a (build 168) for macOS (built on Aug  2 2020 at 06:41:30)
+Fri Jun 27 18:42:31 2025
+
+        -----------------------------NOTICE-----------------------------
+          This is a test version that is still changing rapidly.
+          Please report bugs to dave@phylosolutions.com
+        ----------------------------------------------------------------
+
+Running on Apple M3 Max
+    16 CPU cores on 1 socket
+    Executable built for Intel(R) 64 architecture
+    Compiled using Int...
+2025-06-27 18:42:33,648 - __main__ - DEBUG - Score file (/Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/constraint_score_10.txt) content:
+Tree	-lnL
+1	6319.76552079
+
+2025-06-27 18:42:33,648 - __main__ - DEBUG - Found LNL column at index 1 in header: Tree	-lnL
+2025-06-27 18:42:33,648 - __main__ - INFO - Parsed log-likelihood from /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/constraint_score_10.txt: 6319.76552079
+2025-06-27 18:42:33,649 - __main__ - INFO - Processing branch 11/11 (taxa: 2)
+2025-06-27 18:42:33,649 - __main__ - DEBUG - Constraint search 11 script (/Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/constraint_search_11.nex):
+#NEXUS
+begin paup;
+execute alignment.nex;
+    lset nthreads=14 nst=1 basefreq=empirical rates=equal pinvar=0;
+    set criterion=likelihood;
+constraints clade_constraint (MONOPHYLY) = ((Macaca_fuscata, Macaca_mulatta));
+set maxtrees=100 increase=auto;
+hsearch start=stepwise addseq=random nreps=1;
+hsearch start=1 enforce=yes converse=yes constraints=clade_constraint;
+savetrees file=constraint_tree_11.tre format=newick brlens=yes replace=yes;
+lscores 1 / scorefile=constraint_score_11.txt replace=yes;
+quit;
+end;
+
+2025-06-27 18:42:33,649 - __main__ - INFO - Running PAUP* command file: constraint_search_11.nex (Log: paup_constraint_11.log)
+2025-06-27 18:42:36,186 - __main__ - DEBUG - PAUP* output saved to: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/paup_constraint_11.log
+2025-06-27 18:42:36,186 - __main__ - DEBUG - PAUP* stdout sample (from capture):
+
+P A U P *
+Version 4.0a (build 168) for macOS (built on Aug  2 2020 at 06:41:30)
+Fri Jun 27 18:42:33 2025
+
+        -----------------------------NOTICE-----------------------------
+          This is a test version that is still changing rapidly.
+          Please report bugs to dave@phylosolutions.com
+        ----------------------------------------------------------------
+
+Running on Apple M3 Max
+    16 CPU cores on 1 socket
+    Executable built for Intel(R) 64 architecture
+    Compiled using Int...
+2025-06-27 18:42:36,189 - __main__ - DEBUG - Score file (/Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/constraint_score_11.txt) content:
+Tree	-lnL
+1	6338.11179154
+
+2025-06-27 18:42:36,189 - __main__ - DEBUG - Found LNL column at index 1 in header: Tree	-lnL
+2025-06-27 18:42:36,189 - __main__ - INFO - Parsed log-likelihood from /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/constraint_score_11.txt: 6338.11179154
+2025-06-27 18:42:36,189 - __main__ - INFO - Running AU test on 10 trees (1 ML + 9 constrained).
+2025-06-27 18:42:36,190 - __main__ - DEBUG - AU test PAUP* script (/Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/au_test.nex):
+#NEXUS
+begin paup;
+execute alignment.nex;
+    lset nthreads=14 nst=1 basefreq=empirical rates=equal pinvar=0;
+    set criterion=likelihood;
+gettrees file=ml_tree.tre mode=3 storebrlens=yes;
+gettrees file=constraint_tree_3.tre mode=7 storebrlens=yes;
+gettrees file=constraint_tree_4.tre mode=7 storebrlens=yes;
+gettrees file=constraint_tree_5.tre mode=7 storebrlens=yes;
+gettrees file=constraint_tree_6.tre mode=7 storebrlens=yes;
+gettrees file=constraint_tree_7.tre mode=7 storebrlens=yes;
+gettrees file=constraint_tree_8.tre mode=7 storebrlens=yes;
+gettrees file=constraint_tree_9.tre mode=7 storebrlens=yes;
+gettrees file=constraint_tree_10.tre mode=7 storebrlens=yes;
+gettrees file=constraint_tree_11.tre mode=7 storebrlens=yes;
+treeinfo;
+lscores 1-10 / scorefile=all_tree_scores.txt replace=yes;
+lscores 1-10 / autest=yes scorefile=au_test_results.txt replace=yes;
+log file=au_test_detailed.log replace=yes;
+describe 1-10 / plot=none;
+lscores 1-10;
+log stop;
+quit;
+end;
+
+2025-06-27 18:42:36,190 - __main__ - INFO - Running PAUP* command file: au_test.nex (Log: paup_au.log)
+2025-06-27 18:42:41,063 - __main__ - DEBUG - PAUP* output saved to: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/paup_au.log
+2025-06-27 18:42:41,063 - __main__ - DEBUG - PAUP* stdout sample (from capture):
+
+P A U P *
+Version 4.0a (build 168) for macOS (built on Aug  2 2020 at 06:41:30)
+Fri Jun 27 18:42:36 2025
+
+        -----------------------------NOTICE-----------------------------
+          This is a test version that is still changing rapidly.
+          Please report bugs to dave@phylosolutions.com
+        ----------------------------------------------------------------
+
+Running on Apple M3 Max
+    16 CPU cores on 1 socket
+    Executable built for Intel(R) 64 architecture
+    Compiled using Int...
+2025-06-27 18:42:41,063 - __main__ - DEBUG - PAUP* stderr sample (from capture):
+
+Bootstrap resampling for topology tests...
+
+[##########                                        ] 20.9% 
+[##########                                        ] 21.0% 
+[##########                                        ] 21.1% 
+[##########                                        ] 21.2% 
+[##########                                        ] 21.3% 
+[##########                                        ] 21.4% 
+[##########                                        ] 21.5% 
+[##########                        ...
+2025-06-27 18:42:41,066 - __main__ - DEBUG - AU test log file content (excerpt):
+--- STDOUT ---
+
+P A U P *
+Version 4.0a (build 168) for macOS (built on Aug  2 2020 at 06:41:30)
+Fri Jun 27 18:42:36 2025
+
+        -----------------------------NOTICE-----------------------------
+          This is a test version that is still changing rapidly.
+          Please report bugs to dave@phylosolutions.com
+        ----------------------------------------------------------------
+
+Running on Apple M3 Max
+    16 CPU cores on 1 socket
+    Executable built for Intel(R) 64 architecture
+    Compiled using Intel compiler (icc) 11.1.0 (build 20091012)
+    SSE vectorization enabled
+    SSSE3 instructions supported
+    Multithreading enabled using Pthreads
+
+Processing of file "~/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/au_test.nex"
+begins...
+
+Processing of file "~/Library/CloudStorage/Dropbox/Lab/James
+McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/alignment.nex" begins...
+
+Data read in DNA format
+
+Data matri...
+2025-06-27 18:42:41,066 - __main__ - DEBUG - Found detailed AU test results table:
+       1    6303.66091        (best)
+       7    6304.45629       0.79537  0.6061
+       5    6314.34413      10.68322  0.1105
+       3    6315.69547      12.03456  0.0751
+       9    6319.76552      16.10461  0.0490*
+       4    6327.78045      24.11954  0.0065*
+       2    6337.53372      33.87281      ~0*
+      10    6338.11179      34.45088  0.0082*
+       6    6349.15820      45.49729      ~0*
+       8    6394.85555      91.19464      ~0*
+  * P < 0.05
+2025-06-27 18:42:41,066 - __main__ - INFO - Successfully parsed detailed AU test results for 10 trees.
+2025-06-27 18:42:41,066 - __main__ - INFO - Calculated support values for 9 branches.
+2025-06-27 18:42:41,066 - __main__ - INFO - Starting Bayesian analysis phase...
+2025-06-27 18:42:41,066 - __main__ - INFO - Running Bayesian decay analysis using mrbayes
+2025-06-27 18:42:41,066 - __main__ - INFO - MCMC settings: 1000000 generations, 4 chains, sampling every 1000
+2025-06-27 18:42:41,066 - __main__ - INFO - MPI enabled: Using 8 processors with mpirun
+2025-06-27 18:42:41,066 - __main__ - WARNING - Bayesian analysis may take a long time (~400 seconds per run)
+2025-06-27 18:42:41,066 - __main__ - INFO - Running unconstrained Bayesian analysis...
+2025-06-27 18:42:41,067 - __main__ - INFO - Running MrBayes: mpirun -np 8 mb unc.nex in directory /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149
+2025-06-27 18:42:41,067 - __main__ - DEBUG - Working directory: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149
+2025-06-27 18:42:41,067 - __main__ - DEBUG - NEXUS file: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/unc.nex
+2025-06-27 18:42:41,067 - __main__ - DEBUG - MrBayes timeout set to 8000.0 seconds
+2025-06-27 18:43:23,171 - __main__ - INFO - MrBayes completed successfully for unc
+2025-06-27 18:43:23,171 - __main__ - DEBUG - Looking for MrBayes lstat file: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/unc.nex.lstat
+2025-06-27 18:43:23,171 - __main__ - INFO - Parsed harmonic mean marginal likelihood for unc: -6308.827
+2025-06-27 18:43:23,171 - __main__ - INFO - Parsing posterior probabilities from /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/unc.nex.con.tre
+2025-06-27 18:43:23,174 - __main__ - INFO - Found consensus tree with posterior probabilities
+2025-06-27 18:43:23,174 - __main__ - INFO - Extracted posterior probabilities for 0 clades
+2025-06-27 18:43:23,174 - __main__ - INFO - Unconstrained marginal likelihood: -6308.827
+2025-06-27 18:43:23,174 - __main__ - INFO - Running Bayesian constraint analysis for Clade_3 (taxa: 11)
+2025-06-27 18:43:23,175 - __main__ - INFO - Running MrBayes: mpirun -np 8 mb c_3.nex in directory /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149
+2025-06-27 18:43:23,175 - __main__ - DEBUG - Working directory: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149
+2025-06-27 18:43:23,175 - __main__ - DEBUG - NEXUS file: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/c_3.nex
+2025-06-27 18:43:23,175 - __main__ - DEBUG - MrBayes timeout set to 8000.0 seconds
+2025-06-27 18:44:07,787 - __main__ - INFO - MrBayes completed successfully for c_3
+2025-06-27 18:44:07,787 - __main__ - DEBUG - Looking for MrBayes lstat file: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/c_3.nex.lstat
+2025-06-27 18:44:07,789 - __main__ - INFO - Parsed harmonic mean marginal likelihood for c_3: -6307.073
+2025-06-27 18:44:07,789 - __main__ - INFO - Clade_3: Bayes decay = -1.7540, BF = 1.73e-01
+2025-06-27 18:44:07,789 - __main__ - INFO - Running Bayesian constraint analysis for Clade_4 (taxa: 10)
+2025-06-27 18:44:07,790 - __main__ - INFO - Running MrBayes: mpirun -np 8 mb c_4.nex in directory /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149
+2025-06-27 18:44:07,790 - __main__ - DEBUG - Working directory: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149
+2025-06-27 18:44:07,790 - __main__ - DEBUG - NEXUS file: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/c_4.nex
+2025-06-27 18:44:07,790 - __main__ - DEBUG - MrBayes timeout set to 8000.0 seconds
+2025-06-27 18:44:50,554 - __main__ - INFO - MrBayes completed successfully for c_4
+2025-06-27 18:44:50,555 - __main__ - DEBUG - Looking for MrBayes lstat file: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/c_4.nex.lstat
+2025-06-27 18:44:50,556 - __main__ - INFO - Parsed harmonic mean marginal likelihood for c_4: -6305.269
+2025-06-27 18:44:50,557 - __main__ - INFO - Clade_4: Bayes decay = -3.5580, BF = 2.85e-02
+2025-06-27 18:44:50,557 - __main__ - INFO - Running Bayesian constraint analysis for Clade_5 (taxa: 9)
+2025-06-27 18:44:50,558 - __main__ - INFO - Running MrBayes: mpirun -np 8 mb c_5.nex in directory /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149
+2025-06-27 18:44:50,558 - __main__ - DEBUG - Working directory: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149
+2025-06-27 18:44:50,558 - __main__ - DEBUG - NEXUS file: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/c_5.nex
+2025-06-27 18:44:50,558 - __main__ - DEBUG - MrBayes timeout set to 8000.0 seconds
+2025-06-27 18:45:35,412 - __main__ - INFO - MrBayes completed successfully for c_5
+2025-06-27 18:45:35,413 - __main__ - DEBUG - Looking for MrBayes lstat file: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/c_5.nex.lstat
+2025-06-27 18:45:35,414 - __main__ - INFO - Parsed harmonic mean marginal likelihood for c_5: -6304.37
+2025-06-27 18:45:35,414 - __main__ - INFO - Clade_5: Bayes decay = -4.4570, BF = 1.16e-02
+2025-06-27 18:45:35,414 - __main__ - INFO - Running Bayesian constraint analysis for Clade_6 (taxa: 5)
+2025-06-27 18:45:35,415 - __main__ - INFO - Running MrBayes: mpirun -np 8 mb c_6.nex in directory /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149
+2025-06-27 18:45:35,415 - __main__ - DEBUG - Working directory: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149
+2025-06-27 18:45:35,415 - __main__ - DEBUG - NEXUS file: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/c_6.nex
+2025-06-27 18:45:35,415 - __main__ - DEBUG - MrBayes timeout set to 8000.0 seconds
+2025-06-27 18:46:17,812 - __main__ - INFO - MrBayes completed successfully for c_6
+2025-06-27 18:46:17,812 - __main__ - DEBUG - Looking for MrBayes lstat file: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/c_6.nex.lstat
+2025-06-27 18:46:17,814 - __main__ - INFO - Parsed harmonic mean marginal likelihood for c_6: -6303.792
+2025-06-27 18:46:17,814 - __main__ - INFO - Clade_6: Bayes decay = -5.0350, BF = 6.51e-03
+2025-06-27 18:46:17,814 - __main__ - INFO - Running Bayesian constraint analysis for Clade_7 (taxa: 4)
+2025-06-27 18:46:17,815 - __main__ - INFO - Running MrBayes: mpirun -np 8 mb c_7.nex in directory /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149
+2025-06-27 18:46:17,815 - __main__ - DEBUG - Working directory: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149
+2025-06-27 18:46:17,816 - __main__ - DEBUG - NEXUS file: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/c_7.nex
+2025-06-27 18:46:17,816 - __main__ - DEBUG - MrBayes timeout set to 8000.0 seconds
+2025-06-27 18:47:02,461 - __main__ - INFO - MrBayes completed successfully for c_7
+2025-06-27 18:47:02,461 - __main__ - DEBUG - Looking for MrBayes lstat file: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/c_7.nex.lstat
+2025-06-27 18:47:02,466 - __main__ - INFO - Parsed harmonic mean marginal likelihood for c_7: -6305.368
+2025-06-27 18:47:02,466 - __main__ - INFO - Clade_7: Bayes decay = -3.4590, BF = 3.15e-02
+2025-06-27 18:47:02,466 - __main__ - INFO - Running Bayesian constraint analysis for Clade_8 (taxa: 3)
+2025-06-27 18:47:02,467 - __main__ - INFO - Running MrBayes: mpirun -np 8 mb c_8.nex in directory /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149
+2025-06-27 18:47:02,467 - __main__ - DEBUG - Working directory: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149
+2025-06-27 18:47:02,467 - __main__ - DEBUG - NEXUS file: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/c_8.nex
+2025-06-27 18:47:02,467 - __main__ - DEBUG - MrBayes timeout set to 8000.0 seconds
+2025-06-27 18:47:47,320 - __main__ - INFO - MrBayes completed successfully for c_8
+2025-06-27 18:47:47,320 - __main__ - DEBUG - Looking for MrBayes lstat file: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/c_8.nex.lstat
+2025-06-27 18:47:47,322 - __main__ - INFO - Parsed harmonic mean marginal likelihood for c_8: -6304.633
+2025-06-27 18:47:47,322 - __main__ - INFO - Clade_8: Bayes decay = -4.1940, BF = 1.51e-02
+2025-06-27 18:47:47,322 - __main__ - INFO - Running Bayesian constraint analysis for Clade_9 (taxa: 2)
+2025-06-27 18:47:47,323 - __main__ - INFO - Running MrBayes: mpirun -np 8 mb c_9.nex in directory /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149
+2025-06-27 18:47:47,323 - __main__ - DEBUG - Working directory: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149
+2025-06-27 18:47:47,323 - __main__ - DEBUG - NEXUS file: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/c_9.nex
+2025-06-27 18:47:47,323 - __main__ - DEBUG - MrBayes timeout set to 8000.0 seconds
+2025-06-27 18:48:33,123 - __main__ - INFO - MrBayes completed successfully for c_9
+2025-06-27 18:48:33,123 - __main__ - DEBUG - Looking for MrBayes lstat file: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/c_9.nex.lstat
+2025-06-27 18:48:33,129 - __main__ - INFO - Parsed harmonic mean marginal likelihood for c_9: -6304.848
+2025-06-27 18:48:33,129 - __main__ - INFO - Clade_9: Bayes decay = -3.9790, BF = 1.87e-02
+2025-06-27 18:48:33,129 - __main__ - INFO - Running Bayesian constraint analysis for Clade_10 (taxa: 4)
+2025-06-27 18:48:33,130 - __main__ - INFO - Running MrBayes: mpirun -np 8 mb c_10.nex in directory /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149
+2025-06-27 18:48:33,130 - __main__ - DEBUG - Working directory: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149
+2025-06-27 18:48:33,130 - __main__ - DEBUG - NEXUS file: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/c_10.nex
+2025-06-27 18:48:33,130 - __main__ - DEBUG - MrBayes timeout set to 8000.0 seconds
+2025-06-27 18:49:16,087 - __main__ - INFO - MrBayes completed successfully for c_10
+2025-06-27 18:49:16,088 - __main__ - DEBUG - Looking for MrBayes lstat file: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/c_10.nex.lstat
+2025-06-27 18:49:16,089 - __main__ - INFO - Parsed harmonic mean marginal likelihood for c_10: -6304.209
+2025-06-27 18:49:16,089 - __main__ - INFO - Clade_10: Bayes decay = -4.6180, BF = 9.87e-03
+2025-06-27 18:49:16,089 - __main__ - INFO - Running Bayesian constraint analysis for Clade_11 (taxa: 3)
+2025-06-27 18:49:16,090 - __main__ - INFO - Running MrBayes: mpirun -np 8 mb c_11.nex in directory /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149
+2025-06-27 18:49:16,090 - __main__ - DEBUG - Working directory: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149
+2025-06-27 18:49:16,090 - __main__ - DEBUG - NEXUS file: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/c_11.nex
+2025-06-27 18:49:16,090 - __main__ - DEBUG - MrBayes timeout set to 8000.0 seconds
+2025-06-27 18:50:02,867 - __main__ - INFO - MrBayes completed successfully for c_11
+2025-06-27 18:50:02,868 - __main__ - DEBUG - Looking for MrBayes lstat file: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/c_11.nex.lstat
+2025-06-27 18:50:02,869 - __main__ - INFO - Parsed harmonic mean marginal likelihood for c_11: -6305.147
+2025-06-27 18:50:02,869 - __main__ - INFO - Clade_11: Bayes decay = -3.6800, BF = 2.52e-02
+2025-06-27 18:50:02,869 - __main__ - INFO - Running Bayesian constraint analysis for Clade_12 (taxa: 2)
+2025-06-27 18:50:02,870 - __main__ - INFO - Running MrBayes: mpirun -np 8 mb c_12.nex in directory /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149
+2025-06-27 18:50:02,870 - __main__ - DEBUG - Working directory: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149
+2025-06-27 18:50:02,870 - __main__ - DEBUG - NEXUS file: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/c_12.nex
+2025-06-27 18:50:02,870 - __main__ - DEBUG - MrBayes timeout set to 8000.0 seconds
+2025-06-27 18:50:47,884 - __main__ - INFO - MrBayes completed successfully for c_12
+2025-06-27 18:50:47,885 - __main__ - DEBUG - Looking for MrBayes lstat file: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/c_12.nex.lstat
+2025-06-27 18:50:47,886 - __main__ - INFO - Parsed harmonic mean marginal likelihood for c_12: -6306.563
+2025-06-27 18:50:47,886 - __main__ - INFO - Clade_12: Bayes decay = -2.2640, BF = 1.04e-01
+2025-06-27 18:50:47,886 - __main__ - INFO - Bayesian analysis returned 10 results
+2025-06-27 18:50:47,887 - __main__ - INFO - Results written to ml_decay_indices.txt
+2025-06-27 18:50:47,888 - __main__ - INFO - Detailed report written to ml_decay_indices.md
+2025-06-27 18:50:47,891 - __main__ - DEBUG - Original tree content: '(Lemur_catta:0.00000,(((((((Homo_sapiens:0.04041,Pan_troglodytes:0.05375):0.02001,Gorilla_gorilla:0.05340):0.05154,Orangutan:0.08947):0.02947,Gibbon:0.10720):0.05151,(((Macaca_fuscata:0.01507,Macaca_mulatta:0.02142):0.02981,Macaca_fascicularis:0.04643):0.03118,Macaca_sylvanus:0.05828):0.11926):0.05114,Saimiri_sciureus:0.17763):0.08918,Tarsius_syrichta:0.18197):0.13464):0.00000;
+'
+2025-06-27 18:50:47,891 - __main__ - DEBUG - Cleaned tree content: '(Lemur_catta:0.00000,(((((((Homo_sapiens:0.04041,Pan_troglodytes:0.05375):0.02001,Gorilla_gorilla:0.05340):0.05154,Orangutan:0.08947):0.02947,Gibbon:0.10720):0.05151,(((Macaca_fuscata:0.01507,Macaca_mulatta:0.02142):0.02981,Macaca_fascicularis:0.04643):0.03118,Macaca_sylvanus:0.05828):0.11926):0.05114,Saimiri_sciureus:0.17763):0.08918,Tarsius_syrichta:0.18197):0.13464):0.00000;'
+2025-06-27 18:50:47,892 - __main__ - INFO - Cleaned tree file /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/ml_tree_for_au_annotation.nwk - removed metadata after semicolon
+2025-06-27 18:50:47,895 - __main__ - INFO - Annotated tree with 9 branch values written to /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/annotated_tree_au.nwk (type: au).
+2025-06-27 18:50:47,897 - __main__ - DEBUG - Original tree content: '(Lemur_catta:0.00000,(((((((Homo_sapiens:0.04041,Pan_troglodytes:0.05375):0.02001,Gorilla_gorilla:0.05340):0.05154,Orangutan:0.08947):0.02947,Gibbon:0.10720):0.05151,(((Macaca_fuscata:0.01507,Macaca_mulatta:0.02142):0.02981,Macaca_fascicularis:0.04643):0.03118,Macaca_sylvanus:0.05828):0.11926):0.05114,Saimiri_sciureus:0.17763):0.08918,Tarsius_syrichta:0.18197):0.13464):0.00000;
+'
+2025-06-27 18:50:47,897 - __main__ - DEBUG - Cleaned tree content: '(Lemur_catta:0.00000,(((((((Homo_sapiens:0.04041,Pan_troglodytes:0.05375):0.02001,Gorilla_gorilla:0.05340):0.05154,Orangutan:0.08947):0.02947,Gibbon:0.10720):0.05151,(((Macaca_fuscata:0.01507,Macaca_mulatta:0.02142):0.02981,Macaca_fascicularis:0.04643):0.03118,Macaca_sylvanus:0.05828):0.11926):0.05114,Saimiri_sciureus:0.17763):0.08918,Tarsius_syrichta:0.18197):0.13464):0.00000;'
+2025-06-27 18:50:47,897 - __main__ - INFO - Cleaned tree file /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/ml_tree_for_lnl_annotation.nwk - removed metadata after semicolon
+2025-06-27 18:50:47,900 - __main__ - INFO - Annotated tree with 9 branch values written to /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/annotated_tree_lnl.nwk (type: lnl).
+2025-06-27 18:50:47,903 - __main__ - DEBUG - Original tree content: '(Lemur_catta:0.00000,(((((((Homo_sapiens:0.04041,Pan_troglodytes:0.05375):0.02001,Gorilla_gorilla:0.05340):0.05154,Orangutan:0.08947):0.02947,Gibbon:0.10720):0.05151,(((Macaca_fuscata:0.01507,Macaca_mulatta:0.02142):0.02981,Macaca_fascicularis:0.04643):0.03118,Macaca_sylvanus:0.05828):0.11926):0.05114,Saimiri_sciureus:0.17763):0.08918,Tarsius_syrichta:0.18197):0.13464):0.00000;
+'
+2025-06-27 18:50:47,903 - __main__ - DEBUG - Cleaned tree content: '(Lemur_catta:0.00000,(((((((Homo_sapiens:0.04041,Pan_troglodytes:0.05375):0.02001,Gorilla_gorilla:0.05340):0.05154,Orangutan:0.08947):0.02947,Gibbon:0.10720):0.05151,(((Macaca_fuscata:0.01507,Macaca_mulatta:0.02142):0.02981,Macaca_fascicularis:0.04643):0.03118,Macaca_sylvanus:0.05828):0.11926):0.05114,Saimiri_sciureus:0.17763):0.08918,Tarsius_syrichta:0.18197):0.13464):0.00000;'
+2025-06-27 18:50:47,903 - __main__ - INFO - Cleaned tree file /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/ml_tree_for_combined_annotation.nwk - removed metadata after semicolon
+2025-06-27 18:50:47,906 - __main__ - INFO - Annotated tree with 10 branch values written to /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/annotated_tree_combined.nwk (type: combined).
+2025-06-27 18:50:47,909 - __main__ - DEBUG - Original tree content: '(Lemur_catta:0.00000,(((((((Homo_sapiens:0.04041,Pan_troglodytes:0.05375):0.02001,Gorilla_gorilla:0.05340):0.05154,Orangutan:0.08947):0.02947,Gibbon:0.10720):0.05151,(((Macaca_fuscata:0.01507,Macaca_mulatta:0.02142):0.02981,Macaca_fascicularis:0.04643):0.03118,Macaca_sylvanus:0.05828):0.11926):0.05114,Saimiri_sciureus:0.17763):0.08918,Tarsius_syrichta:0.18197):0.13464):0.00000;
+'
+2025-06-27 18:50:47,909 - __main__ - DEBUG - Cleaned tree content: '(Lemur_catta:0.00000,(((((((Homo_sapiens:0.04041,Pan_troglodytes:0.05375):0.02001,Gorilla_gorilla:0.05340):0.05154,Orangutan:0.08947):0.02947,Gibbon:0.10720):0.05151,(((Macaca_fuscata:0.01507,Macaca_mulatta:0.02142):0.02981,Macaca_fascicularis:0.04643):0.03118,Macaca_sylvanus:0.05828):0.11926):0.05114,Saimiri_sciureus:0.17763):0.08918,Tarsius_syrichta:0.18197):0.13464):0.00000;'
+2025-06-27 18:50:47,909 - __main__ - INFO - Cleaned tree file /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/ml_tree_for_bootstrap_annotation.nwk - removed metadata after semicolon
+2025-06-27 18:50:47,912 - __main__ - INFO - Bootstrap tree (ML topology with bootstrap values) written to /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/annotated_tree_bootstrap.nwk
+2025-06-27 18:50:47,915 - __main__ - DEBUG - Original tree content: '(Lemur_catta:0.00000,(((((((Homo_sapiens:0.04041,Pan_troglodytes:0.05375):0.02001,Gorilla_gorilla:0.05340):0.05154,Orangutan:0.08947):0.02947,Gibbon:0.10720):0.05151,(((Macaca_fuscata:0.01507,Macaca_mulatta:0.02142):0.02981,Macaca_fascicularis:0.04643):0.03118,Macaca_sylvanus:0.05828):0.11926):0.05114,Saimiri_sciureus:0.17763):0.08918,Tarsius_syrichta:0.18197):0.13464):0.00000;
+'
+2025-06-27 18:50:47,915 - __main__ - DEBUG - Cleaned tree content: '(Lemur_catta:0.00000,(((((((Homo_sapiens:0.04041,Pan_troglodytes:0.05375):0.02001,Gorilla_gorilla:0.05340):0.05154,Orangutan:0.08947):0.02947,Gibbon:0.10720):0.05151,(((Macaca_fuscata:0.01507,Macaca_mulatta:0.02142):0.02981,Macaca_fascicularis:0.04643):0.03118,Macaca_sylvanus:0.05828):0.11926):0.05114,Saimiri_sciureus:0.17763):0.08918,Tarsius_syrichta:0.18197):0.13464):0.00000;'
+2025-06-27 18:50:47,915 - __main__ - INFO - Cleaned tree file /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/ml_tree_for_comprehensive_annotation.nwk - removed metadata after semicolon
+2025-06-27 18:50:47,918 - __main__ - INFO - Comprehensive tree with 10 branch values written to /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/annotated_tree_comprehensive.nwk
+2025-06-27 18:50:47,921 - __main__ - DEBUG - Original tree content: '(Lemur_catta:0.00000,(((((((Homo_sapiens:0.04041,Pan_troglodytes:0.05375):0.02001,Gorilla_gorilla:0.05340):0.05154,Orangutan:0.08947):0.02947,Gibbon:0.10720):0.05151,(((Macaca_fuscata:0.01507,Macaca_mulatta:0.02142):0.02981,Macaca_fascicularis:0.04643):0.03118,Macaca_sylvanus:0.05828):0.11926):0.05114,Saimiri_sciureus:0.17763):0.08918,Tarsius_syrichta:0.18197):0.13464):0.00000;
+'
+2025-06-27 18:50:47,921 - __main__ - DEBUG - Cleaned tree content: '(Lemur_catta:0.00000,(((((((Homo_sapiens:0.04041,Pan_troglodytes:0.05375):0.02001,Gorilla_gorilla:0.05340):0.05154,Orangutan:0.08947):0.02947,Gibbon:0.10720):0.05151,(((Macaca_fuscata:0.01507,Macaca_mulatta:0.02142):0.02981,Macaca_fascicularis:0.04643):0.03118,Macaca_sylvanus:0.05828):0.11926):0.05114,Saimiri_sciureus:0.17763):0.08918,Tarsius_syrichta:0.18197):0.13464):0.00000;'
+2025-06-27 18:50:47,921 - __main__ - INFO - Cleaned tree file /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/ml_tree_for_bd_annotation.nwk - removed metadata after semicolon
+2025-06-27 18:50:47,924 - __main__ - INFO - Annotated tree with 9 Bayes decay values written to /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/annotated_tree_bayes_decay.nwk
+2025-06-27 18:50:47,927 - __main__ - DEBUG - Original tree content: '(Lemur_catta:0.00000,(((((((Homo_sapiens:0.04041,Pan_troglodytes:0.05375):0.02001,Gorilla_gorilla:0.05340):0.05154,Orangutan:0.08947):0.02947,Gibbon:0.10720):0.05151,(((Macaca_fuscata:0.01507,Macaca_mulatta:0.02142):0.02981,Macaca_fascicularis:0.04643):0.03118,Macaca_sylvanus:0.05828):0.11926):0.05114,Saimiri_sciureus:0.17763):0.08918,Tarsius_syrichta:0.18197):0.13464):0.00000;
+'
+2025-06-27 18:50:47,927 - __main__ - DEBUG - Cleaned tree content: '(Lemur_catta:0.00000,(((((((Homo_sapiens:0.04041,Pan_troglodytes:0.05375):0.02001,Gorilla_gorilla:0.05340):0.05154,Orangutan:0.08947):0.02947,Gibbon:0.10720):0.05151,(((Macaca_fuscata:0.01507,Macaca_mulatta:0.02142):0.02981,Macaca_fascicularis:0.04643):0.03118,Macaca_sylvanus:0.05828):0.11926):0.05114,Saimiri_sciureus:0.17763):0.08918,Tarsius_syrichta:0.18197):0.13464):0.00000;'
+2025-06-27 18:50:47,927 - __main__ - INFO - Cleaned tree file /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149/ml_tree_for_bf_annotation.nwk - removed metadata after semicolon
+2025-06-27 18:50:47,930 - __main__ - INFO - Annotated tree with 9 Bayes factor values written to /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/annotated_tree_bayes_factor.nwk
+2025-06-27 18:50:47,930 - __main__ - INFO - Successfully created 7 annotated trees.
+2025-06-27 18:50:47,930 - __main__ - INFO -   - au tree: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/annotated_tree_au.nwk
+2025-06-27 18:50:47,930 - __main__ - INFO -   - lnl tree: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/annotated_tree_lnl.nwk
+2025-06-27 18:50:47,930 - __main__ - INFO -   - combined tree: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/annotated_tree_combined.nwk
+2025-06-27 18:50:47,930 - __main__ - INFO -   - bootstrap tree: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/annotated_tree_bootstrap.nwk
+2025-06-27 18:50:47,930 - __main__ - INFO -   - comprehensive tree: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/annotated_tree_comprehensive.nwk
+2025-06-27 18:50:47,930 - __main__ - INFO -   - bayes_decay tree: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/annotated_tree_bayes_decay.nwk
+2025-06-27 18:50:47,930 - __main__ - INFO -   - bayes_factor tree: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/annotated_tree_bayes_factor.nwk
+2025-06-27 18:50:47,930 - __main__ - INFO - Skipping intermediate file cleanup due to debug or keep_files flag
+2025-06-27 18:50:47,930 - __main__ - INFO - MLDecay analysis completed successfully.
+2025-06-27 18:50:47,930 - __main__ - INFO - Temporary files are preserved in: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149
+2025-06-27 18:50:47,930 - __main__ - INFO - Keeping temporary directory: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_184149

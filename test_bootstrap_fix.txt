@@ -1,0 +1,19 @@
+MLDecay Branch Support Analysis
+==============================
+
+Analysis mode: Maximum Likelihood
+
+ML tree log-likelihood: 6303.660911
+
+Branch Support Values:
+------------------------------------------------------------------------------------------------------------------------
+Clade_ID	Num_Taxa	Constrained_lnL	LnL_Diff_from_ML	AU_p-value	Significant_AU (p<0.05)	Bootstrap	Taxa_List
+Clade_10	3	6319.7655	16.1046	0.0446	Yes	100	Macaca_fascicularis,Macaca_fuscata,Macaca_mulatta
+Clade_11	2	6338.1118	34.4509	0.0079	Yes	100	Macaca_fuscata,Macaca_mulatta
+Clade_3	10	6337.5337	33.8728	0.0001	Yes	100	Gibbon,Gorilla_gorilla,Homo_sapiens,Macaca_fascicularis,Macaca_fuscata,Macaca_mulatta,Macaca_sylvanus,Orangutan,Pan_troglodytes,Saimiri_sciureus
+Clade_4	9	6315.6955	12.0346	0.0775	No	100	Gibbon,Gorilla_gorilla,Homo_sapiens,Macaca_fascicularis,Macaca_fuscata,Macaca_mulatta,Macaca_sylvanus,Orangutan,Pan_troglodytes
+Clade_5	5	6327.7805	24.1195	0.0085	Yes	100	Gibbon,Gorilla_gorilla,Homo_sapiens,Orangutan,Pan_troglodytes
+Clade_6	4	6314.3441	10.6832	0.0984	No	90	Gorilla_gorilla,Homo_sapiens,Orangutan,Pan_troglodytes
+Clade_7	3	6349.1582	45.4973	0.0001	Yes	100	Gorilla_gorilla,Homo_sapiens,Pan_troglodytes
+Clade_8	2	6304.4563	0.7954	0.5990	No	N/A	Homo_sapiens,Pan_troglodytes
+Clade_9	4	6394.8556	91.1946	0.0001	Yes	100	Macaca_fascicularis,Macaca_fuscata,Macaca_mulatta,Macaca_sylvanus

@@ -4,12 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-MLDecay is a Python command-line tool for calculating Maximum Likelihood (ML)-based phylogenetic decay indices, also known as ML-Bremer support or ML branch support. It leverages the phylogenetic software PAUP* to assess the robustness of clades in a phylogenetic tree.
+MLDecay is a Python command-line tool for calculating both Maximum Likelihood (ML)-based and Bayesian phylogenetic decay indices. It can compute ML-Bremer support using PAUP* and Bayesian decay indices using MrBayes, assessing the robustness of clades in a phylogenetic tree through multiple statistical frameworks.
 
 ## Required Dependencies
 
 - Python 3.8+
-- PAUP* command-line executable (must be installed separately)
+- PAUP* command-line executable (required for ML analysis)
+- MrBayes command-line executable (required for Bayesian analysis)
 - Python packages:
   - biopython>=1.79
   - numpy>=1.20.0
