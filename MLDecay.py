@@ -870,7 +870,7 @@ class MLDecayIndices:
         logger.info("Running unconstrained Bayesian analysis...")
         
         # Create NEXUS file with MrBayes block
-        nexus_content = self.nexus_path.read_text()
+        nexus_content = self.nexus_file_path.read_text()
         mrbayes_block = self._generate_mrbayes_nexus()
         combined_nexus = nexus_content + "\n" + mrbayes_block
         
@@ -3207,6 +3207,9 @@ def main():
     viz_opts.add_argument("--keep-tree-files", action="store_true", default=False, help="Keep Newick tree files used for HTML visualization (default: False)")
     parser.add_argument("-v", "--version", action="version", version=f"%(prog)s {VERSION}")
     args = parser.parse_args()
+    
+    # Convert data_type to lowercase to handle case-insensitive input
+    args.data_type = args.data_type.lower()
     
     # Validate Bayesian analysis arguments
     if args.analysis in ["bayesian", "both"] and not args.bayesian_software:
