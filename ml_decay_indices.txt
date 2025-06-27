@@ -1,4 +1,4 @@
-MLDecay Branch Support Analysis
+panDecay Branch Support Analysis
 ==============================
 
 Analysis mode: Bayesian (mrbayes)

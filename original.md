@@ -1,4 +1,4 @@
-# ML-Decay Branch Support Analysis Report (v1.0.3)
+# panDecay ML Branch Support Analysis Report (v1.0.3)
 
 Date: 2025-05-21 15:42:35
 

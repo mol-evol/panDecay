@@ -32,7 +32,7 @@ AU_TEST_SCORE_FN = "au_test_results.txt"
 AU_LOG_FN = "paup_au.log"
 
 
-class MLDecayIndices:
+class panDecayIndices:
     """
     Implements ML-based phylogenetic decay indices (Bremer support) using PAUP*.
     Calculates support by comparing optimal tree likelihood with constrained trees,
@@ -2573,7 +2573,7 @@ class MLDecayIndices:
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with output_path.open('w') as f:
-            f.write("MLDecay Branch Support Analysis\n")
+            f.write("panDecay Branch Support Analysis\n")
             f.write("=" * 30 + "\n\n")
             
             # Write appropriate header based on analysis type
@@ -2701,11 +2701,11 @@ class MLDecayIndices:
         with output_path.open('w') as f:
             # Title based on analysis type
             if has_ml and has_bayesian:
-                f.write(f"# ML/Bayesian Decay Branch Support Analysis Report (v{VERSION})\n\n")
+                f.write(f"# panDecay Branch Support Analysis Report (v{VERSION})\n\n")
             elif has_bayesian:
-                f.write(f"# Bayesian Decay Branch Support Analysis Report (v{VERSION})\n\n")
+                f.write(f"# panDecay Bayesian Branch Support Analysis Report (v{VERSION})\n\n")
             else:
-                f.write(f"# ML-Decay Branch Support Analysis Report (v{VERSION})\n\n")
+                f.write(f"# panDecay ML Branch Support Analysis Report (v{VERSION})\n\n")
                 
             f.write(f"Date: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
 
@@ -3260,7 +3260,7 @@ class MLDecayIndices:
             html_parts.append("<head>")
             html_parts.append("    <meta charset=\"UTF-8\">")
             html_parts.append("    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">")
-            html_parts.append(f"    <title>MLDecay - Interactive Tree for {clade_id}</title>")
+            html_parts.append(f"    <title>panDecay - Interactive Tree for {clade_id}</title>")
 
             # CSS
             html_parts.append("""    <style>
@@ -3397,7 +3397,7 @@ class MLDecayIndices:
             html_parts.append("<body>")
 
             # Body content
-            html_parts.append(f"    <h1>MLDecay - Interactive Tree Visualization</h1>")
+            html_parts.append(f"    <h1>panDecay - Interactive Tree Visualization</h1>")
             html_parts.append(f"    <h2>Clade: {clade_id} - {taxa_display}</h2>")
 
             html_parts.append("    <div class=\"container\">")
@@ -3682,7 +3682,7 @@ def print_runtime_parameters(args_ns, model_str_for_print):
     """Prints a summary of runtime parameters."""
     # (args_ns is the namespace from argparse.ArgumentParser)
     print("\n" + "=" * 80)
-    print(f"MLDecay: ML-based Phylogenetic Decay Indices v{VERSION}")
+    print(f"panDecay: Phylogenetic Analysis using Decay Indices v{VERSION}")
     print("=" * 80)
     print("\nRUNTIME PARAMETERS:")
     print(f"  Alignment file:     {args_ns.alignment}") # Original string path is fine for print
@@ -3738,7 +3738,7 @@ def print_runtime_parameters(args_ns, model_str_for_print):
 
 def main():
     parser = argparse.ArgumentParser(
-        description=f"MLDecay v{VERSION}: Calculate ML-based phylogenetic decay indices using PAUP*.",
+        description=f"panDecay v{VERSION}: Calculate ML and Bayesian phylogenetic decay indices.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter # Shows defaults in help
     )
     # Arguments (similar to original, ensure help messages are clear)
@@ -3867,7 +3867,7 @@ def main():
     if args.paup_block:
         pbf_path = Path(args.paup_block)
         logger.info(f"Reading PAUP block from: {pbf_path}")
-        paup_block_content = MLDecayIndices.read_paup_block(pbf_path)
+        paup_block_content = panDecayIndices.read_paup_block(pbf_path)
         if paup_block_content is None: # Handles not found or invalid block
             logger.error("Failed to read or validate PAUP block file. Exiting.")
             sys.exit(1)
@@ -3875,11 +3875,11 @@ def main():
     print_runtime_parameters(args, effective_model_str)
 
     try:
-        # Convert string paths from args to Path objects for MLDecayIndices
+        # Convert string paths from args to Path objects for panDecayIndices
         temp_dir_path = Path(args.temp) if args.temp else None
         starting_tree_path = Path(args.starting_tree) if args.starting_tree else None
 
-        decay_calc = MLDecayIndices(
+        decay_calc = panDecayIndices(
             alignment_file=args.alignment, # Converted to Path in __init__
             alignment_format=args.format,
             model=effective_model_str, # Pass the constructed string
@@ -3970,7 +3970,7 @@ def main():
                         value_type=args.annotation, **viz_kwargs)
 
                 if args.site_analysis:
-                    # Pass visualization preferences to the MLDecayIndices instance
+                    # Pass visualization preferences to the panDecayIndices instance
                     if args.visualize:
                         decay_calc.generate_html = args.html_trees
                         decay_calc.js_cdn = args.js_cdn
@@ -3981,13 +3981,13 @@ def main():
                     logger.info(f"Site-specific analysis results written to {site_output_dir}")
 
             decay_calc.cleanup_intermediate_files()
-            logger.info("MLDecay analysis completed successfully.")
+            logger.info("panDecay analysis completed successfully.")
         else:
             logger.error("ML tree construction failed or likelihood missing. Halting.")
             sys.exit(1) # Ensure exit if ML tree is critical and failed
 
     except Exception as e:
-        logger.error(f"MLDecay analysis terminated with an error: {e}")
+        logger.error(f"panDecay analysis terminated with an error: {e}")
         if args.debug: # Print traceback in debug mode
             import traceback
             logger.debug("Full traceback:\n%s", traceback.format_exc())

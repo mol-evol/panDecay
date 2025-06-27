@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-MLDecay is a Python command-line tool for calculating both Maximum Likelihood (ML)-based and Bayesian phylogenetic decay indices. It can compute ML-Bremer support using PAUP* and Bayesian decay indices using MrBayes, assessing the robustness of clades in a phylogenetic tree through multiple statistical frameworks.
+panDecay is a Python command-line tool for calculating both Maximum Likelihood (ML)-based and Bayesian phylogenetic decay indices. It can compute ML-Bremer support using PAUP* and Bayesian decay indices using MrBayes, assessing the robustness of clades in a phylogenetic tree through multiple statistical frameworks.
 
 ## Required Dependencies
 
@@ -25,31 +25,31 @@ MLDecay is a Python command-line tool for calculating both Maximum Likelihood (M
 pip install -r requirements.txt
 ```
 
-### Running MLDecay
+### Running panDecay
 
 Basic command:
 ```bash
-python MLDecay.py <alignment_file> --model <model_name> [options...]
+python panDecay.py <alignment_file> --model <model_name> [options...]
 ```
 
 Example with DNA data and GTR+G+I model:
 ```bash
-python MLDecay.py alignment.fas --model GTR --gamma --invariable --data-type dna
+python panDecay.py alignment.fas --model GTR --gamma --invariable --data-type dna
 ```
 
 Example with protein data:
 ```bash
-python MLDecay.py proteins.phy --format phylip --data-type protein --protein-model WAG --gamma
+python panDecay.py proteins.phy --format phylip --data-type protein --protein-model WAG --gamma
 ```
 
 Example with site-specific analysis:
 ```bash
-python MLDecay.py alignment.fas --model GTR --gamma --site-analysis --visualize
+python panDecay.py alignment.fas --model GTR --gamma --site-analysis --visualize
 ```
 
 ## Code Architecture
 
-MLDecay is organized around a main Python class `MLDecayIndices` in MLDecay.py, which handles:
+panDecay is organized around a main Python class `panDecayIndices` in panDecay.py, which handles:
 
 1. **Initialization and Setup**: 
    - Parsing arguments and initializing parameters

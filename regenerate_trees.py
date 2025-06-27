@@ -8,10 +8,10 @@ import sys
 import logging
 from pathlib import Path
 
-# Add the MLDecay directory to Python path
+# Add the panDecay directory to Python path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from MLDecay import MLDecayIndices
+from panDecay import panDecayIndices
 
 def main():
     # Set up logging
@@ -32,7 +32,7 @@ def main():
     
     logger.info(f"Using run directory: {latest_run}")
     
-    # Create a minimal MLDecayIndices instance
+    # Create a minimal panDecayIndices instance
     # Use the actual alignment file from the run
     alignment_file = latest_run / "alignment.nex"
     if not alignment_file.exists():
@@ -42,7 +42,7 @@ def main():
             logger.error("Could not find alignment file")
             return
     
-    decay_calc = MLDecayIndices(
+    decay_calc = panDecayIndices(
         alignment_file=str(alignment_file),
         alignment_format="nexus" if alignment_file.suffix == ".nex" else "fasta",
         paup_path="paup",

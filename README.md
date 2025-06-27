@@ -1,8 +1,8 @@
 ![Python 3.8+](https://img.shields.io/badge/python-3.8%2B-blue.svg) ![Version](https://img.shields.io/badge/version-1.0.3-orange.svg) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-# MLDecay: Maximum Likelihood and Bayesian Phylogenetic Decay Indices
+# panDecay: Phylogenetic Analysis using Decay Indices
 
-MLDecay is a Python command-line tool for calculating both Maximum Likelihood (ML)-based and Bayesian phylogenetic decay indices. It can compute ML-Bremer support (using PAUP*) and Bayesian decay indices (using MrBayes or BEAST)   
+panDecay is a Python command-line tool for calculating both Maximum Likelihood (ML)-based and Bayesian phylogenetic decay indices. It can compute ML-Bremer support (using PAUP*) and Bayesian decay indices (using MrBayes or BEAST)   
 
 ## Table of Contents
 
@@ -13,7 +13,7 @@ MLDecay is a Python command-line tool for calculating both Maximum Likelihood (M
 2.  [Features](#features)
 3.  [Installation](#installation)
     *   [Dependencies](#dependencies)
-    *   [Installing MLDecay](#installing-mldecay)
+    *   [Installing panDecay](#installing-pandecay)
 4.  [Usage](#usage)
     *   [Basic Command](#basic-command)
     *   [Command-Line Arguments](#command-line-arguments)
@@ -53,7 +53,7 @@ In phylogenetics, assessing the support for individual branches (clades) in a tr
 
 While parsimony decay indices are well-established, maximum likelihood (ML) is a statistically robust framework for phylogenetic inference. ML-based decay indices extend this concept to the likelihood framework. Instead of "extra steps," we look at the difference in log-likelihood scores between the optimal ML tree and the best tree where a specific clade is constrained to be non-monophyletic (i.e., the branch defining that clade is collapsed).
 
-MLDecay automates this process by:
+panDecay automates this process by:
 1.  Finding the optimal ML tree and its likelihood score.
 2.  For each internal branch in the ML tree:
     a.  Defining a constraint that forces the taxa in that clade to *not* form a monophyletic group (using PAUP\*'s `converse=yes` constraint).
@@ -65,7 +65,7 @@ A significantly worse likelihood for the constrained tree (and a low AU test p-v
 
 ### Bayesian Decay Indices
 
-MLDecay now supports Bayesian phylogenetic decay indices, extending the decay index concept to Bayesian inference. Instead of comparing log-likelihoods, Bayesian decay indices compare marginal likelihoods between:
+panDecay now supports Bayesian phylogenetic decay indices, extending the decay index concept to Bayesian inference. Instead of comparing log-likelihoods, Bayesian decay indices compare marginal likelihoods between:
 1. An unconstrained Bayesian analysis where all topologies are explored
 2. Constrained analyses where specific clades are forced to be non-monophyletic
 
@@ -75,7 +75,7 @@ The Bayesian decay index for a clade is calculated as:
 
 Where ML represents the marginal likelihood (not to be confused with maximum likelihood). A positive Bayesian decay value indicates support for the clade, with larger values indicating stronger support. The Bayes Factor provides an interpretable measure where values >10 indicate strong support and >100 indicate decisive support for the clade.
 
-MLDecay can perform Bayesian analyses using:
+panDecay can perform Bayesian analyses using:
 - **MrBayes**: Currently supported with harmonic mean marginal likelihood estimation
 - **BEAST**: Support planned for future versions
 
@@ -123,7 +123,7 @@ MLDecay can perform Bayesian analyses using:
 
 ### Dependencies
 
-MLDecay requires Python 3.8 or higher and has several dependencies that can be easily installed using pip.
+panDecay requires Python 3.8 or higher and has several dependencies that can be easily installed using pip.
 
 1. **PAUP\***: Required for ML analysis. You must have a working PAUP\* command-line executable installed and accessible in your system's PATH, or provide the full path to it. PAUP\* can be obtained from [phylosolutions.com](http://phylosolutions.com/paup-test/).
 
@@ -137,12 +137,12 @@ MLDecay requires Python 3.8 or higher and has several dependencies that can be e
 
    This will install all required packages including BioPython, NumPy, and the optional visualization packages Matplotlib and Seaborn.
 
-### Installing MLDecay
+### Installing panDecay
 
 1. **Clone the Repository:**
    ```bash
-   git clone https://github.com/mol-evol/MLDecay.git
-   cd MLDecay
+   git clone https://github.com/mol-evol/panDecay.git
+   cd panDecay
    ```
 
 2. **Install Dependencies:**
@@ -152,25 +152,25 @@ MLDecay requires Python 3.8 or higher and has several dependencies that can be e
 
 3. **Make the script executable (optional, for convenience):**
    ```bash
-   chmod +x MLDecay.py
+   chmod +x panDecay.py
    ```
 
 4. You can then run the script directly:
    ```bash
-   ./MLDecay.py [arguments...]
+   ./panDecay.py [arguments...]
    ```
    or using the python interpreter:
    ```bash
-   python3 MLDecay.py [arguments...]
+   python3 panDecay.py [arguments...]
    ```
 
-5. **Optional: Make MLDecay available system-wide**
+5. **Optional: Make panDecay available system-wide**
    
-   Consider adding the MLDecay directory to your system's PATH or creating a symbolic link to `MLDecay.py` in a directory that is already in your PATH (e.g., `~/.local/bin/` or `/usr/local/bin/`).
+   Consider adding the panDecay directory to your system's PATH or creating a symbolic link to `panDecay.py` in a directory that is already in your PATH (e.g., `~/.local/bin/` or `/usr/local/bin/`).
 
    For example, to create a symbolic link:
    ```bash
-   ln -s $(pwd)/MLDecay.py ~/.local/bin/mldecay
+   ln -s $(pwd)/panDecay.py ~/.local/bin/mldecay
    ```
 
 ## Usage
@@ -178,13 +178,13 @@ MLDecay requires Python 3.8 or higher and has several dependencies that can be e
 ### Basic Command
 
 ```bash
-python3 MLDecay.py <alignment_file> --model <model_name> [options...]
+python3 panDecay.py <alignment_file> --model <model_name> [options...]
 ```
 
 ### Command-Line Arguments
 
 ```
-usage: MLDecay.py [-h] [--format FORMAT] [--model MODEL] [--gamma] [--invariable] [--paup PAUP] [--output OUTPUT] [--tree TREE]
+usage: panDecay.py [-h] [--format FORMAT] [--model MODEL] [--gamma] [--invariable] [--paup PAUP] [--output OUTPUT] [--tree TREE]
                   [--data-type {dna,protein,discrete}] [--gamma-shape GAMMA_SHAPE] [--prop-invar PROP_INVAR] 
                   [--base-freq {equal,estimate,empirical}] [--rates {equal,gamma}] [--protein-model PROTEIN_MODEL] 
                   [--nst {1,2,6}] [--parsmodel | --no-parsmodel] [--threads THREADS] [--starting-tree STARTING_TREE] 
@@ -197,7 +197,7 @@ usage: MLDecay.py [-h] [--format FORMAT] [--model MODEL] [--gamma] [--invariable
                   [--visualize] [--viz-format {png,pdf,svg}] [-v]
                   alignment
 
-MLDecay v1.0.3: Calculate ML and/or Bayesian phylogenetic decay indices.
+panDecay v1.0.3: Calculate ML and/or Bayesian phylogenetic decay indices.
 
 positional arguments:
   alignment             Input alignment file path.
@@ -307,7 +307,7 @@ A text file specified with `--paup-block <path_to_block.nex>`.
     savetrees file=my_custom_ml.tre replace=yes;
     lscores 1 /scorefile=my_custom_scores.txt replace=yes;
     ```
-    MLDecay will try to defensively add `savetrees` and `lscores` commands if they appear to be missing from the user's block when needed for its internal workflow.
+    panDecay will try to defensively add `savetrees` and `lscores` commands if they appear to be missing from the user's block when needed for its internal workflow.
 
 ## Output Files
 
@@ -331,7 +331,7 @@ A tab-delimited text file containing:
     *   `Taxa_List`: A comma-separated list of taxa in the clade.
 
 ### Annotated Trees
-MLDecay generates several different annotated tree files:
+panDecay generates several different annotated tree files:
 * `<tree_base>_au.nwk`: Tree with AU test p-values as branch labels
 * `<tree_base>_lnl.nwk`: Tree with log-likelihood differences as branch labels
 * `<tree_base>_combined.nwk`: Tree with both values as branch labels in the format "AU:0.95|LnL:2.34"
@@ -360,11 +360,11 @@ This feature allows you to identify which alignment positions support or conflic
 If `--visualize` is used, static plots are generated (requires `matplotlib` and `seaborn`):
 *   **Support Distribution Plot** (`<output_stem>_dist_au.<viz_format>` and `<output_stem>_dist_lnl.<viz_format>`): Histograms showing the distribution of AU p-values and LNL differences across all tested branches.
 
-# Understanding the Site Analysis Plots in MLDecay
+# Understanding the Site Analysis Plots in panDecay
 
 ## What the Bar Colours Mean
 
-In the site-specific likelihood plots generated by MLDecay (such as `site_plot_Clade_X.png`): ![site_plot_Clade_X.png](./site_plot_Clade_X.png)
+In the site-specific likelihood plots generated by panDecay (such as `site_plot_Clade_X.png`): ![site_plot_Clade_X.png](./site_plot_Clade_X.png)
 
 - **Green bars** represent sites that **support** the branch/clade being tested. These are alignment positions where the ML tree (with the clade present) has a better likelihood than the constrained tree (where the clade is forced to be non-monophyletic).
 
@@ -441,7 +441,7 @@ Let [alignment.fas](./alignment.fas) be a FASTA DNA alignment, [proteins.phy](./
 Analyze a DNA alignment with GTR+G+I model, automatically estimating parameters.
 
 ```bash
-python3 MLDecay.py alignment.fas --model GTR --gamma --invariable --data-type dna \
+python3 panDecay.py alignment.fas --model GTR --gamma --invariable --data-type dna \
     --output dna_decay.txt --tree dna_annotated
 ```
 
@@ -449,7 +449,7 @@ python3 MLDecay.py alignment.fas --model GTR --gamma --invariable --data-type dn
 Analyze a protein alignment using the WAG model, fixed gamma shape, and estimating proportion of invariable sites.
 
 ```bash
-python3 MLDecay.py proteins.phy --format phylip --data-type protein \
+python3 panDecay.py proteins.phy --format phylip --data-type protein \
     --protein-model WAG --gamma --gamma-shape 0.85 --invariable \
     --output protein_decay.txt --tree protein_annotated --threads 8
 ```
@@ -458,7 +458,7 @@ python3 MLDecay.py proteins.phy --format phylip --data-type protein \
 Analyze a binary (0/1) discrete morphological dataset (e.g., in NEXUS format `morpho.nex`) using the Mk+G model.
 
 ```bash
-python3 MLDecay.py morpho.nex --format nexus --data-type discrete \
+python3 panDecay.py morpho.nex --format nexus --data-type discrete \
     --model Mk --gamma \
     --output morpho_decay.txt --tree morpho_annotated
 ```
@@ -468,7 +468,7 @@ python3 MLDecay.py morpho.nex --format nexus --data-type discrete \
 Perform a GTR+G analysis, but provide PAUP* with a starting tree to potentially speed up or refine the initial ML search.
 
 ```bash
-python3 MLDecay.py alignment.fas --model GTR --gamma \
+python3 panDecay.py alignment.fas --model GTR --gamma \
     --starting-tree my_start_tree.nwk \
     --output results_with_start_tree.txt
 ```
@@ -481,16 +481,16 @@ hsearch nreps=50 swap=tbr addseq=random hold=1 multrees=yes;
 ```
 Then run:
 ```bash
-python3 MLDecay.py alignment.fas --paup-block my_paup_commands.txt \
+python3 panDecay.py alignment.fas --paup-block my_paup_commands.txt \
     --output results_custom_block.txt
 ```
-*(MLDecay will still handle the constraint generation and AU test logic around your block.)*
+*(panDecay will still handle the constraint generation and AU test logic around your block.)*
 
 ### Example 6: Site-Specific Analysis
 Analyze which sites in the alignment support or conflict with each clade:
 
 ```bash
-python3 MLDecay.py alignment.fas --model GTR --gamma --site-analysis --visualize \
+python3 panDecay.py alignment.fas --model GTR --gamma --site-analysis --visualize \
     --output site_analysis_results.txt
 ```
 
@@ -500,14 +500,14 @@ This will generate site-specific likelihood analyses in addition to the standard
 Perform bootstrap analysis (100 replicates by default) alongside ML decay indices:
 
 ```bash
-python3 MLDecay.py alignment.fas --model GTR --gamma --bootstrap \
+python3 panDecay.py alignment.fas --model GTR --gamma --bootstrap \
     --output with_bootstrap.txt
 ```
 
 For more bootstrap replicates:
 
 ```bash
-python3 MLDecay.py alignment.fas --model GTR --gamma --bootstrap --bootstrap-reps 500 \
+python3 panDecay.py alignment.fas --model GTR --gamma --bootstrap --bootstrap-reps 500 \
     --output bootstrap500.txt
 ```
 
@@ -517,7 +517,7 @@ This will produce additional tree files with bootstrap values and a comprehensiv
 Perform only Bayesian decay analysis using MrBayes:
 
 ```bash
-python3 MLDecay.py alignment.fas --analysis bayesian --bayesian-software mrbayes \
+python3 panDecay.py alignment.fas --analysis bayesian --bayesian-software mrbayes \
     --bayes-model GTR --bayes-ngen 500000 --output bayesian_only.txt
 ```
 
@@ -525,7 +525,7 @@ python3 MLDecay.py alignment.fas --analysis bayesian --bayesian-software mrbayes
 Run both ML and Bayesian analyses:
 
 ```bash
-python3 MLDecay.py alignment.fas --model GTR --gamma -C --bayesian-software mrbayes \
+python3 panDecay.py alignment.fas --model GTR --gamma -C --bayesian-software mrbayes \
     --bayes-ngen 1000000 --output combined_analysis.txt
 ```
 
@@ -533,7 +533,7 @@ python3 MLDecay.py alignment.fas --model GTR --gamma -C --bayesian-software mrba
 If you have MPI-enabled MrBayes installed:
 
 ```bash
-python3 MLDecay.py alignment.fas -B --bayesian-software mrbayes --use-mpi \
+python3 panDecay.py alignment.fas -B --bayesian-software mrbayes --use-mpi \
     --mpi-processors 8 --bayes-chains 4 --bayes-ngen 2000000
 ```
 
@@ -543,14 +543,14 @@ This runs 4 chains across 8 processors (2 chains per processor for better mixing
 If MrBayes is compiled with BEAGLE support:
 
 ```bash
-python3 MLDecay.py alignment.fas -C --bayesian-software mrbayes --use-beagle \
+python3 panDecay.py alignment.fas -C --bayesian-software mrbayes --use-beagle \
     --beagle-device gpu --beagle-precision single --bayes-ngen 5000000
 ```
 
 For CPU-based BEAGLE acceleration:
 
 ```bash
-python3 MLDecay.py alignment.fas -C --bayesian-software mrbayes --use-beagle \
+python3 panDecay.py alignment.fas -C --bayesian-software mrbayes --use-beagle \
     --beagle-device cpu --beagle-precision double
 ```
 
@@ -558,7 +558,7 @@ python3 MLDecay.py alignment.fas -C --bayesian-software mrbayes --use-beagle \
 For maximum performance with both MPI and BEAGLE:
 
 ```bash
-python3 MLDecay.py large_alignment.fas -B --bayesian-software mrbayes \
+python3 panDecay.py large_alignment.fas -B --bayesian-software mrbayes \
     --use-mpi --mpi-processors 16 --use-beagle --beagle-device gpu \
     --bayes-chains 4 --bayes-ngen 10000000 --bayes-sample-freq 5000
 ```
@@ -587,7 +587,7 @@ make && sudo make install
 For a quick test with minimal MCMC generations:
 
 ```bash
-python3 MLDecay.py alignment.fas --both --bayesian-software mrbayes \
+python3 panDecay.py alignment.fas --both --bayesian-software mrbayes \
     --bayes-ngen 10000 --bayes-sample-freq 100 \
     --output quick_test.txt
 ```
@@ -644,7 +644,7 @@ Generally, clades with large positive `LnL_Diff_from_ML` values, low `AU_p-value
 *   **MrBayes errors**:
     *   "Command not found": Ensure MrBayes is installed and accessible. Use `--mrbayes-path /path/to/mb` if it's not in your PATH.
     *   "Error in command 'Ss'": Your version of MrBayes doesn't support stepping-stone sampling. The program will automatically use harmonic mean estimation instead.
-    *   Path errors with spaces: MLDecay handles paths with spaces automatically by using relative paths for MrBayes execution.
+    *   Path errors with spaces: panDecay handles paths with spaces automatically by using relative paths for MrBayes execution.
     *   No Bayesian output: Check the debug log for specific errors. Ensure your alignment is compatible with MrBayes (e.g., taxon names without special characters).
 *   **Bayesian analysis takes too long**: Reduce the number of generations (`--bayes-ngen 50000`) or increase sampling frequency (`--bayes-sample-freq 500`) for testing. Production runs typically need at least 1 million generations.
 
@@ -685,7 +685,7 @@ This is why phylogeneticists often trust Bayes factors more - they're less likel
 
 ## Citations
 
-If you use MLDecay in your research, please cite this GitHub repository. Additionally, consider citing the relevant methodological papers:
+If you use panDecay in your research, please cite this GitHub repository. Additionally, consider citing the relevant methodological papers:
 
 *   **PAUP\***:
     *   Swofford, D. L. (2003). PAUP\*. Phylogenetic Analysis Using Parsimony (\*and Other Methods). Version 4. Sinauer Associates, Sunderland, Massachusetts.

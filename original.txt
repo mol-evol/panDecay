@@ -1,4 +1,4 @@
-MLDecay Branch Support Analysis
+panDecay Branch Support Analysis
 ==============================
 
 ML tree log-likelihood: 6303.660911
