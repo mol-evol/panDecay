@@ -723,5 +723,6 @@ Contributions, bug reports, and feature requests are welcome! Please feel free t
 ## Contact
 
 For questions or support, please open an issue on the GitHub repository.
-Project Maintainer: James McInerney to assess the robustness of clades in a phylogenetic tree by comparing the likelihood of the optimal ML tree with trees where specific clades are constrained to be non-monophyletic. The primary statistical measure used is the Approximately Unbiased (AU) test.
+
+Project Maintainer: James McInerney
 
