@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MLDecay - Interactive Tree for Clade_6</title>
+    <style>
+            body {
+                font-family: Arial, sans-serif;
+                line-height: 1.6;
+                color: #333;
+                max-width: 1200px;
+                margin: 0 auto;
+                padding: 20px;
+            }
+            h1, h2, h3 {
+                color: #2c3e50;
+            }
+            .container {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 20px;
+            }
+            .tree-section {
+                flex: 1;
+                min-width: 500px;
+            }
+            .info-section {
+                flex: 1;
+                min-width: 300px;
+                background-color: #f8f9fa;
+                padding: 15px;
+                border-radius: 5px;
+            }
+            #tree_container {
+                width: 100%;
+                height: 600px;
+                border: 1px solid #ddd;
+                border-radius: 4px;
+                overflow: hidden;
+            }
+            .table {
+                width: 100%;
+                border-collapse: collapse;
+                margin-bottom: 15px;
+            }
+            .table th, .table td {
+                padding: 8px;
+                text-align: left;
+                border-bottom: 1px solid #ddd;
+            }
+            .table th {
+                background-color: #f2f2f2;
+            }
+            .highlight {
+                color: #e74c3c;
+                font-weight: bold;
+            }
+            .significant {
+                background-color: #d4edda;
+            }
+            .not-significant {
+                background-color: #f8d7da;
+            }
+            .buttons {
+                margin: 10px 0;
+            }
+            button {
+                background-color: #4CAF50;
+                color: white;
+                padding: 8px 12px;
+                border: none;
+                border-radius: 4px;
+                cursor: pointer;
+                margin-right: 5px;
+            }
+            button:hover {
+                background-color: #45a049;
+            }
+            .phylotree-node circle {
+                fill: #999;
+            }
+            .highlighted-node circle {
+                fill: #e74c3c !important;
+                r: 5 !important;
+            }
+            .highlighted-node text {
+                fill: #e74c3c !important;
+                font-weight: bold !important;
+            }
+            .highlighted-branch {
+                stroke: #e74c3c !important;
+                stroke-width: 3px !important;
+            }
+            .legend {
+                margin-top: 10px;
+                font-size: 0.9em;
+            }
+            .legend-item {
+                display: inline-block;
+                margin-right: 15px;
+            }
+            .legend-color {
+                display: inline-block;
+                width: 12px;
+                height: 12px;
+                margin-right: 5px;
+                vertical-align: middle;
+            }
+            .download-links {
+                margin-top: 20px;
+            }
+            .download-links a {
+                display: inline-block;
+                margin-right: 10px;
+                padding: 5px 10px;
+                background-color: #f8f9fa;
+                border: 1px solid #ddd;
+                border-radius: 3px;
+                text-decoration: none;
+                color: #333;
+            }
+            .download-links a:hover {
+                background-color: #e9ecef;
+            }
+        </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/phylotree@1.0.0-alpha.3/dist/phylotree.js"></script>
+</head>
+<body>
+    <h1>MLDecay - Interactive Tree Visualization</h1>
+    <h2>Clade: Clade_6 - Homo_sapiens, Pan_troglodytes, Gorilla_gorilla, Orangutan</h2>
+    <div class="container">
+        <div class="tree-section">
+            <div class="buttons">
+                <button onclick="tree.spacing_x(100).spacing_y(20).update()">Expand Tree</button>
+                <button onclick="tree.spacing_x(30).spacing_y(10).update()">Compact Tree</button>
+                <button onclick="resetTree()">Reset View</button>
+                <button onclick="toggleLabels()">Toggle Labels</button>
+            </div>
+            <div id="tree_container"></div>
+            <div class="legend">
+                <div class="legend-item">
+                    <span class="legend-color" style="background-color: #e74c3c;"></span>
+                    <span>Highlighted Clade</span>
+                </div>
+                <div class="legend-item">
+                    <span class="legend-color" style="background-color: #999;"></span>
+                    <span>Other Nodes</span>
+                </div>
+            </div>
+        </div>
+        <div class="info-section">
+            <h3>Clade Information</h3>
+            <table class="table">
+                <tr><th>Number of Taxa:</th><td>4 of 12 (33.3%)</td></tr>
+                <tr><th>Taxa:</th><td>Gorilla_gorilla, Homo_sapiens, Orangutan, Pan_troglodytes</td></tr>
+                <tr><th>Bootstrap Support:</th><td>100%</td></tr>
+            </table>
+            <h3>Branch Support</h3>
+            <table class="table">
+                <tr><th>AU Test p-value:</th><td class="significant">0.0000 (significant)</td></tr>
+                <tr><th>Log-Likelihood Difference:</th><td>1068.3313</td></tr>
+            </table>
+            <h3>Site Analysis</h3>
+            <table class="table">
+                <tr><th>Supporting Sites:</th><td>61800</td></tr>
+                <tr><th>Conflicting Sites:</th><td>27900</td></tr>
+                <tr><th>Support Ratio:</th><td>2.22</td></tr>
+                <tr><th>Weighted Support Ratio:</th><td>1.37</td></tr>
+            </table>
+            <h3>Downloads</h3>
+            <div class="download-links">
+                <a href="tree_Clade_6.nwk" download>Download Newick Tree</a>
+                <a href="#" onclick="saveSvg()">Download SVG</a>
+            </div>
+        </div>
+    </div>
+    <script>
+        // Taxa to highlight
+        const highlightTaxa = ["Homo_sapiens", "Pan_troglodytes", "Gorilla_gorilla", "Orangutan"];
+
+        // Create tree
+        let tree = new phylotree.phylotree("tree_Clade_6.nwk");
+        let showLabels = true;
+
+        // Initialize visualization on page load
+        document.addEventListener("DOMContentLoaded", function() {
+            loadAndDisplayTree();
+        });
+
+        function loadAndDisplayTree() {
+            fetch("tree_Clade_6.nwk").then(response => {
+                if (response.ok) {
+                    return response.text();
+                }
+                throw new Error('Tree file not found');
+            })
+            .then(treeData => {
+                // Set up tree visualization
+                tree = new phylotree.phylotree(treeData);
+
+                // Configure tree display settings
+                tree.branch_length(null)  // Use branch lengths from the tree
+                    .branch_name(function(node) {
+                        return node.data.name;
+                    })
+                    .node_span(function(node) {
+                        return showLabels ? 5 : 2;
+                    })
+                    .node_circle_size(function(node) {
+                        return isHighlighted(node) ? 5 : 3;
+                    })
+                    .font_size(14)
+                    .scale_bar_font_size(12)
+                    .node_styler(nodeStyler)
+                    .branch_styler(branchStyler)
+                    .layout_handler(phylotree.layout_handlers.radial)
+                    .spacing_x(40) // Controls horizontal spacing
+                    .spacing_y(15) // Controls vertical spacing
+                    .size([550, 550])
+                    .radial(false); // Start with rectangular layout
+
+                // Get the container
+                let container = document.getElementById('tree_container');
+
+                // Render the tree
+                tree.render("#tree_container");
+            })
+            .catch(error => {
+                console.error("Error loading tree data:", error);
+                document.getElementById('tree_container').innerHTML =
+                    "<p style='color:red;padding:20px;'>Error loading tree data. Check console for details.</p>";
+            });
+        }
+
+        // Style branches that belong to the highlighted clade
+        function branchStyler(dom_element, link_data) {
+            if (isHighlighted(link_data.target)) {
+                dom_element.style.stroke = "#e74c3c";
+                dom_element.style.strokeWidth = "3px";
+                dom_element.classList.add("highlighted-branch");
+            }
+        }
+
+        // Style nodes that belong to the highlighted clade
+        function nodeStyler(dom_element, node_data) {
+            if (isHighlighted(node_data)) {
+                dom_element.classList.add("highlighted-node");
+            }
+        }
+
+        // Check if a node belongs to the highlighted clade
+        function isHighlighted(node) {
+            if (!node.data) return false;
+
+            // Directly check leaf nodes
+            if (node.children && node.children.length === 0) {
+                return highlightTaxa.includes(node.data.name);
+            }
+
+            // For internal nodes, check if all descendants are in the highlighted taxa
+            let leaves = getAllLeaves(node);
+            let leafNames = leaves.map(leaf => leaf.data.name);
+
+            if (leafNames.length === 0) return false;
+
+            // Check if this node represents exactly our clade
+            // or is contained within our clade
+            return leafNames.every(name => highlightTaxa.includes(name));
+        }
+
+        // Get all leaves (terminal nodes) descending from a node
+        function getAllLeaves(node) {
+            if (!node.children || node.children.length === 0) {
+                return [node];
+            }
+
+            let leaves = [];
+            for (let child of node.children) {
+                leaves = leaves.concat(getAllLeaves(child));
+            }
+            return leaves;
+        }
+
+        // Reset tree to default view
+        function resetTree() {
+            tree.spacing_x(40)
+                .spacing_y(15)
+                .radial(false)
+                .update();
+        }
+
+        // Toggle display of leaf labels
+        function toggleLabels() {
+            showLabels = !showLabels;
+            tree.node_span(function(node) {
+                return showLabels ? 5 : 2;
+            }).update();
+        }
+
+        // Save tree as SVG
+        function saveSvg() {
+            let svg = document.querySelector("#tree_container svg");
+            let serializer = new XMLSerializer();
+            let source = serializer.serializeToString(svg);
+
+            // Add name spaces
+            if (!source.match(/^<svg[^>]+xmlns="http:\/\/www\.w3\.org\/2000\/svg"/)) {
+                source = source.replace(/^<svg/, '<svg xmlns="http://www.w3.org/2000/svg"');
+            }
+            if (!source.match(/^<svg[^>]+"http:\/\/www\.w3\.org\/1999\/xlink"/)) {
+                source = source.replace(/^<svg/, '<svg xmlns:xlink="http://www.w3.org/1999/xlink"');
+            }
+
+            // Add XML declaration
+            source = '<?xml version="1.0" standalone="no"?>\r\n' + source;
+
+            // Create download link
+            let downloadLink = document.createElement("a");
+            downloadLink.href = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(source);
+            downloadLink.download = "tree_Clade_6.svg";
+            document.body.appendChild(downloadLink);
+            downloadLink.click();
+            document.body.removeChild(downloadLink);
+        }
+    </script>
+</body>
+</html>

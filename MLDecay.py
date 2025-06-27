@@ -44,7 +44,11 @@ class MLDecayIndices:
                  starting_tree: Path = None, data_type="dna",
                  debug=False, keep_files=False, gamma_shape=None, prop_invar=None,
                  base_freq=None, rates=None, protein_model=None, nst=None,
-                 parsmodel=None, paup_block=None):
+                 parsmodel=None, paup_block=None, analysis_mode="ml",
+                 bayesian_software=None, mrbayes_path="mb", beast_path="beast",
+                 bayes_model=None, bayes_ngen=1000000, bayes_burnin=0.25,
+                 bayes_chains=4, bayes_sample_freq=1000, marginal_likelihood="ss",
+                 ss_alpha=0.4, ss_nsteps=50):
 
         self.alignment_file = Path(alignment_file)
         self.alignment_format = alignment_format
@@ -62,6 +66,20 @@ class MLDecayIndices:
         self.parsmodel_arg = parsmodel # For discrete data, used in _convert_model_to_paup
         self.user_paup_block = paup_block # Raw user block content
         self._files_to_cleanup = []
+        
+        # Bayesian analysis parameters
+        self.analysis_mode = analysis_mode
+        self.bayesian_software = bayesian_software
+        self.mrbayes_path = mrbayes_path
+        self.beast_path = beast_path
+        self.bayes_model = bayes_model or model  # Use ML model if not specified
+        self.bayes_ngen = bayes_ngen
+        self.bayes_burnin = bayes_burnin
+        self.bayes_chains = bayes_chains
+        self.bayes_sample_freq = bayes_sample_freq
+        self.marginal_likelihood = marginal_likelihood
+        self.ss_alpha = ss_alpha
+        self.ss_nsteps = ss_nsteps
 
         self.data_type = data_type.lower()
         if self.data_type not in ["dna", "protein", "discrete"]:
@@ -702,19 +720,308 @@ class MLDecayIndices:
         except Exception as e:
             logger.error(f"Constraint tree generation/scoring failed for index {tree_idx}: {e}")
             return None, None
+    
+    # ===== Bayesian Analysis Methods =====
+    
+    def _generate_mrbayes_nexus(self, constraint_tree_file=None, clade_taxa=None, constraint_id=None):
+        """
+        Generate MrBayes NEXUS file with optional constraint for non-monophyly.
+        
+        Args:
+            constraint_tree_file: Path to save the constraint tree (for file-based constraints)
+            clade_taxa: List of taxa to constrain as non-monophyletic
+            constraint_id: Identifier for the constraint
+            
+        Returns:
+            String containing MrBayes block
+        """
+        blocks = []
+        
+        # MrBayes block
+        blocks.append("begin mrbayes;")
+        
+        # If constraint is specified, add it
+        if clade_taxa and constraint_id:
+            # Format taxa for MrBayes
+            formatted_taxa = [self._format_taxon_for_paup(t) for t in clade_taxa]
+            taxa_string = " ".join(formatted_taxa)
+            
+            # Create a constraint that forces NON-monophyly
+            # The -1 syntax forces the taxa to NOT form a monophyletic group
+            blocks.append(f"    constraint broken_{constraint_id} -1 = {taxa_string};")
+            blocks.append(f"    prset topologypr = constraints(broken_{constraint_id});")
+        
+        # Model settings based on data type
+        if self.data_type == "dna":
+            # Convert model string to MrBayes format
+            if "GTR" in self.bayes_model.upper():
+                blocks.append("    lset nst=6 rates=invgamma;")
+            elif "HKY" in self.bayes_model.upper():
+                blocks.append("    lset nst=2 rates=invgamma;")
+            elif "JC" in self.bayes_model.upper():
+                blocks.append("    lset nst=1 rates=equal;")
+            else:
+                blocks.append("    lset nst=6 rates=invgamma;")  # Default to GTR+G
+                
+            # Add gamma/invariable sites if specified
+            if "+G" in self.bayes_model and "+I" in self.bayes_model:
+                blocks.append("    lset rates=invgamma;")
+            elif "+G" in self.bayes_model:
+                blocks.append("    lset rates=gamma;")
+            elif "+I" in self.bayes_model:
+                blocks.append("    lset rates=propinv;")
+                
+        elif self.data_type == "protein":
+            protein_models = {
+                "JTT": "jones", "WAG": "wag", "LG": "lg", 
+                "DAYHOFF": "dayhoff", "CPREV": "cprev", "MTREV": "mtrev"
+            }
+            model_name = "wag"  # default
+            for pm, mb_name in protein_models.items():
+                if pm in self.bayes_model.upper():
+                    model_name = mb_name
+                    break
+            blocks.append(f"    prset aamodelpr=fixed({model_name});")
+            
+            if "+G" in self.bayes_model:
+                blocks.append("    lset rates=gamma;")
+        
+        # MCMC settings
+        blocks.append(f"    mcmc ngen={self.bayes_ngen} samplefreq={self.bayes_sample_freq} "
+                     f"nchains={self.bayes_chains} savebrlens=yes;")
+        
+        # Marginal likelihood estimation
+        if self.marginal_likelihood == "ss":
+            blocks.append(f"    ss alpha={self.ss_alpha} nsteps={self.ss_nsteps};")
+        elif self.marginal_likelihood == "ps":
+            blocks.append("    sump burnin=yes;")
+            
+        # Summary commands
+        burnin_samples = int(self.bayes_ngen / self.bayes_sample_freq * self.bayes_burnin)
+        blocks.append(f"    sump burnin={burnin_samples};")
+        blocks.append(f"    sumt burnin={burnin_samples};")
+        
+        blocks.append("end;")
+        
+        return "\n".join(blocks)
+    
+    def _run_mrbayes(self, nexus_file, output_prefix):
+        """
+        Execute MrBayes and return the marginal likelihood.
+        
+        Args:
+            nexus_file: Path to NEXUS file with data and MrBayes block
+            output_prefix: Prefix for output files
+            
+        Returns:
+            Marginal likelihood value or None if failed
+        """
+        try:
+            # MrBayes command
+            cmd = [self.mrbayes_path, str(nexus_file)]
+            
+            logger.info(f"Running MrBayes: {' '.join(cmd)}")
+            
+            # Run MrBayes
+            result = subprocess.run(cmd, cwd=str(self.temp_path), 
+                                  capture_output=True, text=True, 
+                                  timeout=max(7200, self.bayes_ngen / 1000))  # Rough timeout estimate
+            
+            if result.returncode != 0:
+                logger.error(f"MrBayes failed with return code {result.returncode}")
+                if self.debug:
+                    logger.debug(f"MrBayes stderr: {result.stderr}")
+                return None
+            
+            # Parse marginal likelihood from output
+            ml_value = self._parse_mrbayes_marginal_likelihood(
+                self.temp_path / f"{nexus_file.stem}.log", output_prefix)
+            
+            return ml_value
+            
+        except subprocess.TimeoutExpired:
+            logger.error(f"MrBayes timed out for {nexus_file}")
+            return None
+        except Exception as e:
+            logger.error(f"Error running MrBayes: {e}")
+            if self.debug:
+                import traceback
+                logger.debug(traceback.format_exc())
+            return None
+    
+    def run_bayesian_decay_analysis(self):
+        """
+        Run Bayesian decay analysis for all clades identified in the ML tree.
+        
+        Returns:
+            Dictionary mapping clade_id to Bayesian decay metrics
+        """
+        if not self.ml_tree:
+            logger.error("No ML tree available. Build ML tree first to identify clades.")
+            return {}
+            
+        if not self.bayesian_software:
+            logger.error("No Bayesian software specified.")
+            return {}
+            
+        logger.info(f"Running Bayesian decay analysis using {self.bayesian_software}")
+        
+        # First, run unconstrained Bayesian analysis
+        logger.info("Running unconstrained Bayesian analysis...")
+        
+        # Create NEXUS file with MrBayes block
+        nexus_content = self.nexus_path.read_text()
+        mrbayes_block = self._generate_mrbayes_nexus()
+        combined_nexus = nexus_content + "\n" + mrbayes_block
+        
+        unconstrained_nexus = self.temp_path / "unconstrained.nex"
+        unconstrained_nexus.write_text(combined_nexus)
+        
+        # Run unconstrained analysis
+        unconstrained_ml = self._run_mrbayes(unconstrained_nexus, "unconstrained")
+        
+        if unconstrained_ml is None:
+            logger.error("Unconstrained Bayesian analysis failed")
+            return {}
+            
+        logger.info(f"Unconstrained marginal likelihood: {unconstrained_ml}")
+        
+        # Now run constrained analyses for each clade
+        bayesian_results = {}
+        
+        # Get all clades from ML tree (same as in ML analysis)
+        internal_nodes = [node for node in self.ml_tree.get_nonterminals() 
+                         if node is not self.ml_tree.root]
+        
+        for idx, node in enumerate(internal_nodes, start=3):
+            clade_taxa = [term.name for term in node.get_terminals()]
+            clade_id = f"Clade_{idx}"
+            
+            logger.info(f"Running Bayesian constraint analysis for {clade_id} (taxa: {len(clade_taxa)})")
+            
+            # Create constrained NEXUS file
+            mrbayes_block = self._generate_mrbayes_nexus(
+                clade_taxa=clade_taxa, 
+                constraint_id=clade_id
+            )
+            combined_nexus = nexus_content + "\n" + mrbayes_block
+            
+            constrained_nexus = self.temp_path / f"constrained_{clade_id}.nex"
+            constrained_nexus.write_text(combined_nexus)
+            
+            # Run constrained analysis
+            constrained_ml = self._run_mrbayes(constrained_nexus, f"constrained_{clade_id}")
+            
+            if constrained_ml is not None:
+                # Calculate Bayesian decay (marginal likelihood difference)
+                bayes_decay = unconstrained_ml - constrained_ml
+                bayes_factor = np.exp(bayes_decay)  # Convert log difference to Bayes Factor
+                
+                bayesian_results[clade_id] = {
+                    'unconstrained_ml': unconstrained_ml,
+                    'constrained_ml': constrained_ml,
+                    'bayes_decay': bayes_decay,
+                    'bayes_factor': bayes_factor,
+                    'taxa': clade_taxa
+                }
+                
+                logger.info(f"{clade_id}: Bayes decay = {bayes_decay:.4f}, BF = {bayes_factor:.2e}")
+            else:
+                logger.warning(f"Constrained analysis failed for {clade_id}")
+                
+        return bayesian_results
+    
+    def _parse_mrbayes_marginal_likelihood(self, log_file, output_prefix):
+        """
+        Parse marginal likelihood from MrBayes log file.
+        
+        Args:
+            log_file: Path to MrBayes .log file
+            output_prefix: Prefix to identify the run
+            
+        Returns:
+            Marginal likelihood value or None
+        """
+        if not log_file.exists():
+            logger.warning(f"MrBayes log file not found: {log_file}")
+            return None
+            
+        try:
+            log_content = log_file.read_text()
+            
+            # Look for stepping-stone sampling results
+            if self.marginal_likelihood == "ss":
+                # Pattern for stepping-stone marginal likelihood
+                ss_pattern = r"Marginal likelihood \(in natural log units\) estimated using stepping-stone sampling.*?= (-?\d+\.\d+)"
+                match = re.search(ss_pattern, log_content, re.DOTALL)
+                if match:
+                    ml_value = float(match.group(1))
+                    logger.info(f"Parsed stepping-stone marginal likelihood for {output_prefix}: {ml_value}")
+                    return ml_value
+                    
+            # Look for harmonic mean estimate
+            hm_pattern = r"Estimated marginal likelihood.*?= (-?\d+\.\d+)"
+            match = re.search(hm_pattern, log_content)
+            if match:
+                ml_value = float(match.group(1))
+                logger.info(f"Parsed harmonic mean marginal likelihood for {output_prefix}: {ml_value}")
+                return ml_value
+                
+            logger.warning(f"Could not find marginal likelihood in {log_file}")
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error parsing MrBayes log: {e}")
+            if self.debug:
+                import traceback
+                logger.debug(traceback.format_exc())
+            return None
 
     def calculate_decay_indices(self, perform_site_analysis=False):
-        """Calculate ML decay indices for all internal branches of the ML tree."""
+        """
+        Calculate decay indices based on the selected analysis mode.
+        
+        Args:
+            perform_site_analysis: Whether to perform site-specific analysis (ML only)
+            
+        Returns:
+            Dictionary of decay indices
+        """
+        # For any analysis mode, we need the ML tree to identify clades
         if not self.ml_tree:
             logger.info("ML tree not available. Attempting to build it first...")
             try:
                 self.build_ml_tree()
             except Exception as e:
                 logger.error(f"Failed to build ML tree during decay calculation: {e}")
-                return {} # Cannot proceed
+                return {}
 
+        if not self.ml_tree:
+            logger.error("ML tree is missing. Cannot identify clades for decay analysis.")
+            return {}
+            
+        # For ML-only and combined modes, we need ML likelihood
+        if self.analysis_mode in ["ml", "both"] and self.ml_likelihood is None:
+            logger.error("ML likelihood is missing. Cannot calculate ML decay indices.")
+            if self.analysis_mode == "ml":
+                return {}
+            # For "both" mode, we can still continue with Bayesian only
+            
+        # Dispatch to appropriate method based on analysis mode
+        if self.analysis_mode == "ml":
+            return self._calculate_ml_decay_indices(perform_site_analysis)
+        elif self.analysis_mode == "bayesian":
+            return self._calculate_bayesian_decay_indices()
+        elif self.analysis_mode == "both":
+            return self._calculate_combined_decay_indices(perform_site_analysis)
+        else:
+            logger.error(f"Unknown analysis mode: {self.analysis_mode}")
+            return {}
+    
+    def _calculate_ml_decay_indices(self, perform_site_analysis=False):
+        """Calculate ML decay indices for all internal branches of the ML tree."""
         if not self.ml_tree or self.ml_likelihood is None:
-            logger.error("ML tree or its likelihood is missing. Cannot calculate decay indices.")
+            logger.error("ML tree or its likelihood is missing. Cannot calculate ML decay indices.")
             return {}
 
         logger.info("Calculating branch support (decay indices)...")
@@ -847,6 +1154,86 @@ class MLDecayIndices:
         else:
             logger.info(f"Calculated support values for {len(self.decay_indices)} branches.")
 
+        return self.decay_indices
+    
+    def _calculate_bayesian_decay_indices(self):
+        """
+        Calculate Bayesian decay indices for all internal branches.
+        
+        Returns:
+            Dictionary of decay indices with Bayesian metrics
+        """
+        logger.info("Calculating Bayesian decay indices...")
+        
+        # Run Bayesian decay analysis
+        bayesian_results = self.run_bayesian_decay_analysis()
+        
+        if not bayesian_results:
+            logger.warning("No Bayesian decay indices were calculated.")
+            return {}
+            
+        # Convert to standard decay_indices format
+        self.decay_indices = {}
+        
+        for clade_id, bayes_data in bayesian_results.items():
+            self.decay_indices[clade_id] = {
+                'taxa': bayes_data['taxa'],
+                'bayes_unconstrained_ml': bayes_data['unconstrained_ml'],
+                'bayes_constrained_ml': bayes_data['constrained_ml'],
+                'bayes_decay': bayes_data['bayes_decay'],
+                'bayes_factor': bayes_data['bayes_factor'],
+                # ML fields are None for Bayesian-only analysis
+                'lnl_diff': None,
+                'constrained_lnl': None,
+                'AU_pvalue': None,
+                'significant_AU': None
+            }
+            
+        logger.info(f"Calculated Bayesian decay indices for {len(self.decay_indices)} branches.")
+        return self.decay_indices
+    
+    def _calculate_combined_decay_indices(self, perform_site_analysis=False):
+        """
+        Calculate both ML and Bayesian decay indices.
+        
+        Args:
+            perform_site_analysis: Whether to perform site-specific analysis for ML
+            
+        Returns:
+            Dictionary of decay indices with both ML and Bayesian metrics
+        """
+        logger.info("Calculating combined ML and Bayesian decay indices...")
+        
+        # First calculate ML decay indices
+        ml_results = self._calculate_ml_decay_indices(perform_site_analysis)
+        
+        # Then run Bayesian analysis
+        bayesian_results = self.run_bayesian_decay_analysis()
+        
+        # Merge results
+        if bayesian_results:
+            for clade_id in ml_results:
+                if clade_id in bayesian_results:
+                    # Add Bayesian fields to existing ML results
+                    bayes_data = bayesian_results[clade_id]
+                    ml_results[clade_id].update({
+                        'bayes_unconstrained_ml': bayes_data['unconstrained_ml'],
+                        'bayes_constrained_ml': bayes_data['constrained_ml'],
+                        'bayes_decay': bayes_data['bayes_decay'],
+                        'bayes_factor': bayes_data['bayes_factor']
+                    })
+                else:
+                    # No Bayesian results for this clade
+                    ml_results[clade_id].update({
+                        'bayes_unconstrained_ml': None,
+                        'bayes_constrained_ml': None,
+                        'bayes_decay': None,
+                        'bayes_factor': None
+                    })
+        else:
+            logger.warning("Bayesian analysis failed; results will contain ML metrics only.")
+            
+        self.decay_indices = ml_results
         return self.decay_indices
 
     def _calculate_site_likelihoods(self, tree_files_list, branch_id):
@@ -1614,23 +2001,44 @@ class MLDecayIndices:
 
         # Check if bootstrap analysis was performed
         has_bootstrap = hasattr(self, 'bootstrap_tree') and self.bootstrap_tree
+        
+        # Check which types of results we have
+        has_ml = any(d.get('lnl_diff') is not None for d in self.decay_indices.values())
+        has_bayesian = any(d.get('bayes_decay') is not None for d in self.decay_indices.values())
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with output_path.open('w') as f:
             f.write("MLDecay Branch Support Analysis\n")
             f.write("=" * 30 + "\n\n")
-            ml_l = self.ml_likelihood if self.ml_likelihood is not None else "N/A"
-            if isinstance(ml_l, float): ml_l = f"{ml_l:.6f}"
-            f.write(f"ML tree log-likelihood: {ml_l}\n\n")
+            
+            # Write appropriate header based on analysis type
+            if self.analysis_mode == "ml":
+                f.write("Analysis mode: Maximum Likelihood\n")
+            elif self.analysis_mode == "bayesian":
+                f.write(f"Analysis mode: Bayesian ({self.bayesian_software})\n")
+            elif self.analysis_mode == "both":
+                f.write(f"Analysis mode: Combined ML + Bayesian ({self.bayesian_software})\n")
+            f.write("\n")
+            
+            # ML tree likelihood (if available)
+            if self.ml_likelihood is not None:
+                f.write(f"ML tree log-likelihood: {self.ml_likelihood:.6f}\n\n")
+            
             f.write("Branch Support Values:\n")
-            f.write("-" * 80 + "\n")
+            f.write("-" * 120 + "\n")
 
-            # Header - add bootstrap column if bootstrap analysis was performed
-            header = "Clade_ID\tNum_Taxa\tConstrained_lnL\tLnL_Diff_from_ML\tAU_p-value\tSignificant_AU (p<0.05)"
+            # Build dynamic header based on available data
+            header_parts = ["Clade_ID", "Num_Taxa"]
+            
+            if has_ml:
+                header_parts.extend(["Constrained_lnL", "LnL_Diff_from_ML", "AU_p-value", "Significant_AU (p<0.05)"])
+            if has_bayesian:
+                header_parts.extend(["Bayes_ML_Diff", "Bayes_Factor"])
             if has_bootstrap:
-                header += "\tBootstrap"
-            header += "\tTaxa_List\n"
-            f.write(header)
+                header_parts.append("Bootstrap")
+            header_parts.append("Taxa_List")
+            
+            f.write("\t".join(header_parts) + "\n")
 
             # Create mapping of taxa sets to bootstrap values if bootstrap analysis was performed
             bootstrap_values = {}
@@ -1645,19 +2053,38 @@ class MLDecayIndices:
                 taxa_str = ",".join(taxa_list)
                 num_taxa = len(taxa_list)
 
-                c_lnl = data.get('constrained_lnl', 'N/A')
-                if isinstance(c_lnl, float): c_lnl = f"{c_lnl:.4f}"
-
-                lnl_d = data.get('lnl_diff', 'N/A')
-                if isinstance(lnl_d, float): lnl_d = f"{lnl_d:.4f}"
-
-                au_p = data.get('AU_pvalue', 'N/A')
-                if isinstance(au_p, float): au_p = f"{au_p:.4f}"
-
-                sig_au = data.get('significant_AU', 'N/A')
-                if isinstance(sig_au, bool): sig_au = "Yes" if sig_au else "No"
-
-                row = f"{clade_id}\t{num_taxa}\t{c_lnl}\t{lnl_d}\t{au_p}\t{sig_au}"
+                row_parts = [clade_id, str(num_taxa)]
+                
+                # Add ML fields if present
+                if has_ml:
+                    c_lnl = data.get('constrained_lnl', 'N/A')
+                    if isinstance(c_lnl, float): c_lnl = f"{c_lnl:.4f}"
+                    
+                    lnl_d = data.get('lnl_diff', 'N/A')
+                    if isinstance(lnl_d, float): lnl_d = f"{lnl_d:.4f}"
+                    
+                    au_p = data.get('AU_pvalue', 'N/A')
+                    if isinstance(au_p, float): au_p = f"{au_p:.4f}"
+                    
+                    sig_au = data.get('significant_AU', 'N/A')
+                    if isinstance(sig_au, bool): sig_au = "Yes" if sig_au else "No"
+                    
+                    row_parts.extend([c_lnl, lnl_d, au_p, sig_au])
+                
+                # Add Bayesian fields if present
+                if has_bayesian:
+                    bayes_decay = data.get('bayes_decay', 'N/A')
+                    if isinstance(bayes_decay, float): bayes_decay = f"{bayes_decay:.4f}"
+                    
+                    bayes_factor = data.get('bayes_factor', 'N/A')
+                    if isinstance(bayes_factor, float): 
+                        # Use scientific notation for large Bayes factors
+                        if bayes_factor > 1000:
+                            bayes_factor = f"{bayes_factor:.2e}"
+                        else:
+                            bayes_factor = f"{bayes_factor:.2f}"
+                    
+                    row_parts.extend([bayes_decay, bayes_factor])
 
                 # Add bootstrap value if available
                 if has_bootstrap:
@@ -1665,16 +2092,16 @@ class MLDecayIndices:
                     bs_val = bootstrap_values.get(taxa_set, "N/A")
                     if isinstance(bs_val, (int, float)):
                         bs_val = f"{int(bs_val)}"
-                    row += f"\t{bs_val}"
+                    row_parts.append(bs_val)
 
-                row += f"\t{taxa_str}\n"
-                f.write(row)
+                row_parts.append(taxa_str)
+                f.write("\t".join(row_parts) + "\n")
 
         logger.info(f"Results written to {output_path}")
 
     def generate_detailed_report(self, output_path: Path):
         # Basic check
-        if not self.decay_indices and self.ml_likelihood is None:
+        if not self.decay_indices and self.ml_likelihood is None and not hasattr(self, 'bayes_marginal_likelihood'):
             logger.warning("No results available to generate detailed report.")
             try:
                 output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1684,58 +2111,113 @@ class MLDecayIndices:
                  logger.error(f"Failed to write empty detailed report {output_path}: {e_write}")
                  return
 
-        # Check if bootstrap analysis was performed
+        # Check which types of results we have
+        has_ml = any(d.get('lnl_diff') is not None for d in self.decay_indices.values()) if self.decay_indices else False
+        has_bayesian = any(d.get('bayes_decay') is not None for d in self.decay_indices.values()) if self.decay_indices else False
         has_bootstrap = hasattr(self, 'bootstrap_tree') and self.bootstrap_tree
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with output_path.open('w') as f:
-            f.write(f"# ML-Decay Branch Support Analysis Report (v{VERSION})\n\n")
+            # Title based on analysis type
+            if has_ml and has_bayesian:
+                f.write(f"# ML/Bayesian Decay Branch Support Analysis Report (v{VERSION})\n\n")
+            elif has_bayesian:
+                f.write(f"# Bayesian Decay Branch Support Analysis Report (v{VERSION})\n\n")
+            else:
+                f.write(f"# ML-Decay Branch Support Analysis Report (v{VERSION})\n\n")
+                
             f.write(f"Date: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
 
             f.write("## Analysis Parameters\n\n")
             f.write(f"- Alignment file: `{self.alignment_file.name}`\n")
             f.write(f"- Data type: `{self.data_type}`\n")
-            if self.user_paup_block:
-                f.write("- Model: User-defined PAUP* block\n")
-            else:
-                f.write(f"- Model string: `{self.model_str}`\n")
-                f.write(f"- PAUP* `lset` command: `{self.paup_model_cmds}`\n")
+            f.write(f"- Analysis mode: `{self.analysis_mode}`\n")
+            
+            # ML parameters
+            if has_ml or self.analysis_mode in ["ml", "both"]:
+                if self.user_paup_block:
+                    f.write("- ML Model: User-defined PAUP* block\n")
+                else:
+                    f.write(f"- ML Model string: `{self.model_str}`\n")
+                    f.write(f"- PAUP* `lset` command: `{self.paup_model_cmds}`\n")
+            
+            # Bayesian parameters
+            if has_bayesian or self.analysis_mode in ["bayesian", "both"]:
+                f.write(f"- Bayesian software: `{self.bayesian_software}`\n")
+                f.write(f"- Bayesian model: `{self.bayes_model}`\n")
+                f.write(f"- MCMC generations: `{self.bayes_ngen}`\n")
+                f.write(f"- Burnin fraction: `{self.bayes_burnin}`\n")
+                f.write(f"- Marginal likelihood method: `{self.marginal_likelihood}`\n")
+                
             if has_bootstrap:
                 f.write("- Bootstrap analysis: Performed\n")
 
-            ml_l = self.ml_likelihood if self.ml_likelihood is not None else "N/A"
-            if isinstance(ml_l, float): ml_l = f"{ml_l:.6f}"
             f.write("\n## Summary Statistics\n\n")
-            f.write(f"- ML tree log-likelihood: **{ml_l}**\n")
+            
+            # ML statistics
+            if has_ml:
+                ml_l = self.ml_likelihood if self.ml_likelihood is not None else "N/A"
+                if isinstance(ml_l, float): ml_l = f"{ml_l:.6f}"
+                f.write(f"- ML tree log-likelihood: **{ml_l}**\n")
+                
+            # Bayesian statistics
+            if has_bayesian and hasattr(self, 'bayes_marginal_likelihood'):
+                bayes_ml = self.bayes_marginal_likelihood if self.bayes_marginal_likelihood is not None else "N/A"
+                if isinstance(bayes_ml, float): bayes_ml = f"{bayes_ml:.6f}"
+                f.write(f"- Bayesian marginal likelihood: **{bayes_ml}**\n")
+                
             f.write(f"- Number of internal branches tested: {len(self.decay_indices)}\n")
 
             if self.decay_indices:
-                lnl_diffs = [d['lnl_diff'] for d in self.decay_indices.values() if d.get('lnl_diff') is not None]
-                if lnl_diffs:
-                    f.write(f"- Avg log-likelihood difference (constrained vs ML): {np.mean(lnl_diffs):.4f}\n")
-                    f.write(f"- Min log-likelihood difference: {min(lnl_diffs):.4f}\n")
-                    f.write(f"- Max log-likelihood difference: {max(lnl_diffs):.4f}\n")
+                # ML-specific statistics
+                if has_ml:
+                    lnl_diffs = [d['lnl_diff'] for d in self.decay_indices.values() if d.get('lnl_diff') is not None]
+                    if lnl_diffs:
+                        f.write(f"- Avg ML log-likelihood difference (constrained vs ML): {np.mean(lnl_diffs):.4f}\n")
+                        f.write(f"- Min ML log-likelihood difference: {min(lnl_diffs):.4f}\n")
+                        f.write(f"- Max ML log-likelihood difference: {max(lnl_diffs):.4f}\n")
 
-                au_pvals = [d['AU_pvalue'] for d in self.decay_indices.values() if d.get('AU_pvalue') is not None]
-                if au_pvals:
-                    sig_au_count = sum(1 for p in au_pvals if p < 0.05)
-                    f.write(f"- Branches with significant AU support (p < 0.05): {sig_au_count} / {len(au_pvals)} evaluated\n")
+                    au_pvals = [d['AU_pvalue'] for d in self.decay_indices.values() if d.get('AU_pvalue') is not None]
+                    if au_pvals:
+                        sig_au_count = sum(1 for p in au_pvals if p < 0.05)
+                        f.write(f"- Branches with significant AU support (p < 0.05): {sig_au_count} / {len(au_pvals)} evaluated\n")
+                
+                # Bayesian-specific statistics
+                if has_bayesian:
+                    bayes_decays = [d['bayes_decay'] for d in self.decay_indices.values() if d.get('bayes_decay') is not None]
+                    if bayes_decays:
+                        f.write(f"- Avg Bayesian decay (marginal lnL difference): {np.mean(bayes_decays):.4f}\n")
+                        f.write(f"- Min Bayesian decay: {min(bayes_decays):.4f}\n")
+                        f.write(f"- Max Bayesian decay: {max(bayes_decays):.4f}\n")
+                        
+                    bayes_factors = [d['bayes_factor'] for d in self.decay_indices.values() if d.get('bayes_factor') is not None]
+                    if bayes_factors:
+                        strong_bf_count = sum(1 for bf in bayes_factors if bf > 10)
+                        f.write(f"- Branches with strong Bayes Factor support (BF > 10): {strong_bf_count} / {len(bayes_factors)} evaluated\n")
 
             f.write("\n## Detailed Branch Support Results\n\n")
 
-            # Table header - add bootstrap column if needed
-            header = "| Clade ID | Taxa Count | Constrained lnL | LnL Diff from ML | AU p-value | Significant (AU) "
+            # Build dynamic table header based on available data
+            header_parts = ["| Clade ID | Taxa Count "]
+            separator_parts = ["|----------|------------ "]
+            
+            if has_ml:
+                header_parts.extend(["| Constrained lnL | LnL Diff from ML | AU p-value | Significant (AU) "])
+                separator_parts.extend(["|-----------------|------------------|------------|-------------------- "])
+            
+            if has_bayesian:
+                header_parts.extend(["| Bayes Decay | Bayes Factor | BF Support "])
+                separator_parts.extend(["|-------------|--------------|------------ "])
+                
             if has_bootstrap:
-                header += "| Bootstrap "
-            header += "| Included Taxa (sample) |\n"
-            f.write(header)
-
-            # Table separator - add extra cell for bootstrap if needed
-            separator = "|----------|------------|-----------------|------------------|------------|-------------------- "
-            if has_bootstrap:
-                separator += "|----------- "
-            separator += "|--------------------------|\n"
-            f.write(separator)
+                header_parts.append("| Bootstrap ")
+                separator_parts.append("|----------- ")
+                
+            header_parts.append("| Included Taxa (sample) |\n")
+            separator_parts.append("|--------------------------|\n")
+            
+            f.write("".join(header_parts))
+            f.write("".join(separator_parts))
 
             # Get bootstrap values if bootstrap analysis was performed
             bootstrap_values = {}
@@ -1750,37 +2232,80 @@ class MLDecayIndices:
                 taxa_count = len(taxa_list)
                 taxa_sample = ", ".join(taxa_list[:3]) + ('...' if taxa_count > 3 else '')
 
-                c_lnl = data.get('constrained_lnl', 'N/A')
-                if isinstance(c_lnl, float): c_lnl = f"{c_lnl:.4f}"
-
-                lnl_d = data.get('lnl_diff', 'N/A')
-                if isinstance(lnl_d, float): lnl_d = f"{lnl_d:.4f}"
-
-                au_p = data.get('AU_pvalue', 'N/A')
-                if isinstance(au_p, float): au_p = f"{au_p:.4f}"
-
-                sig_au = data.get('significant_AU', 'N/A')
-                if isinstance(sig_au, bool): sig_au = "**Yes**" if sig_au else "No"
-
                 # Build the table row
-                row = f"| {clade_id} | {taxa_count} | {c_lnl} | {lnl_d} | {au_p} | {sig_au} "
+                row_parts = [f"| {clade_id} | {taxa_count} "]
+                
+                # ML fields
+                if has_ml:
+                    c_lnl = data.get('constrained_lnl', 'N/A')
+                    if isinstance(c_lnl, float): c_lnl = f"{c_lnl:.4f}"
+                    
+                    lnl_d = data.get('lnl_diff', 'N/A')
+                    if isinstance(lnl_d, float): lnl_d = f"{lnl_d:.4f}"
+                    
+                    au_p = data.get('AU_pvalue', 'N/A')
+                    if isinstance(au_p, float): au_p = f"{au_p:.4f}"
+                    
+                    sig_au = data.get('significant_AU', 'N/A')
+                    if isinstance(sig_au, bool): sig_au = "**Yes**" if sig_au else "No"
+                    
+                    row_parts.append(f"| {c_lnl} | {lnl_d} | {au_p} | {sig_au} ")
+                
+                # Bayesian fields
+                if has_bayesian:
+                    bayes_d = data.get('bayes_decay', 'N/A')
+                    if isinstance(bayes_d, float): bayes_d = f"{bayes_d:.4f}"
+                    
+                    bayes_f = data.get('bayes_factor', 'N/A')
+                    if isinstance(bayes_f, float): bayes_f = f"{bayes_f:.2f}"
+                    
+                    # Interpret Bayes Factor support
+                    bf_support = 'N/A'
+                    if isinstance(bayes_f, float):
+                        if bayes_f > 100:
+                            bf_support = "**Very Strong**"
+                        elif bayes_f > 10:
+                            bf_support = "**Strong**"
+                        elif bayes_f > 3:
+                            bf_support = "Moderate"
+                        elif bayes_f > 1:
+                            bf_support = "Weak"
+                        else:
+                            bf_support = "None"
+                    
+                    row_parts.append(f"| {bayes_d} | {bayes_f} | {bf_support} ")
 
-                # Add bootstrap column if available
+                # Bootstrap column if available
                 if has_bootstrap:
                     taxa_set = frozenset(taxa_list)
                     bs_val = bootstrap_values.get(taxa_set, "N/A")
                     if isinstance(bs_val, (int, float)):
                         bs_val = f"{int(bs_val)}"
-                    row += f"| {bs_val} "
+                    row_parts.append(f"| {bs_val} ")
 
-                row += f"| {taxa_sample} |\n"
-                f.write(row)
+                row_parts.append(f"| {taxa_sample} |\n")
+                f.write("".join(row_parts))
 
             f.write("\n## Interpretation Guide\n\n")
-            f.write("- **LnL Diff from ML**: Log-likelihood of the best tree *without* the clade minus ML tree's log-likelihood. More negative (larger absolute difference) implies stronger support for the clade's presence in the ML tree.\n")
-            f.write("- **AU p-value**: P-value from the Approximately Unbiased test comparing the ML tree against the alternative (constrained) tree. Lower p-values (e.g., < 0.05) suggest the alternative tree (where the clade is broken) is significantly worse than the ML tree, thus supporting the clade.\n")
+            
+            if has_ml:
+                f.write("### ML Analysis\n")
+                f.write("- **LnL Diff from ML**: Log-likelihood of the best tree *without* the clade minus ML tree's log-likelihood. More negative (larger absolute difference) implies stronger support for the clade's presence in the ML tree.\n")
+                f.write("- **AU p-value**: P-value from the Approximately Unbiased test comparing the ML tree against the alternative (constrained) tree. Lower p-values (e.g., < 0.05) suggest the alternative tree (where the clade is broken) is significantly worse than the ML tree, thus supporting the clade.\n\n")
+                
+            if has_bayesian:
+                f.write("### Bayesian Analysis\n")
+                f.write("- **Bayes Decay**: Marginal log-likelihood difference between unconstrained and constrained analyses. More negative values indicate stronger support for the clade.\n")
+                f.write("- **Bayes Factor**: Exponential of the Bayes Decay value. Represents the ratio of marginal likelihoods. Common interpretations:\n")
+                f.write("  - BF > 100: Very strong support\n")
+                f.write("  - BF > 10: Strong support\n")
+                f.write("  - BF > 3: Moderate support\n")
+                f.write("  - BF > 1: Weak support\n")
+                f.write("  - BF ≤ 1: No support\n\n")
+                
             if has_bootstrap:
                 f.write("- **Bootstrap**: Bootstrap support value (percentage of bootstrap replicates in which the clade appears). Higher values (e.g., > 70) suggest stronger support for the clade.\n")
+                
         logger.info(f"Detailed report written to {output_path}")
 
     def write_site_analysis_results(self, output_dir: Path, keep_tree_files=False):
@@ -2641,10 +3166,37 @@ def main():
     run_ctrl.add_argument("--keep-files", action="store_true", help="Keep temporary files after analysis.")
     run_ctrl.add_argument("--debug", action="store_true", help="Enable detailed debug logging (implies --keep-files).")
 
+    # Analysis mode selection
+    analysis_mode = parser.add_argument_group('Analysis Mode')
+    analysis_mode.add_argument("--analysis", choices=["ml", "bayesian", "both"], default="ml",
+                              help="Type of decay analysis to perform: ML-only, Bayesian-only, or both (default: ml)")
+    analysis_mode.add_argument("-M", "--ml-only", action="store_const", const="ml", dest="analysis",
+                              help="Perform ML analysis only (default)")
+    analysis_mode.add_argument("-B", "--bayesian-only", action="store_const", const="bayesian", dest="analysis",
+                              help="Perform Bayesian analysis only")
+    analysis_mode.add_argument("-MB", "--both", action="store_const", const="both", dest="analysis",
+                              help="Perform both ML and Bayesian analyses")
+    
     # Add bootstrap options
     bootstrap_opts = parser.add_argument_group('Bootstrap Analysis (optional)')
     bootstrap_opts.add_argument("--bootstrap", action="store_true", help="Perform bootstrap analysis to calculate support values.")
     bootstrap_opts.add_argument("--bootstrap-reps", type=int, default=100, help="Number of bootstrap replicates (default: 100)")
+    
+    # Bayesian-specific options
+    bayesian_opts = parser.add_argument_group('Bayesian Analysis Options')
+    bayesian_opts.add_argument("--bayesian-software", choices=["mrbayes", "beast"], 
+                              help="Bayesian software to use (required if analysis includes Bayesian)")
+    bayesian_opts.add_argument("--mrbayes-path", default="mb", help="Path to MrBayes executable")
+    bayesian_opts.add_argument("--beast-path", default="beast", help="Path to BEAST executable")
+    bayesian_opts.add_argument("--bayes-model", help="Model for Bayesian analysis (if different from ML model)")
+    bayesian_opts.add_argument("--bayes-ngen", type=int, default=1000000, help="Number of MCMC generations")
+    bayesian_opts.add_argument("--bayes-burnin", type=float, default=0.25, help="Burnin fraction (0-1)")
+    bayesian_opts.add_argument("--bayes-chains", type=int, default=4, help="Number of MCMC chains")
+    bayesian_opts.add_argument("--bayes-sample-freq", type=int, default=1000, help="Sample frequency for MCMC")
+    bayesian_opts.add_argument("--marginal-likelihood", choices=["ss", "ps", "hm"], default="ss",
+                              help="Marginal likelihood estimation method: ss=stepping-stone, ps=path sampling, hm=harmonic mean")
+    bayesian_opts.add_argument("--ss-alpha", type=float, default=0.4, help="Alpha parameter for stepping-stone sampling")
+    bayesian_opts.add_argument("--ss-nsteps", type=int, default=50, help="Number of steps for stepping-stone sampling")
 
     viz_opts = parser.add_argument_group('Visualization Output (optional)')
     viz_opts.add_argument("--visualize", action="store_true", help="Generate static visualization plots (requires matplotlib, seaborn).")
@@ -2655,6 +3207,13 @@ def main():
     viz_opts.add_argument("--keep-tree-files", action="store_true", default=False, help="Keep Newick tree files used for HTML visualization (default: False)")
     parser.add_argument("-v", "--version", action="version", version=f"%(prog)s {VERSION}")
     args = parser.parse_args()
+    
+    # Validate Bayesian analysis arguments
+    if args.analysis in ["bayesian", "both"] and not args.bayesian_software:
+        parser.error("--bayesian-software is required when using Bayesian analysis mode")
+    
+    if args.analysis == "ml" and args.bayesian_software:
+        logger.warning("Bayesian software specified but analysis mode is ML-only. Bayesian options will be ignored.")
 
     if args.debug:
         logger.setLevel(logging.DEBUG)
@@ -2710,7 +3269,19 @@ def main():
             base_freq=args.base_freq, rates=args.rates,
             protein_model=args.protein_model, nst=args.nst,
             parsmodel=args.parsmodel, # Pass the BooleanOptionalAction value
-            paup_block=paup_block_content
+            paup_block=paup_block_content,
+            analysis_mode=args.analysis,
+            bayesian_software=args.bayesian_software,
+            mrbayes_path=args.mrbayes_path,
+            beast_path=args.beast_path,
+            bayes_model=args.bayes_model,
+            bayes_ngen=args.bayes_ngen,
+            bayes_burnin=args.bayes_burnin,
+            bayes_chains=args.bayes_chains,
+            bayes_sample_freq=args.bayes_sample_freq,
+            marginal_likelihood=args.marginal_likelihood,
+            ss_alpha=args.ss_alpha,
+            ss_nsteps=args.ss_nsteps
         )
 
         decay_calc.build_ml_tree() # Can raise exceptions

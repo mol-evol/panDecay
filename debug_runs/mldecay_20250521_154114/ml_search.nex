@@ -1,0 +1,10 @@
+#NEXUS
+begin paup;
+execute alignment.nex;
+    lset nthreads=14 nst=1 basefreq=empirical rates=equal pinvar=0;
+    set criterion=likelihood;
+hsearch start=stepwise addseq=random nreps=10;
+savetrees file=ml_tree.tre format=newick brlens=yes replace=yes;
+lscores 1 / scorefile=ml_score.txt replace=yes;
+quit;
+end;

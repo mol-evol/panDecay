@@ -1,0 +1,10 @@
+#NEXUS
+begin paup;
+execute alignment.nex;
+    lset nthreads=14 nst=1 basefreq=empirical rates=equal pinvar=0;
+    set criterion=likelihood;
+gettrees file=ml_tree.tre mode=3 storebrlens=yes;
+gettrees file=constraint_tree_10.tre mode=7 storebrlens=yes;
+lscores 1-2 / sitelikes=yes scorefile=site_lnl_Clade_10.txt replace=yes;
+quit;
+end;

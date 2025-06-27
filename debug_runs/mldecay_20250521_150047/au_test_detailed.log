@@ -1,0 +1,14 @@
+
+P A U P *
+Version 4.0a (build 168) for macOS (built on Aug  2 2020 at 06:41:30)
+Wed May 21 15:02:09 2025
+
+
+Error(#702): Tree identifier "all" is invalid.
+                 This often occurs when the slash ('/') character that separates a list of tree identifiers from subsequent option settings is omitted in a command.
+
+Error occurred while processing line 20 of file au_test.nex
+
+Processing of input file "au_test.nex" terminated due to errors.
+
+Execution terminated due to errors.

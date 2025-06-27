@@ -1,0 +1,120 @@
+
+P A U P *
+Version 4.0a (build 168) for macOS (built on Aug  2 2020 at 06:41:30)
+Thu Jun 26 21:33:13 2025
+
+
+Tree description:
+
+  Optimality criterion = likelihood
+    898 characters are included
+    All characters have equal weight
+    Likelihood settings:
+      Current model:
+                               Data type = nucleotide
+                  DNA substitution types = 1
+                       State frequencies = equal
+          Proportion of invariable sites = none
+                 Rates at variable sites = equal
+                    Model correspondence = JC69
+
+      Number of distinct data patterns under this model = 413
+      Molecular clock not enforced
+      Starting branch lengths obtained using Rogers-Swofford approximation method
+      Branch-length optimization = one-dimensional Newton-Raphson with pass limit=20, tolerance=1e-07
+      Likelihood calculations performed in single precision
+      Vector processing enabled
+      Using standard Felsenstein pruning for computing likelihoods
+      Conditional-likelihood rescaling threshold = 1e-20
+      Using 12 parallel threads on 16 processors
+
+Tree 1 ("Tree 1"):
+
+-Ln likelihood = 6424.202
+
+Tree 2 ("Tree 2"):
+
+-Ln likelihood = 6460.040
+
+Tree 3 ("Tree 3"):
+
+-Ln likelihood = 6437.026
+
+Tree 4 ("Tree 4"):
+
+-Ln likelihood = 6452.784
+
+Tree 5 ("Tree 5"):
+
+-Ln likelihood = 6436.202
+
+Tree 6 ("Tree 6"):
+
+-Ln likelihood = 6471.108
+
+Tree 7 ("Tree 7"):
+
+-Ln likelihood = 6426.356
+
+Tree 8 ("Tree 8"):
+
+-Ln likelihood = 6521.582
+
+Tree 9 ("Tree 9"):
+
+-Ln likelihood = 6442.040
+
+Tree 10 ("Tree 10"):
+
+-Ln likelihood = 6462.139
+
+Likelihood scores of tree(s) in memory:
+---------------------------------------
+  898 characters are included
+  All characters have equal weight
+  Likelihood settings:
+    Current model:
+                             Data type = nucleotide
+                DNA substitution types = 1
+                     State frequencies = equal
+        Proportion of invariable sites = none
+               Rates at variable sites = equal
+                  Model correspondence = JC69
+
+    Number of distinct data patterns under this model = 413
+    Molecular clock not enforced
+    Starting branch lengths obtained using Rogers-Swofford approximation method
+    Branch-length optimization = one-dimensional Newton-Raphson with pass limit=20, tolerance=1e-07
+    Likelihood calculations performed in single precision
+    Vector processing enabled
+    Using standard Felsenstein pruning for computing likelihoods
+    Conditional-likelihood rescaling threshold = 1e-20
+    Using 12 parallel threads on 16 processors
+
+Tree             1           2           3           4           5           6           7           8           9          10
+------------------------------------------------------------------------------------------------------------------------------
+-ln L     6424.202    6460.040    6437.026    6452.784    6436.202    6471.108    6426.356    6521.582    6442.040    6462.139
+
+Time used to compute likelihoods = 0.02 sec (CPU time = 0.25 sec)
+
+Test(s) for significance of likelihood-score differences:
+
+  Test(s) performed:
+    AU: Shimodaira Approximately Unbiased test
+  Values for KH/SH/AU tests are P values for null hypothesis of no difference between trees
+  Number of bootstrap replicates = 10000
+  Starting seed = generated automatically
+
+    Tree         -ln L    Diff -ln L      AU
+--------------------------------------------
+       1    6424.20240        (best)
+       7    6426.35650       2.15409  0.4891
+       5    6436.20249      12.00008  0.0799
+       3    6437.02599      12.82359  0.0671
+       9    6442.03957      17.83717  0.0331*
+       4    6452.78370      28.58130  0.0069*
+       2    6460.04044      35.83804      ~0*
+      10    6462.13936      37.93696  0.0049*
+       6    6471.10754      46.90513      ~0*
+       8    6521.58213      97.37972      ~0*
+  * P < 0.05
