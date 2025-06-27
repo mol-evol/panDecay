@@ -1,10 +1,10 @@
-2025-06-27 12:04:56,846 - __main__ - INFO - Debug logging enabled. Detailed log: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/mldecay_debug.log
-2025-06-27 12:04:56,847 - __main__ - INFO - PAUP* will be configured to use up to 12 thread(s).
-2025-06-27 12:04:56,847 - __main__ - INFO - Using temporary directory: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_120456
-2025-06-27 12:04:56,862 - __main__ - INFO - Loaded alignment: 12 sequences, 898 sites.
-2025-06-27 12:04:56,864 - __main__ - INFO - Converted alignment to NEXUS: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_120456/alignment.nex
-2025-06-27 12:04:56,864 - __main__ - INFO - Building maximum likelihood tree...
-2025-06-27 12:04:56,864 - __main__ - DEBUG - ML search PAUP* script (/Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_120456/ml_search.nex):
+2025-06-27 12:12:55,036 - __main__ - INFO - Debug logging enabled. Detailed log: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/mldecay_debug.log
+2025-06-27 12:12:55,036 - __main__ - INFO - PAUP* will be configured to use up to 12 thread(s).
+2025-06-27 12:12:55,041 - __main__ - INFO - Using temporary directory: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_121255
+2025-06-27 12:12:55,057 - __main__ - INFO - Loaded alignment: 12 sequences, 898 sites.
+2025-06-27 12:12:55,059 - __main__ - INFO - Converted alignment to NEXUS: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_121255/alignment.nex
+2025-06-27 12:12:55,059 - __main__ - INFO - Building maximum likelihood tree...
+2025-06-27 12:12:55,059 - __main__ - DEBUG - ML search PAUP* script (/Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_121255/ml_search.nex):
 #NEXUS
 begin paup;
 execute alignment.nex;
@@ -16,4 +16,4 @@ lscores 1 / scorefile=ml_score.txt replace=yes;
 quit;
 end;
 
-2025-06-27 12:04:56,864 - __main__ - INFO - Running PAUP* command file: ml_search.nex (Log: paup_ml.log)
+2025-06-27 12:12:55,059 - __main__ - INFO - Running PAUP* command file: ml_search.nex (Log: paup_ml.log)

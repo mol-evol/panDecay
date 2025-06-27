@@ -788,20 +788,20 @@ class MLDecayIndices:
         
         # MCMC settings
         blocks.append(f"    mcmc ngen={self.bayes_ngen} samplefreq={self.bayes_sample_freq} "
-                     f"nchains={self.bayes_chains} savebrlens=yes;")
+                     f"nchains={self.bayes_chains} savebrlens=yes printfreq=1000 diagnfreq=5000;")
         
-        # Marginal likelihood estimation
-        if self.marginal_likelihood == "ss":
-            blocks.append(f"    ss alpha={self.ss_alpha} nsteps={self.ss_nsteps};")
-        elif self.marginal_likelihood == "ps":
-            blocks.append("    sump burnin=yes;")
-            
-        # Summary commands
+        # Summary commands first
         burnin_samples = int(self.bayes_ngen / self.bayes_sample_freq * self.bayes_burnin)
         blocks.append(f"    sump burnin={burnin_samples};")
         blocks.append(f"    sumt burnin={burnin_samples};")
         
+        # Marginal likelihood estimation after MCMC
+        if self.marginal_likelihood == "ss":
+            blocks.append(f"    ss alpha={self.ss_alpha} nsteps={self.ss_nsteps} burnin={burnin_samples};")
+        
         blocks.append("end;")
+        blocks.append("")  # Empty line
+        blocks.append("quit;")  # Ensure MrBayes exits
         
         return "\n".join(blocks)
     
@@ -837,7 +837,15 @@ class MLDecayIndices:
                 logger.error(f"MrBayes failed with return code {result.returncode}")
                 logger.error(f"MrBayes stdout: {result.stdout[:500]}")  # First 500 chars
                 logger.error(f"MrBayes stderr: {result.stderr[:500]}")  # First 500 chars
+                # Check for specific error patterns
+                if "Error" in result.stdout or "Could not" in result.stdout:
+                    error_lines = [line for line in result.stdout.split('\n') if 'Error' in line or 'Could not' in line]
+                    for line in error_lines[:5]:
+                        logger.error(f"MrBayes error: {line}")
                 return None
+            
+            # Log successful completion
+            logger.info(f"MrBayes completed successfully for {output_prefix}")
             
             # Parse marginal likelihood from output
             log_file_path = self.temp_path / f"{nexus_file.stem}.log"
@@ -887,11 +895,11 @@ class MLDecayIndices:
         mrbayes_block = self._generate_mrbayes_nexus()
         combined_nexus = nexus_content + "\n" + mrbayes_block
         
-        unconstrained_nexus = self.temp_path / "unconstrained.nex"
+        unconstrained_nexus = self.temp_path / "unc.nex"
         unconstrained_nexus.write_text(combined_nexus)
         
         # Run unconstrained analysis
-        unconstrained_ml = self._run_mrbayes(unconstrained_nexus, "unconstrained")
+        unconstrained_ml = self._run_mrbayes(unconstrained_nexus, "unc")
         
         if unconstrained_ml is None:
             logger.error("Unconstrained Bayesian analysis failed")
@@ -919,11 +927,11 @@ class MLDecayIndices:
             )
             combined_nexus = nexus_content + "\n" + mrbayes_block
             
-            constrained_nexus = self.temp_path / f"constrained_{clade_id}.nex"
+            constrained_nexus = self.temp_path / f"c_{idx}.nex"
             constrained_nexus.write_text(combined_nexus)
             
             # Run constrained analysis
-            constrained_ml = self._run_mrbayes(constrained_nexus, f"constrained_{clade_id}")
+            constrained_ml = self._run_mrbayes(constrained_nexus, f"c_{idx}")
             
             if constrained_ml is not None:
                 # Calculate Bayesian decay (marginal likelihood difference)
