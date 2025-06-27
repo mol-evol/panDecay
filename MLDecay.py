@@ -819,8 +819,13 @@ class MLDecayIndices:
         blocks.append(f"    sump burnin={burnin_samples};")
         blocks.append(f"    sumt burnin={burnin_samples};")
         
-        # Note: Stepping-stone sampling might not be available in all MrBayes versions
-        # We'll rely on the harmonic mean estimate from sump instead
+        # Add stepping-stone sampling if requested
+        if self.marginal_likelihood == "ss":
+            # Stepping-stone sampling parameters
+            # alpha: shape parameter for Beta distribution (default 0.4)
+            # nsteps: number of steps between prior and posterior (default 50)
+            blocks.append(f"    ss alpha={self.ss_alpha} nsteps={self.ss_nsteps} "
+                         f"burnin={burnin_samples};")
         
         blocks.append("end;")
         blocks.append("")  # Empty line
@@ -884,10 +889,23 @@ class MLDecayIndices:
             logger.info(f"MrBayes completed successfully for {output_prefix}")
             
             # Parse marginal likelihood from output
-            # MrBayes creates .lstat file with marginal likelihood estimates
-            lstat_file_path = self.temp_path / f"{nexus_file.name}.lstat"
-            logger.debug(f"Looking for MrBayes lstat file: {lstat_file_path}")
-            ml_value = self._parse_mrbayes_marginal_likelihood(lstat_file_path, output_prefix)
+            ml_value = None
+            
+            # Use stepping-stone if requested
+            if self.marginal_likelihood == "ss":
+                logger.debug(f"Looking for stepping-stone output for {output_prefix}")
+                ml_value = self._parse_mrbayes_stepping_stone(nexus_file, output_prefix)
+                
+                # Fall back to harmonic mean if stepping-stone failed
+                if ml_value is None:
+                    logger.warning("Stepping-stone parsing failed, falling back to harmonic mean")
+                    lstat_file_path = self.temp_path / f"{nexus_file.name}.lstat"
+                    ml_value = self._parse_mrbayes_marginal_likelihood(lstat_file_path, output_prefix)
+            else:
+                # Use harmonic mean from .lstat file
+                lstat_file_path = self.temp_path / f"{nexus_file.name}.lstat"
+                logger.debug(f"Looking for MrBayes lstat file: {lstat_file_path}")
+                ml_value = self._parse_mrbayes_marginal_likelihood(lstat_file_path, output_prefix)
             
             # Parse posterior probabilities from consensus tree (only for unconstrained analysis)
             if output_prefix == "unc":
@@ -1066,6 +1084,93 @@ class MLDecayIndices:
             
         except Exception as e:
             logger.error(f"Error parsing MrBayes lstat file: {e}")
+            if self.debug:
+                import traceback
+                logger.debug(traceback.format_exc())
+            return None
+
+    def _parse_mrbayes_stepping_stone(self, nexus_file_path, output_prefix):
+        """
+        Parse stepping-stone marginal likelihood from MrBayes .ss output file.
+        
+        Args:
+            nexus_file_path: Path to the NEXUS file (base name for output files)
+            output_prefix: Prefix to identify the run
+            
+        Returns:
+            Marginal likelihood value or None
+        """
+        # MrBayes creates .ss file with stepping-stone results
+        ss_file_path = self.temp_path / f"{nexus_file_path.name}.ss"
+        
+        if not ss_file_path.exists():
+            logger.warning(f"MrBayes stepping-stone file not found: {ss_file_path}")
+            return None
+            
+        try:
+            ss_content = ss_file_path.read_text()
+            
+            # Parse the stepping-stone output
+            # Look for line with "Marginal likelihood (ln)"
+            for line in ss_content.splitlines():
+                if "Marginal likelihood (ln)" in line:
+                    # Extract the value - format varies slightly between MrBayes versions
+                    # Common formats:
+                    # "Marginal likelihood (ln) = -1234.56"
+                    # "Marginal likelihood (ln):     -1234.56"
+                    parts = line.split("=")
+                    if len(parts) < 2:
+                        parts = line.split(":")
+                    
+                    if len(parts) >= 2:
+                        try:
+                            ml_value = float(parts[-1].strip())
+                            logger.info(f"Parsed stepping-stone marginal likelihood for {output_prefix}: {ml_value}")
+                            return ml_value
+                        except ValueError:
+                            logger.warning(f"Could not parse ML value from line: {line}")
+            
+            # Alternative: Calculate marginal likelihood from step contributions
+            # The .ss file contains contributions for each step
+            # We need to sum the contributions for each run
+            
+            # Parse the step contributions table
+            run1_sum = 0.0
+            run2_sum = 0.0
+            found_data = False
+            
+            for line in ss_content.splitlines():
+                # Skip header lines
+                if line.startswith('[') or line.startswith('Step'):
+                    continue
+                    
+                parts = line.split()
+                if len(parts) >= 5:  # Step, Power, run1, run2, aSplit0
+                    try:
+                        step = int(parts[0])
+                        run1_contrib = float(parts[2])
+                        run2_contrib = float(parts[3])
+                        
+                        run1_sum += run1_contrib
+                        run2_sum += run2_contrib
+                        found_data = True
+                    except (ValueError, IndexError):
+                        continue
+            
+            if found_data:
+                # Average the marginal likelihoods from both runs
+                ml_value = (run1_sum + run2_sum) / 2.0
+                logger.info(f"Calculated stepping-stone marginal likelihood for {output_prefix}: {ml_value}")
+                logger.debug(f"Run1 ML: {run1_sum}, Run2 ML: {run2_sum}")
+                return ml_value
+            
+            logger.warning(f"Could not calculate stepping-stone marginal likelihood from {ss_file_path}")
+            if self.debug:
+                logger.debug(f"Stepping-stone file content:\n{ss_content[:500]}")
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error parsing MrBayes stepping-stone file: {e}")
             if self.debug:
                 import traceback
                 logger.debug(traceback.format_exc())
@@ -2623,8 +2728,9 @@ class MLDecayIndices:
                 f.write(f"- Bayesian model: `{self.bayes_model}`\n")
                 f.write(f"- MCMC generations: `{self.bayes_ngen}`\n")
                 f.write(f"- Burnin fraction: `{self.bayes_burnin}`\n")
-                # We're using harmonic mean from sump, not stepping-stone
-                f.write(f"- Marginal likelihood method: `harmonic mean`\n")
+                # Report the actual method being used
+                ml_method = "stepping-stone" if self.marginal_likelihood == "ss" else "harmonic mean"
+                f.write(f"- Marginal likelihood method: `{ml_method}`\n")
                 
             if has_bootstrap:
                 f.write("- Bootstrap analysis: Performed\n")
@@ -2786,9 +2892,15 @@ class MLDecayIndices:
             if has_bayesian:
                 f.write("### Bayesian Analysis\n")
                 f.write("- **Bayes Decay**: Marginal log-likelihood difference (unconstrained - constrained). **Positive values** indicate support for the clade, with larger positive values indicating stronger support. **Negative values** suggest the constrained analysis had higher marginal likelihood, which may indicate:\n")
-                f.write("  - Poor MCMC convergence (try increasing generations)\n")
-                f.write("  - Unreliable harmonic mean estimates\n")
-                f.write("  - Genuine lack of support for the clade\n")
+                if self.marginal_likelihood == "ss":
+                    f.write("  - Poor chain convergence or insufficient MCMC sampling\n")
+                    f.write("  - Complex posterior distribution requiring more steps\n")
+                    f.write("  - Genuine lack of support for the clade\n")
+                else:
+                    f.write("  - Harmonic mean estimator limitations (notoriously unreliable)\n")
+                    f.write("  - Poor MCMC convergence (try increasing generations)\n")
+                    f.write("  - Genuine lack of support for the clade\n")
+                    f.write("  - **Consider using stepping-stone sampling (--marginal-likelihood ss) for more reliable estimates**\n")
                 f.write("- **Bayes Factor**: Exponential of the Bayes Decay value. Represents the ratio of marginal likelihoods. Common interpretations:\n")
                 f.write("  - BF > 100: Very strong support\n")
                 f.write("  - BF > 10: Strong support\n")
