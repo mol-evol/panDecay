@@ -817,10 +817,14 @@ class MLDecayIndices:
             Marginal likelihood value or None if failed
         """
         try:
-            # MrBayes command
-            cmd = [self.mrbayes_path, str(nexus_file)]
+            # MrBayes needs absolute paths and proper quoting for paths with spaces
+            # We'll use a relative path instead to avoid issues with spaces
+            nexus_filename = nexus_file.name
             
-            logger.info(f"Running MrBayes: {' '.join(cmd)}")
+            # MrBayes command - use just the filename since we'll run in the same directory
+            cmd = [self.mrbayes_path, nexus_filename]
+            
+            logger.info(f"Running MrBayes: {' '.join(cmd)} in directory {self.temp_path}")
             logger.debug(f"Working directory: {self.temp_path}")
             logger.debug(f"NEXUS file: {nexus_file}")
             
