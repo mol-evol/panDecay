@@ -1,21 +1,19 @@
-2025-06-27 10:56:47,476 - __main__ - INFO - Debug logging enabled. Detailed log: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/mldecay_debug.log
-2025-06-27 10:56:47,476 - __main__ - INFO - PAUP* will be configured to use up to 12 thread(s).
-2025-06-27 10:56:47,476 - __main__ - INFO - Using temporary directory: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_105647
-2025-06-27 10:56:47,477 - __main__ - ERROR - Failed to load alignment 'Primate10.nex': No records found in handle
-2025-06-27 10:56:47,477 - __main__ - ERROR - MLDecay analysis terminated with an error: No records found in handle
-2025-06-27 10:56:47,481 - __main__ - DEBUG - Full traceback:
-Traceback (most recent call last):
-  File "/Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/MLDecay.py", line 3260, in main
-    decay_calc = MLDecayIndices(
-        alignment_file=args.alignment, # Converted to Path in __init__
-    ...<25 lines>...
-        ss_nsteps=args.ss_nsteps
-    )
-  File "/Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/MLDecay.py", line 151, in __init__
-    self.alignment = AlignIO.read(str(self.alignment_file), self.alignment_format)
-                     ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/Users/mbzjom/Library/Python/3.13/lib/python/site-packages/Bio/AlignIO/__init__.py", line 386, in read
-    raise ValueError("No records found in handle") from None
-ValueError: No records found in handle
+2025-06-27 12:04:56,846 - __main__ - INFO - Debug logging enabled. Detailed log: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/mldecay_debug.log
+2025-06-27 12:04:56,847 - __main__ - INFO - PAUP* will be configured to use up to 12 thread(s).
+2025-06-27 12:04:56,847 - __main__ - INFO - Using temporary directory: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_120456
+2025-06-27 12:04:56,862 - __main__ - INFO - Loaded alignment: 12 sequences, 898 sites.
+2025-06-27 12:04:56,864 - __main__ - INFO - Converted alignment to NEXUS: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_120456/alignment.nex
+2025-06-27 12:04:56,864 - __main__ - INFO - Building maximum likelihood tree...
+2025-06-27 12:04:56,864 - __main__ - DEBUG - ML search PAUP* script (/Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_120456/ml_search.nex):
+#NEXUS
+begin paup;
+execute alignment.nex;
+    lset nthreads=12 nst=6 rmatrix=estimate basefreq=estimate rates=equal pinvar=0;
+    set criterion=likelihood;
+hsearch start=stepwise addseq=random nreps=10;
+savetrees file=ml_tree.tre format=newick brlens=yes replace=yes;
+lscores 1 / scorefile=ml_score.txt replace=yes;
+quit;
+end;
 
-2025-06-27 10:56:47,482 - __main__ - INFO - Keeping temporary directory: /Users/mbzjom/Library/CloudStorage/Dropbox/Lab/James McInerney/programming/MLDecay/debug_runs/mldecay_20250627_105647
+2025-06-27 12:04:56,864 - __main__ - INFO - Running PAUP* command file: ml_search.nex (Log: paup_ml.log)

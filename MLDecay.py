@@ -821,21 +821,28 @@ class MLDecayIndices:
             cmd = [self.mrbayes_path, str(nexus_file)]
             
             logger.info(f"Running MrBayes: {' '.join(cmd)}")
+            logger.debug(f"Working directory: {self.temp_path}")
+            logger.debug(f"NEXUS file: {nexus_file}")
             
             # Run MrBayes
+            # More realistic timeout: assume ~1000 generations/second, multiply by safety factor
+            timeout_seconds = max(7200, (self.bayes_ngen / 500) * self.bayes_chains)
+            logger.debug(f"MrBayes timeout set to {timeout_seconds} seconds")
+            
             result = subprocess.run(cmd, cwd=str(self.temp_path), 
                                   capture_output=True, text=True, 
-                                  timeout=max(7200, self.bayes_ngen / 1000))  # Rough timeout estimate
+                                  timeout=timeout_seconds)
             
             if result.returncode != 0:
                 logger.error(f"MrBayes failed with return code {result.returncode}")
-                if self.debug:
-                    logger.debug(f"MrBayes stderr: {result.stderr}")
+                logger.error(f"MrBayes stdout: {result.stdout[:500]}")  # First 500 chars
+                logger.error(f"MrBayes stderr: {result.stderr[:500]}")  # First 500 chars
                 return None
             
             # Parse marginal likelihood from output
-            ml_value = self._parse_mrbayes_marginal_likelihood(
-                self.temp_path / f"{nexus_file.stem}.log", output_prefix)
+            log_file_path = self.temp_path / f"{nexus_file.stem}.log"
+            logger.debug(f"Looking for MrBayes log file: {log_file_path}")
+            ml_value = self._parse_mrbayes_marginal_likelihood(log_file_path, output_prefix)
             
             return ml_value
             
@@ -865,6 +872,12 @@ class MLDecayIndices:
             return {}
             
         logger.info(f"Running Bayesian decay analysis using {self.bayesian_software}")
+        logger.info(f"MCMC settings: {self.bayes_ngen} generations, {self.bayes_chains} chains, sampling every {self.bayes_sample_freq}")
+        
+        # Warn if this will take a long time
+        estimated_time = (self.bayes_ngen * self.bayes_chains) / 10000  # Very rough estimate
+        if estimated_time > 60:
+            logger.warning(f"Bayesian analysis may take a long time (~{estimated_time:.0f} seconds per run)")
         
         # First, run unconstrained Bayesian analysis
         logger.info("Running unconstrained Bayesian analysis...")
@@ -1208,9 +1221,11 @@ class MLDecayIndices:
         ml_results = self._calculate_ml_decay_indices(perform_site_analysis)
         
         # Then run Bayesian analysis
+        logger.info("Starting Bayesian analysis phase...")
         bayesian_results = self.run_bayesian_decay_analysis()
         
         # Merge results
+        logger.info(f"Bayesian analysis returned {len(bayesian_results) if bayesian_results else 0} results")
         if bayesian_results:
             for clade_id in ml_results:
                 if clade_id in bayesian_results:
