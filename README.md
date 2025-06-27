@@ -2,7 +2,7 @@
 
 # panDecay: Phylogenetic Analysis using Decay Indices
 
-panDecay is a Python command-line tool for calculating both Maximum Likelihood (ML)-based and Bayesian phylogenetic decay indices. It can compute ML-Bremer support (using PAUP*) and Bayesian decay indices (using MrBayes or BEAST)   
+panDecay is a Python command-line tool for calculating phylogenetic decay indices across multiple analysis frameworks. It can compute parsimony-based decay indices (traditional Bremer support), Maximum Likelihood (ML)-based decay indices, and Bayesian decay indices (using MrBayes or BEAST)   
 
 ## Table of Contents
 
@@ -82,9 +82,10 @@ panDecay can perform Bayesian analyses using:
 ## Features
 
 ### Analysis Types
+*   **Parsimony Analysis**: Calculates traditional Bremer support values (parsimony decay indices)
 *   **ML Analysis**: Calculates ML-based decay values using log-likelihood differences
 *   **Bayesian Analysis**: Calculates Bayesian decay indices using marginal likelihood comparisons
-*   **Combined Analysis**: Performs both ML and Bayesian analyses in a single run
+*   **Combined Analysis**: Performs multiple analysis types in a single run
 *   **Bootstrap Analysis**: Optional bootstrap support values alongside decay indices
 
 ### Core Capabilities
@@ -189,7 +190,7 @@ usage: panDecay.py [-h] [--format FORMAT] [--model MODEL] [--gamma] [--invariabl
                   [--base-freq {equal,estimate,empirical}] [--rates {equal,gamma}] [--protein-model PROTEIN_MODEL] 
                   [--nst {1,2,6}] [--parsmodel | --no-parsmodel] [--threads THREADS] [--starting-tree STARTING_TREE] 
                   [--paup-block PAUP_BLOCK] [--temp TEMP] [--keep-files] [--debug] [--site-analysis] 
-                  [--analysis {ml,bayesian,both}] [-M] [-B] [-MB] [--bayesian-software {mrbayes,beast}]
+                  [--analysis {parsimony,ml,bayesian,both}] [-M] [-B] [-MB] [--bayesian-software {mrbayes,beast}]
                   [--mrbayes-path MRBAYES_PATH] [--beast-path BEAST_PATH] [--bayes-model BAYES_MODEL]
                   [--bayes-ngen BAYES_NGEN] [--bayes-burnin BAYES_BURNIN] [--bayes-chains BAYES_CHAINS]
                   [--bayes-sample-freq BAYES_SAMPLE_FREQ] [--marginal-likelihood {ss,ps,hm}]
@@ -244,7 +245,7 @@ Runtime Control:
   --debug               Enable detailed debug logging (implies --keep-files). (default: False)
 
 Analysis Mode:
-  --analysis {ml,bayesian,both}
+  --analysis {parsimony,ml,bayesian,both}
                         Analysis type to perform (default: ml)
   -M, --ml-only         Perform ML analysis only (default)
   -B, --bayesian-only   Perform Bayesian analysis only
@@ -445,7 +446,15 @@ python3 panDecay.py alignment.fas --model GTR --gamma --invariable --data-type d
     --output dna_decay.txt --tree dna_annotated
 ```
 
-### Example 2: Protein Data with Specific Model
+### Example 2: Parsimony Analysis (Traditional Bremer Support)
+Calculate traditional Bremer support values using parsimony analysis.
+
+```bash
+python3 panDecay.py alignment.fas --analysis parsimony \
+    --output parsimony_bremer.txt --tree parsimony_annotated
+```
+
+### Example 3: Protein Data with Specific Model
 Analyze a protein alignment using the WAG model, fixed gamma shape, and estimating proportion of invariable sites.
 
 ```bash
@@ -454,7 +463,7 @@ python3 panDecay.py proteins.phy --format phylip --data-type protein \
     --output protein_decay.txt --tree protein_annotated --threads 8
 ```
 
-### Example 3: Discrete Morphological Data
+### Example 4: Discrete Morphological Data
 Analyze a binary (0/1) discrete morphological dataset (e.g., in NEXUS format `morpho.nex`) using the Mk+G model.
 
 ```bash
@@ -464,7 +473,7 @@ python3 panDecay.py morpho.nex --format nexus --data-type discrete \
 ```
 *Note: For discrete data, ensure characters are '0' and '1'. `--parsmodel` (default for discrete) will use parsimony-like branch lengths.*
 
-### Example 4: Using a Starting Tree
+### Example 5: Using a Starting Tree
 Perform a GTR+G analysis, but provide PAUP* with a starting tree to potentially speed up or refine the initial ML search.
 
 ```bash
@@ -473,7 +482,7 @@ python3 panDecay.py alignment.fas --model GTR --gamma \
     --output results_with_start_tree.txt
 ```
 
-### Example 5: Advanced Control with PAUP\* Block
+### Example 6: Advanced Control with PAUP\* Block
 Use a custom PAUP\* block for complex settings. Assume `my_paup_commands.txt` contains:
 ```paup
 lset nst=6 basefreq=empirical rates=gamma(categories=8) shape=estimate pinv=0.1;
@@ -486,7 +495,7 @@ python3 panDecay.py alignment.fas --paup-block my_paup_commands.txt \
 ```
 *(panDecay will still handle the constraint generation and AU test logic around your block.)*
 
-### Example 6: Site-Specific Analysis
+### Example 7: Site-Specific Analysis
 Analyze which sites in the alignment support or conflict with each clade:
 
 ```bash
@@ -496,7 +505,7 @@ python3 panDecay.py alignment.fas --model GTR --gamma --site-analysis --visualiz
 
 This will generate site-specific likelihood analyses in addition to the standard branch support results.
 
-### Example 7: Bootstrap Analysis
+### Example 8: Bootstrap Analysis
 Perform bootstrap analysis (100 replicates by default) alongside ML decay indices:
 
 ```bash
@@ -513,7 +522,7 @@ python3 panDecay.py alignment.fas --model GTR --gamma --bootstrap --bootstrap-re
 
 This will produce additional tree files with bootstrap values and a comprehensive tree that combines bootstrap values with ML decay indices.
 
-### Example 8: Bayesian Analysis Only
+### Example 9: Bayesian Analysis Only
 Perform only Bayesian decay analysis using MrBayes:
 
 ```bash
@@ -521,7 +530,7 @@ python3 panDecay.py alignment.fas --analysis bayesian --bayesian-software mrbaye
     --bayes-model GTR --bayes-ngen 500000 --output bayesian_only.txt
 ```
 
-### Example 9: Combined ML and Bayesian Analysis
+### Example 10: Combined ML and Bayesian Analysis
 Run both ML and Bayesian analyses:
 
 ```bash
@@ -529,7 +538,7 @@ python3 panDecay.py alignment.fas --model GTR --gamma -C --bayesian-software mrb
     --bayes-ngen 1000000 --output combined_analysis.txt
 ```
 
-### Example 10: Using MPI for Parallel MrBayes
+### Example 11: Using MPI for Parallel MrBayes
 If you have MPI-enabled MrBayes installed:
 
 ```bash
@@ -539,7 +548,7 @@ python3 panDecay.py alignment.fas -B --bayesian-software mrbayes --use-mpi \
 
 This runs 4 chains across 8 processors (2 chains per processor for better mixing).
 
-### Example 11: Using BEAGLE for GPU Acceleration
+### Example 12: Using BEAGLE for GPU Acceleration
 If MrBayes is compiled with BEAGLE support:
 
 ```bash
@@ -554,7 +563,7 @@ python3 panDecay.py alignment.fas -C --bayesian-software mrbayes --use-beagle \
     --beagle-device cpu --beagle-precision double
 ```
 
-### Example 12: Combined MPI and BEAGLE
+### Example 13: Combined MPI and BEAGLE
 For maximum performance with both MPI and BEAGLE:
 
 ```bash
