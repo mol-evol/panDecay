@@ -85,7 +85,7 @@ panDecay can perform Bayesian analyses using:
 *   **Parsimony Analysis**: Calculates traditional Bremer support values (parsimony decay indices)
 *   **ML Analysis**: Calculates ML-based decay values using log-likelihood differences
 *   **Bayesian Analysis**: Calculates Bayesian decay indices using marginal likelihood comparisons
-*   **Combined Analysis**: Performs multiple analysis types in a single run
+*   **Combined Analysis**: Performs multiple analysis types in a single run (e.g., ML+Bayesian, or all three)
 *   **Bootstrap Analysis**: Optional bootstrap support values alongside decay indices
 
 ### Core Capabilities
@@ -190,7 +190,7 @@ usage: panDecay.py [-h] [--format FORMAT] [--model MODEL] [--gamma] [--invariabl
                   [--base-freq {equal,estimate,empirical}] [--rates {equal,gamma}] [--protein-model PROTEIN_MODEL] 
                   [--nst {1,2,6}] [--parsmodel | --no-parsmodel] [--threads THREADS] [--starting-tree STARTING_TREE] 
                   [--paup-block PAUP_BLOCK] [--temp TEMP] [--keep-files] [--debug] [--site-analysis] 
-                  [--analysis {parsimony,ml,bayesian,both}] [-M] [-B] [-MB] [--bayesian-software {mrbayes,beast}]
+                  [--analysis {parsimony,ml,bayesian,all}] [-M] [-B] [-C] [--bayesian-software {mrbayes,beast}]
                   [--mrbayes-path MRBAYES_PATH] [--beast-path BEAST_PATH] [--bayes-model BAYES_MODEL]
                   [--bayes-ngen BAYES_NGEN] [--bayes-burnin BAYES_BURNIN] [--bayes-chains BAYES_CHAINS]
                   [--bayes-sample-freq BAYES_SAMPLE_FREQ] [--marginal-likelihood {ss,ps,hm}]
@@ -245,11 +245,11 @@ Runtime Control:
   --debug               Enable detailed debug logging (implies --keep-files). (default: False)
 
 Analysis Mode:
-  --analysis {parsimony,ml,bayesian,both}
+  --analysis {parsimony,ml,bayesian,all}
                         Analysis type to perform (default: ml)
   -M, --ml-only         Perform ML analysis only (default)
   -B, --bayesian-only   Perform Bayesian analysis only
-  -MB, --both           Perform both ML and Bayesian analyses
+  -C, --combined        Perform combined analyses (e.g., ML+Bayesian)
 
 Bayesian Analysis Options:
   --bayesian-software {mrbayes,beast}
