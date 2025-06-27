@@ -1,0 +1,85 @@
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Debug and temporary directories
+debug_runs/
+temp/
+tmp/
+oldFiles/
+
+# Analysis output directories
+*_site_analysis/
+
+# Generated files
+*.nwk
+*.log
+ml_decay_indices.txt
+ml_decay_indices.md
+ml_decay_indices_*.png
+annotated_tree_*.nwk
+*_dist_*.png
+
+# Test files
+test_*.txt
+test_*.md
+test_*.nwk
+
+# Temporary and debug files
+mldecay_debug.log
+temp_sites.txt
+ml_score_confirm.txt
+my_paup_commands.txt
+
+# Original/backup files
+original.*
+*.bak
+*_old.*
+README_old.md
+
+# Screenshots
+Screenshot*.png
+
+# Temporary alignment files
+elongate_alignment.py
+regenerate_trees.py
+update_tree.py
+
+# Other temporary files
+*.tmp
+*.temp
