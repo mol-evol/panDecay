@@ -200,7 +200,7 @@ usage: panDecay.py [-h] [--format FORMAT] [--model MODEL] [--gamma] [--invariabl
                   [--constraint-file CONSTRAINT_FILE] [-v]
                   alignment
 
-panDecay v1.1.0: Calculate ML and/or Bayesian phylogenetic decay indices.
+panDecay v1.1.0: Calculate phylogenetic decay indices (ML, Bayesian, and parsimony).
 
 positional arguments:
   alignment             Input alignment file path.

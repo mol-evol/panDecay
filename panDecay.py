@@ -4245,7 +4245,7 @@ def parse_config(config_file, args):
 
 def main():
     parser = argparse.ArgumentParser(
-        description=f"panDecay v{VERSION}: Calculate ML and Bayesian phylogenetic decay indices.",
+        description=f"panDecay v{VERSION}: Calculate phylogenetic decay indices (ML, Bayesian, and parsimony).",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter # Shows defaults in help
     )
     # Arguments (similar to original, ensure help messages are clear)
