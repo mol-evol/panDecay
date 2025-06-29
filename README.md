@@ -1,4 +1,4 @@
-![Python 3.8+](https://img.shields.io/badge/python-3.8%2B-blue.svg) ![Version](https://img.shields.io/badge/version-1.0.3-orange.svg) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+![Python 3.8+](https://img.shields.io/badge/python-3.8%2B-blue.svg) ![Version](https://img.shields.io/badge/version-1.1.0-orange.svg) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 # panDecay: Phylogenetic Analysis using Decay Indices
 
@@ -195,10 +195,12 @@ usage: panDecay.py [-h] [--format FORMAT] [--model MODEL] [--gamma] [--invariabl
                   [--bayes-ngen BAYES_NGEN] [--bayes-burnin BAYES_BURNIN] [--bayes-chains BAYES_CHAINS]
                   [--bayes-sample-freq BAYES_SAMPLE_FREQ] [--marginal-likelihood {ss,ps,hm}]
                   [--ss-alpha SS_ALPHA] [--ss-nsteps SS_NSTEPS] [--bootstrap] [--bootstrap-reps BOOTSTRAP_REPS] 
-                  [--visualize] [--viz-format {png,pdf,svg}] [-v]
+                  [--visualize] [--viz-format {png,pdf,svg}] [--config CONFIG] [--generate-config GENERATE_CONFIG]
+                  [--constraint-mode {all,specific,exclude}] [--test-branches TEST_BRANCHES] 
+                  [--constraint-file CONSTRAINT_FILE] [-v]
                   alignment
 
-panDecay v1.0.3: Calculate ML and/or Bayesian phylogenetic decay indices.
+panDecay v1.1.0: Calculate ML and/or Bayesian phylogenetic decay indices.
 
 positional arguments:
   alignment             Input alignment file path.
@@ -282,6 +284,19 @@ Visualization Output (optional):
   --visualize           Generate static visualization plots (requires matplotlib, seaborn). (default: False)
   --viz-format {png,pdf,svg}
                         Format for static visualizations. (default: png)
+
+Configuration and Constraint Options:
+  --config CONFIG       Read parameters from configuration file (INI format)
+  --generate-config GENERATE_CONFIG
+                        Generate a template configuration file at the specified path and exit
+  --constraint-mode {all,specific,exclude}
+                        Branch selection mode: all (test all branches), specific (test only specified), 
+                        exclude (test all except specified) (default: all)
+  --test-branches TEST_BRANCHES
+                        Specify branches to test. Format: 'taxon1,taxon2,taxon3;taxon4,taxon5' for clades, 
+                        '1,3,5' for branch IDs, or '@file.txt' to read from file
+  --constraint-file CONSTRAINT_FILE
+                        File containing constraint definitions (one per line)
 ```
 
 ## Input Files
@@ -309,6 +324,39 @@ A text file specified with `--paup-block <path_to_block.nex>`.
     lscores 1 /scorefile=my_custom_scores.txt replace=yes;
     ```
     panDecay will try to defensively add `savetrees` and `lscores` commands if they appear to be missing from the user's block when needed for its internal workflow.
+
+### Configuration File (INI format)
+A configuration file specified with `--config <path_to_config.ini>`.
+*   **Format:** Standard INI format with key-value pairs and optional sections
+*   **Purpose:** Allows specifying all command-line parameters in a file for reproducibility and convenience
+*   **Template:** Generate a fully-commented template with `--generate-config template.ini`
+*   **Sections:**
+    *   Main section (no header): Contains most parameters like alignment, model, output settings
+    *   `[constraints]`: Define specific clades to test when using `constraint_mode = specific`
+*   **Example:**
+    ```ini
+    alignment = my_data.fas
+    model = GTR
+    gamma = true
+    constraint_mode = specific
+    
+    [constraints]
+    clade1 = taxonA,taxonB,taxonC
+    clade2 = taxonD,taxonE
+    ```
+*   **Note:** Command-line arguments override configuration file values
+
+### Constraint File
+A text file specified with `--constraint-file <path>` or `--test-branches @<path>`.
+*   **Format:** One constraint per line, taxa separated by commas
+*   **Comments:** Lines starting with # are ignored
+*   **Example:**
+    ```
+    # Primates clade
+    Homo_sapiens,Pan_troglodytes,Gorilla_gorilla
+    # Rodents clade  
+    Mus_musculus,Rattus_norvegicus
+    ```
 
 ## Output Files
 
@@ -599,6 +647,63 @@ For a quick test with minimal MCMC generations:
 python3 panDecay.py alignment.fas --both --bayesian-software mrbayes \
     --bayes-ngen 10000 --bayes-sample-freq 100 \
     --output quick_test.txt
+```
+
+### Example 14: Using Configuration Files
+Generate a template configuration file and use it for analysis:
+
+```bash
+# Generate template
+python3 panDecay.py --generate-config my_analysis.ini
+
+# Edit my_analysis.ini with your parameters, then run:
+python3 panDecay.py --config my_analysis.ini
+
+# Override config file settings with command-line arguments
+python3 panDecay.py --config my_analysis.ini --threads 16 --output different_output.txt
+```
+
+### Example 15: Testing Specific Branches
+Test only specific clades of interest:
+
+```bash
+# Test only clades containing specific taxa (semicolon-separated)
+python3 panDecay.py alignment.fas --constraint-mode specific \
+    --test-branches "Homo_sapiens,Pan_troglodytes;Mus_musculus,Rattus_norvegicus"
+
+# Test specific branch IDs from a previous analysis
+python3 panDecay.py alignment.fas --constraint-mode specific \
+    --test-branches "1,3,5,7"
+
+# Read constraints from a file
+python3 panDecay.py alignment.fas --constraint-mode specific \
+    --test-branches "@my_constraints.txt"
+
+# Test all branches EXCEPT specified ones
+python3 panDecay.py alignment.fas --constraint-mode exclude \
+    --test-branches "Drosophila_melanogaster,Anopheles_gambiae"
+```
+
+### Example 16: Combined Config File with Constraints
+Create a configuration file with constraint definitions:
+
+```ini
+# my_analysis.ini
+alignment = vertebrates.fas
+model = GTR
+gamma = true
+analysis = all
+constraint_mode = specific
+
+[constraints]
+primates = Homo_sapiens,Pan_troglodytes,Gorilla_gorilla
+rodents = Mus_musculus,Rattus_norvegicus
+birds = Gallus_gallus,Taeniopygia_guttata
+```
+
+Then run:
+```bash
+python3 panDecay.py --config my_analysis.ini
 ```
 
 ## Interpreting Results
