@@ -99,8 +99,18 @@ panDecay can perform Bayesian analyses using:
 
 ### Bayesian Features
 *   Support for MrBayes with automatic constraint generation
-*   Marginal likelihood estimation using harmonic mean
-*   Bayes Factor calculation for interpretable support values
+*   Marginal likelihood estimation using:
+    *   **Stepping-stone sampling** (recommended, more accurate)
+    *   **Harmonic mean** (faster but less reliable)
+*   **Improved Bayes Factor reporting**:
+    *   Primary focus on Bayes Decay (log Bayes Factor) for interpretability
+    *   Bayes Factor values capped at 10^6 for display to avoid numerical issues
+    *   Clear warnings about model dimension effects for extreme values
+*   **MCMC Convergence Diagnostics**:
+    *   Automatic checking of ESS (Effective Sample Size)
+    *   PSRF (Potential Scale Reduction Factor) monitoring
+    *   ASDSF (Average Standard Deviation of Split Frequencies) tracking
+    *   Configurable convergence thresholds with strict mode option
 *   Flexible MCMC parameters (generations, chains, burnin, sampling frequency)
 *   **MPI support**: Run chains in parallel with MPI-enabled MrBayes
 *   **BEAGLE support**: GPU/CPU acceleration for likelihood calculations
@@ -273,6 +283,14 @@ Bayesian Analysis Options:
                         Marginal likelihood estimation method: ss=stepping-stone, ps=path sampling, hm=harmonic mean (default: ss)
   --ss-alpha SS_ALPHA   Alpha parameter for stepping-stone sampling (default: 0.4)
   --ss-nsteps SS_NSTEPS Number of steps for stepping-stone sampling (default: 50)
+
+Convergence Checking Options (MrBayes):
+  --check-convergence/--no-check-convergence
+                        Check MCMC convergence diagnostics (default: True)
+  --min-ess MIN_ESS     Minimum ESS (Effective Sample Size) threshold (default: 200)
+  --max-psrf MAX_PSRF   Maximum PSRF (Potential Scale Reduction Factor) threshold (default: 1.01)
+  --max-asdsf MAX_ASDSF Maximum ASDSF (Average Standard Deviation of Split Frequencies) threshold (default: 0.01)
+  --convergence-strict  Fail analysis if convergence criteria not met (default: warn only)
 
 Bootstrap Analysis (optional):
   --bootstrap           Perform bootstrap analysis to calculate support values. (default: False)
@@ -736,19 +754,28 @@ python3 panDecay.py --config my_analysis.ini
     *   Percentage of bootstrap replicates in which the clade appears.
     *   Higher values (e.g., > 70%) indicate stronger support.
     *   Bootstrap is a widely-used and well-understood method, providing a complementary measure of support to the AU test and LnL differences.
-*   **Bayesian Decay (Bayes_ML_Diff):**
-    *   The difference in marginal log-likelihood between unconstrained and constrained analyses.
-    *   **Positive values** indicate the unconstrained tree (with the clade) has better marginal likelihood, supporting the clade.
-    *   **Negative values** indicate the constrained tree (without the clade) has better marginal likelihood, suggesting weak support.
-    *   Larger absolute values indicate stronger evidence.
-*   **Bayes Factor:**
-    *   The exponential of the Bayesian decay value, providing an interpretable ratio of model support.
-    *   Common interpretations:
+*   **Bayesian Decay (BD):**
+    *   The primary metric for Bayesian support: marginal log-likelihood difference (unconstrained - constrained)
+    *   **Positive values** indicate support for the clade, with interpretation scale:
+        *   BD 0-1: Weak evidence for the clade
+        *   BD 1-3: Positive evidence for the clade
+        *   BD 3-5: Strong evidence for the clade
+        *   BD > 5: Very strong evidence for the clade
+    *   **Note**: BD = log(Bayes Factor), making it more interpretable than BF for large values
+    *   **⚠️ Important**: BD values > 10 may partially reflect model dimension differences between constrained/unconstrained trees
+    *   **Negative values** suggest potential issues:
+        *   Poor MCMC convergence (check convergence diagnostics)
+        *   Marginal likelihood estimation problems
+        *   Genuine lack of support for the clade
+*   **Bayes Factor (BF):**
+    *   The exponential of the Bayesian decay value (BF = e^BD)
+    *   Displayed with cap at 10^6 to avoid astronomical numbers
+    *   Traditional interpretations:
         *   BF < 1: Evidence against the clade
         *   1 < BF < 3: Weak evidence for the clade
         *   3 < BF < 10: Moderate evidence for the clade
         *   10 < BF < 100: Strong evidence for the clade
-        *   BF > 100: Decisive evidence for the clade
+        *   BF > 100: Very strong evidence for the clade
 
 **Site-Specific Analysis Interpretation:**
 * **Negative delta lnL values** indicate sites that support the branch (they become less likely when the branch is constrained to be absent).

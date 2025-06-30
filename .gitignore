@@ -83,3 +83,6 @@ update_tree.py
 # Other temporary files
 *.tmp
 *.temp
+
+# Paper directory (private)
+Paper/

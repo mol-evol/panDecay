@@ -53,7 +53,8 @@ class panDecayIndices:
                  mpirun_path="mpirun", use_beagle=False, beagle_device="auto",
                  beagle_precision="double", beagle_scaling="dynamic",
                  constraint_mode="all", test_branches=None, constraint_file=None,
-                 config_constraints=None):
+                 config_constraints=None, check_convergence=True, min_ess=200,
+                 max_psrf=1.01, max_asdsf=0.01, convergence_strict=False):
 
         self.alignment_file = Path(alignment_file)
         self.alignment_format = alignment_format
@@ -105,6 +106,13 @@ class panDecayIndices:
         self.test_branches = test_branches
         self.constraint_file = constraint_file
         self.config_constraints = config_constraints or {}
+        
+        # Convergence checking parameters
+        self.check_convergence = check_convergence
+        self.min_ess = min_ess
+        self.max_psrf = max_psrf
+        self.max_asdsf = max_asdsf
+        self.convergence_strict = convergence_strict
 
         self.data_type = data_type.lower()
         if self.data_type not in ["dna", "protein", "discrete"]:
@@ -212,6 +220,9 @@ class panDecayIndices:
         has_gamma = "+G" in model_str.upper()
         has_invar = "+I" in model_str.upper()
         base_model_name = model_str.split("+")[0].upper()
+        
+        if self.debug:
+            logger.debug(f"Model conversion debug - model_str: {model_str}, base_model_name: {base_model_name}, data_type: {self.data_type}")
 
         if self.data_type == "dna":
             if nst is not None: cmd_parts.append(f"nst={nst}")
@@ -776,30 +787,39 @@ class panDecayIndices:
             formatted_taxa = [self._format_taxon_for_paup(t) for t in clade_taxa]
             taxa_string = " ".join(formatted_taxa)
             
-            # Create a constraint that forces NON-monophyly
-            # The -1 syntax forces the taxa to NOT form a monophyletic group
-            blocks.append(f"    constraint broken_{constraint_id} -1 = {taxa_string};")
+            # Create a negative constraint to force NON-monophyly
+            # Based on MrBayes manual section 6.8.1: negative constraints 'ban' trees
+            # where listed taxa form a monophyletic group
+            blocks.append(f"    constraint broken_{constraint_id} negative = {taxa_string};")
             blocks.append(f"    prset topologypr = constraints(broken_{constraint_id});")
         
         # Model settings based on data type
         if self.data_type == "dna":
-            # Convert model string to MrBayes format
+            if self.debug:
+                logger.debug(f"MrBayes model debug - bayes_model: {self.bayes_model}, data_type: {self.data_type}")
+            
+            # Determine nst parameter
             if "GTR" in self.bayes_model.upper():
-                blocks.append("    lset nst=6 rates=invgamma;")
+                nst_val = "6"
             elif "HKY" in self.bayes_model.upper():
-                blocks.append("    lset nst=2 rates=invgamma;")
+                nst_val = "2"
             elif "JC" in self.bayes_model.upper():
-                blocks.append("    lset nst=1 rates=equal;")
+                nst_val = "1"
             else:
-                blocks.append("    lset nst=6 rates=invgamma;")  # Default to GTR+G
+                nst_val = "6"  # Default to GTR
                 
-            # Add gamma/invariable sites if specified
+            # Determine rates parameter
             if "+G" in self.bayes_model and "+I" in self.bayes_model:
-                blocks.append("    lset rates=invgamma;")
+                rates_val = "invgamma"
             elif "+G" in self.bayes_model:
-                blocks.append("    lset rates=gamma;")
+                rates_val = "gamma"
             elif "+I" in self.bayes_model:
-                blocks.append("    lset rates=propinv;")
+                rates_val = "propinv"
+            else:
+                rates_val = "equal"
+                
+            # Combine into single lset command
+            blocks.append(f"    lset nst={nst_val} rates={rates_val};")
                 
         elif self.data_type == "protein":
             protein_models = {
@@ -929,6 +949,18 @@ class panDecayIndices:
                 else:
                     logger.warning(f"Consensus tree not found: {con_tree_path}")
             
+            # Check convergence diagnostics
+            convergence_data = self._parse_mrbayes_convergence_diagnostics(nexus_file, output_prefix)
+            if not self._check_mrbayes_convergence(convergence_data, output_prefix):
+                # If strict mode and convergence failed, return None
+                if self.convergence_strict:
+                    return None
+            
+            # Store convergence data for reporting
+            if not hasattr(self, 'convergence_diagnostics'):
+                self.convergence_diagnostics = {}
+            self.convergence_diagnostics[output_prefix] = convergence_data
+            
             return ml_value
             
         except subprocess.TimeoutExpired:
@@ -1028,23 +1060,49 @@ class panDecayIndices:
             constrained_nexus = self.temp_path / f"c_{idx}.nex"
             constrained_nexus.write_text(combined_nexus)
             
+            # Debug: save first constraint file for inspection
+            if idx == 3 and self.debug:
+                debug_copy = self.temp_path.parent / "debug_mrbayes_constraint.nex"
+                debug_copy.write_text(combined_nexus)
+                logger.info(f"Debug: Saved constraint file to {debug_copy}")
+            
             # Run constrained analysis
             constrained_ml = self._run_mrbayes(constrained_nexus, f"c_{idx}")
             
             if constrained_ml is not None:
                 # Calculate Bayesian decay (marginal likelihood difference)
                 bayes_decay = unconstrained_ml - constrained_ml
-                bayes_factor = np.exp(bayes_decay)  # Convert log difference to Bayes Factor
+                
+                # Calculate Bayes Factor with reasonable bounds for display
+                # Note: log(BF) = Bayes Decay
+                # Cap display at BF = 10^6 (decay ~13.8) for readability
+                MAX_DISPLAY_DECAY = 13.8  # log(10^6)
+                
+                if bayes_decay > MAX_DISPLAY_DECAY:
+                    bayes_factor = 10**6  # Display cap
+                    bayes_factor_display = ">10^6"
+                    if bayes_decay > 10:
+                        logger.warning(f"{clade_id}: Large Bayes Decay ({bayes_decay:.2f}) may reflect model dimension differences")
+                elif bayes_decay < -MAX_DISPLAY_DECAY:
+                    bayes_factor = 10**-6  # Display cap
+                    bayes_factor_display = "<10^-6"
+                else:
+                    bayes_factor = np.exp(bayes_decay)
+                    if bayes_factor > 1000:
+                        bayes_factor_display = f"{bayes_factor:.2e}"
+                    else:
+                        bayes_factor_display = f"{bayes_factor:.2f}"
                 
                 bayesian_results[clade_id] = {
                     'unconstrained_ml': unconstrained_ml,
                     'constrained_ml': constrained_ml,
                     'bayes_decay': bayes_decay,
                     'bayes_factor': bayes_factor,
+                    'bayes_factor_display': bayes_factor_display,
                     'taxa': clade_taxa
                 }
                 
-                logger.info(f"{clade_id}: Bayes decay = {bayes_decay:.4f}, BF = {bayes_factor:.2e}")
+                logger.info(f"{clade_id}: Bayes decay = {bayes_decay:.4f}, BF = {bayes_factor_display}")
                 if bayes_decay < 0:
                     logger.warning(f"⚠️  {clade_id} has negative Bayes Decay ({bayes_decay:.4f}), suggesting potential convergence or estimation issues")
             else:
@@ -1060,7 +1118,7 @@ class panDecayIndices:
                 logger.warning("  1. Increasing MCMC generations (--bayes-ngen 5000000 or higher)")
                 logger.warning("  2. Using more chains (--bayes-chains 8)")
                 logger.warning("  3. Checking MCMC convergence diagnostics in MrBayes output")
-                logger.warning("  4. The harmonic mean is known to be unreliable - consider implementing stepping-stone sampling")
+                logger.warning("  4. Verifying chain convergence (check .stat files for ESS values)")
                 logger.warning(f"Affected clades: {', '.join(negative_clades)}\n")
                 
         return bayesian_results
@@ -1281,6 +1339,161 @@ class panDecayIndices:
                 logger.debug(traceback.format_exc())
             return {}
 
+    def _parse_mrbayes_convergence_diagnostics(self, nexus_file_path, output_prefix):
+        """
+        Parse convergence diagnostics from MrBayes output files.
+        
+        Args:
+            nexus_file_path: Path to the MrBayes nexus file
+            output_prefix: Output file prefix (e.g., 'unc', 'c_3')
+            
+        Returns:
+            Dictionary with convergence metrics:
+            {
+                'min_ess': minimum ESS across all parameters,
+                'max_psrf': maximum PSRF across all parameters,
+                'asdsf': average standard deviation of split frequencies,
+                'converged': boolean indicating if convergence criteria met,
+                'warnings': list of warning messages
+            }
+        """
+        convergence_data = {
+            'min_ess': None,
+            'max_psrf': None,
+            'asdsf': None,
+            'converged': False,
+            'warnings': []
+        }
+        
+        try:
+            # Parse .pstat file for ESS and PSRF
+            pstat_file = self.temp_path / f"{nexus_file_path.name}.pstat"
+            if pstat_file.exists():
+                pstat_content = pstat_file.read_text()
+                
+                # Parse ESS and PSRF values
+                ess_values = []
+                psrf_values = []
+                
+                for line in pstat_content.splitlines():
+                    if line.startswith("#") or not line.strip():
+                        continue
+                    
+                    parts = line.split()
+                    if len(parts) >= 4:  # Parameter, Mean, Variance, ESS, PSRF
+                        try:
+                            # ESS is typically in column 3 or 4 (0-indexed)
+                            if len(parts) > 3 and parts[3].replace('.','').replace('-','').isdigit():
+                                ess = float(parts[3])
+                                ess_values.append(ess)
+                            
+                            # PSRF is typically in column 4 or 5
+                            if len(parts) > 4 and parts[4].replace('.','').replace('-','').isdigit():
+                                psrf = float(parts[4])
+                                psrf_values.append(psrf)
+                        except (ValueError, IndexError):
+                            continue
+                
+                if ess_values:
+                    convergence_data['min_ess'] = min(ess_values)
+                    if convergence_data['min_ess'] < self.min_ess:
+                        convergence_data['warnings'].append(
+                            f"Low ESS detected: {convergence_data['min_ess']:.0f} < {self.min_ess}"
+                        )
+                
+                if psrf_values:
+                    convergence_data['max_psrf'] = max(psrf_values)
+                    if convergence_data['max_psrf'] > self.max_psrf:
+                        convergence_data['warnings'].append(
+                            f"High PSRF detected: {convergence_data['max_psrf']:.3f} > {self.max_psrf}"
+                        )
+            
+            # Parse .mcmc file or stdout for ASDSF
+            mcmc_file = self.temp_path / f"{nexus_file_path.name}.mcmc"
+            if mcmc_file.exists():
+                mcmc_content = mcmc_file.read_text()
+                
+                # Look for ASDSF in the last few lines
+                for line in reversed(mcmc_content.splitlines()[-20:]):
+                    if "Average standard deviation of split frequencies:" in line:
+                        try:
+                            asdsf_str = line.split(":")[-1].strip()
+                            convergence_data['asdsf'] = float(asdsf_str)
+                            if convergence_data['asdsf'] > self.max_asdsf:
+                                convergence_data['warnings'].append(
+                                    f"High ASDSF: {convergence_data['asdsf']:.6f} > {self.max_asdsf}"
+                                )
+                            break
+                        except ValueError:
+                            pass
+            
+            # Determine overall convergence
+            convergence_data['converged'] = (
+                (convergence_data['min_ess'] is None or convergence_data['min_ess'] >= self.min_ess) and
+                (convergence_data['max_psrf'] is None or convergence_data['max_psrf'] <= self.max_psrf) and
+                (convergence_data['asdsf'] is None or convergence_data['asdsf'] <= self.max_asdsf)
+            )
+            
+            return convergence_data
+            
+        except Exception as e:
+            logger.error(f"Error parsing convergence diagnostics: {e}")
+            if self.debug:
+                import traceback
+                logger.debug(traceback.format_exc())
+            return convergence_data
+    
+    def _check_mrbayes_convergence(self, convergence_data, output_prefix):
+        """
+        Check convergence criteria and log appropriate warnings.
+        
+        Args:
+            convergence_data: Dictionary from _parse_mrbayes_convergence_diagnostics
+            output_prefix: Run identifier for logging
+            
+        Returns:
+            Boolean indicating if run should be considered valid
+        """
+        if not self.check_convergence:
+            return True
+        
+        # Log convergence metrics
+        logger.info(f"Convergence diagnostics for {output_prefix}:")
+        if convergence_data['min_ess'] is not None:
+            logger.info(f"  Minimum ESS: {convergence_data['min_ess']:.0f}")
+        if convergence_data['max_psrf'] is not None:
+            logger.info(f"  Maximum PSRF: {convergence_data['max_psrf']:.3f}")
+        if convergence_data['asdsf'] is not None:
+            logger.info(f"  Final ASDSF: {convergence_data['asdsf']:.6f}")
+        
+        # Log warnings
+        for warning in convergence_data['warnings']:
+            logger.warning(f"  ⚠️  {warning}")
+        
+        # If strict mode and not converged, treat as failure
+        if self.convergence_strict and not convergence_data['converged']:
+            logger.error(f"Convergence criteria not met for {output_prefix} (strict mode enabled)")
+            return False
+        
+        # Otherwise just warn
+        if not convergence_data['converged']:
+            logger.warning(f"Convergence criteria not met for {output_prefix}, but continuing (strict mode disabled)")
+            logger.warning("Consider increasing --bayes-ngen or adjusting MCMC parameters")
+        
+        return True
+
+    def _identify_testable_branches(self):
+        """
+        Identify all internal branches in the tree that can be tested.
+        Returns a list of clade objects.
+        """
+        if not self.ml_tree:
+            logger.error("No tree available for branch identification")
+            return []
+        
+        internal_clades = [cl for cl in self.ml_tree.get_nonterminals() if cl and cl.clades]
+        return internal_clades
+    
     def run_parsimony_decay_analysis(self):
         """
         Run parsimony analysis to calculate traditional Bremer support values.
@@ -1309,6 +1522,9 @@ class panDecayIndices:
         pars_cmd_path = self.temp_path / PARS_NEX_FN
         pars_cmd_path.write_text(paup_script_content)
         
+        # Initialize original_tree at the start to avoid scope issues
+        original_tree = self.ml_tree
+        
         try:
             self._run_paup_command_file(PARS_NEX_FN, PARS_LOG_FN)
             
@@ -1317,14 +1533,38 @@ class panDecayIndices:
             pars_score = None
             if score_path.exists():
                 score_content = score_path.read_text()
+                logger.debug(f"Parsimony score file content:\n{score_content}")
                 # Parse parsimony score from PAUP output
+                # Try different patterns that PAUP might use
                 for line in score_content.splitlines():
-                    if "Length" in line:
+                    # Pattern 1: "Length = 123"
+                    if "Length" in line and "=" in line:
+                        try:
+                            score_str = line.split("=")[1].strip().split()[0]
+                            pars_score = int(score_str)
+                            break
+                        except (ValueError, IndexError):
+                            pass
+                    # Pattern 2: "Tree    Length"
+                    # Next line: "1       123"
+                    elif line.strip() and line.split()[0] == "1":
+                        parts = line.strip().split()
+                        if len(parts) >= 2:
+                            try:
+                                pars_score = int(parts[1])
+                                break
+                            except ValueError:
+                                pass
+                    # Pattern 3: Original pattern "Length 123"
+                    elif "Length" in line:
                         parts = line.strip().split()
                         for i, part in enumerate(parts):
-                            if part == "Length":
-                                pars_score = int(parts[i+1])
-                                break
+                            if part == "Length" and i+1 < len(parts):
+                                try:
+                                    pars_score = int(parts[i+1])
+                                    break
+                                except (ValueError, IndexError):
+                                    continue
                         if pars_score:
                             break
             
@@ -1344,7 +1584,7 @@ class panDecayIndices:
                 return {}
             
             # Temporarily use parsimony tree for clade identification if no ML tree
-            original_tree = self.ml_tree
+            # (original_tree already initialized above)
             if not self.ml_tree:
                 try:
                     self.ml_tree = Phylo.read(str(pars_tree_path), 'newick')
@@ -1364,7 +1604,14 @@ class panDecayIndices:
                     return {}
                 logger.info(f"Parsed {len(user_constraints)} user-defined constraints for parsimony analysis")
             
-            for idx, (node, clade_taxa) in enumerate(branches, 1):
+            # Process branches to extract taxon names
+            processed_branches = []
+            for clade in branches:
+                if clade and clade.clades:
+                    clade_taxa_names = [term.name for term in clade.get_terminals()]
+                    processed_branches.append((clade, clade_taxa_names))
+            
+            for idx, (node, clade_taxa) in enumerate(processed_branches, 1):
                 clade_id = f"Clade_{idx + 2}"  # Same numbering as ML analysis
                 
                 # Skip trivial branches
@@ -1381,11 +1628,15 @@ class panDecayIndices:
                 logger.info(f"Calculating parsimony decay for {clade_id} ({num_taxa} taxa)")
                 
                 # Create constraint forcing non-monophyly
+                # Format taxa names for PAUP* constraint syntax
+                formatted_clade_taxa = [self._format_taxon_for_paup(t) for t in clade_taxa]
+                # Use same constraint specification format as ML analysis
+                clade_spec = "((" + ", ".join(formatted_clade_taxa) + "));"
                 constraint_cmds = [
                     f"execute {NEXUS_ALIGNMENT_FN};",
                     f"set criterion=parsimony;",
-                    f"constraint broken_clade (MONOPHYLY) = {' '.join(clade_taxa)};",
-                    f"hsearch start=stepwise addseq=random nreps=10 swap=tbr multrees=yes enforce=no converse=yes constraints=broken_clade;",
+                    f"constraint broken_clade (MONOPHYLY) = {clade_spec}",
+                    f"hsearch start=stepwise addseq=random nreps=10 swap=tbr multrees=yes enforce=yes converse=yes constraints=broken_clade;",
                     f"savetrees file=pars_constraint_{idx}.tre replace=yes;",
                     f"pscores 1 / scorefile=pars_constraint_score_{idx}.txt replace=yes;"
                 ]
@@ -1403,13 +1654,37 @@ class panDecayIndices:
                     
                     if constrained_score_path.exists():
                         score_content = constrained_score_path.read_text()
+                        logger.debug(f"Constraint {idx} parsimony score file content:\n{score_content}")
+                        # Use same parsing logic as initial parsimony score
                         for line in score_content.splitlines():
-                            if "Length" in line:
+                            # Pattern 1: "Length = 123"
+                            if "Length" in line and "=" in line:
+                                try:
+                                    score_str = line.split("=")[1].strip().split()[0]
+                                    constrained_score = int(score_str)
+                                    break
+                                except (ValueError, IndexError):
+                                    pass
+                            # Pattern 2: "Tree    Length"
+                            # Next line: "1       123"
+                            elif line.strip() and line.split()[0] == "1":
+                                parts = line.strip().split()
+                                if len(parts) >= 2:
+                                    try:
+                                        constrained_score = int(parts[1])
+                                        break
+                                    except ValueError:
+                                        pass
+                            # Pattern 3: Original pattern "Length 123"
+                            elif "Length" in line:
                                 parts = line.strip().split()
                                 for i, part in enumerate(parts):
-                                    if part == "Length":
-                                        constrained_score = int(parts[i+1])
-                                        break
+                                    if part == "Length" and i+1 < len(parts):
+                                        try:
+                                            constrained_score = int(parts[i+1])
+                                            break
+                                        except (ValueError, IndexError):
+                                            continue
                                 if constrained_score:
                                     break
                     
@@ -1430,13 +1705,13 @@ class panDecayIndices:
         except Exception as e:
             logger.error(f"Parsimony decay analysis failed: {e}")
             # Restore original tree if we temporarily used parsimony tree
-            if original_tree is None and self.ml_tree is not None:
+            if original_tree is not None:
                 self.ml_tree = original_tree
             return {}
         
         finally:
             # Restore original tree if we temporarily used parsimony tree
-            if original_tree is None and self.ml_tree is not None:
+            if original_tree is not None:
                 self.ml_tree = original_tree
             
         return parsimony_decay
@@ -1517,6 +1792,16 @@ class panDecayIndices:
         """
         Calculate decay indices based on the selected analysis mode.
         
+        Note: ML and parsimony analyses are performed separately even though both use PAUP*.
+        This is because:
+        1. They use different optimality criteria (likelihood vs. parsimony score)
+        2. The optimal tree under one criterion may not be optimal under the other
+        3. Tree searches are guided by the active criterion (likelihood-based vs. parsimony-based swapping)
+        4. This design allows flexible analysis combinations (ML-only, parsimony-only, etc.)
+        
+        Future optimization: When both analyses are requested, we could find the constrained
+        tree under one criterion and then score it under both criteria in a single PAUP* run.
+        
         Args:
             perform_site_analysis: Whether to perform site-specific analysis (ML only)
             
@@ -1566,7 +1851,7 @@ class panDecayIndices:
                             'bayes_unconstrained_ml': bayes_data.get('unconstrained_ml'),
                             'bayes_constrained_ml': bayes_data.get('constrained_ml'),
                             'bayes_decay': bayes_data.get('bayes_decay'),
-                            'bayes_bf': bayes_data.get('bayes_factor')
+                            'bayes_factor': bayes_data.get('bayes_factor')
                         })
                     else:
                         # Create new entry for Bayesian-only results
@@ -1768,10 +2053,10 @@ class panDecayIndices:
             return {}
             
         # Convert to standard decay_indices format
-        self.decay_indices = {}
+        converted_results = {}
         
         for clade_id, bayes_data in bayesian_results.items():
-            self.decay_indices[clade_id] = {
+            converted_results[clade_id] = {
                 'taxa': bayes_data['taxa'],
                 'bayes_unconstrained_ml': bayes_data['unconstrained_ml'],
                 'bayes_constrained_ml': bayes_data['constrained_ml'],
@@ -1784,8 +2069,8 @@ class panDecayIndices:
                 'significant_AU': None
             }
             
-        logger.info(f"Calculated Bayesian decay indices for {len(self.decay_indices)} branches.")
-        return self.decay_indices
+        logger.info(f"Calculated Bayesian decay indices for {len(converted_results)} branches.")
+        return converted_results
     
     def _calculate_combined_decay_indices(self, perform_site_analysis=False):
         """
@@ -2464,16 +2749,26 @@ class panDecayIndices:
                             if bayes_decay is not None:
                                 annotation_parts.append(f"BD:{bayes_decay:.4f}")
                                 
-                            if bayes_factor is not None:
-                                annotation_parts.append(f"BF:{bayes_factor:.2f}")
+                            # Use display string for Bayes Factor if available
+                            bayes_factor_display = decay_info.get('bayes_factor_display')
+                            if bayes_factor_display:
+                                annotation_parts.append(f"BF:{bayes_factor_display}")
+                            elif bayes_factor is not None:
+                                # Fallback for older results
+                                if bayes_factor > 10**6:
+                                    annotation_parts.append(f"BF:>10^6")
+                                elif bayes_factor > 1000:
+                                    annotation_parts.append(f"BF:{bayes_factor:.2e}")
+                                else:
+                                    annotation_parts.append(f"BF:{bayes_factor:.2f}")
                                 
                             # Add parsimony decay if available
-                            pars_decay = matched_data.get('pars_decay')
+                            pars_decay = decay_info.get('pars_decay')
                             if pars_decay is not None:
                                 annotation_parts.append(f"PD:{pars_decay}")
                                 
                             # Add posterior probability if available
-                            post_prob = matched_data.get('posterior_prob')
+                            post_prob = decay_info.get('posterior_prob')
                             if post_prob is not None:
                                 annotation_parts.append(f"PP:{post_prob:.2f}")
                             break
@@ -2605,16 +2900,26 @@ class panDecayIndices:
                             if bayes_decay is not None:
                                 annotation_parts.append(f"BD:{bayes_decay:.4f}")
                                 
-                            if bayes_factor is not None:
-                                annotation_parts.append(f"BF:{bayes_factor:.2f}")
+                            # Use display string for Bayes Factor if available
+                            bayes_factor_display = decay_info.get('bayes_factor_display')
+                            if bayes_factor_display:
+                                annotation_parts.append(f"BF:{bayes_factor_display}")
+                            elif bayes_factor is not None:
+                                # Fallback for older results
+                                if bayes_factor > 10**6:
+                                    annotation_parts.append(f"BF:>10^6")
+                                elif bayes_factor > 1000:
+                                    annotation_parts.append(f"BF:{bayes_factor:.2e}")
+                                else:
+                                    annotation_parts.append(f"BF:{bayes_factor:.2f}")
                                 
                             # Add parsimony decay if available
-                            pars_decay = matched_data.get('pars_decay')
+                            pars_decay = decay_info.get('pars_decay')
                             if pars_decay is not None:
                                 annotation_parts.append(f"PD:{pars_decay}")
                                 
                             # Add posterior probability if available
-                            post_prob = matched_data.get('posterior_prob')
+                            post_prob = decay_info.get('posterior_prob')
                             if post_prob is not None:
                                 annotation_parts.append(f"PP:{post_prob:.2f}")
 
@@ -2705,8 +3010,18 @@ class panDecayIndices:
 
                         node.confidence = None  # Default
                         if matched_data and 'bayes_factor' in matched_data and matched_data['bayes_factor'] is not None:
-                            bayes_factor_val = matched_data['bayes_factor']
-                            node.name = f"{matched_clade_id} - BF:{bayes_factor_val:.2f}"
+                            # Use display string if available
+                            bayes_factor_display = matched_data.get('bayes_factor_display')
+                            if bayes_factor_display:
+                                node.name = f"{matched_clade_id} - BF:{bayes_factor_display}"
+                            else:
+                                bayes_factor_val = matched_data['bayes_factor']
+                                if bayes_factor_val > 10**6:
+                                    node.name = f"{matched_clade_id} - BF:>10^6"
+                                elif bayes_factor_val > 1000:
+                                    node.name = f"{matched_clade_id} - BF:{bayes_factor_val:.2e}"
+                                else:
+                                    node.name = f"{matched_clade_id} - BF:{bayes_factor_val:.2f}"
                             annotated_nodes_count += 1
 
                     Phylo.write(bf_tree, str(bayes_factor_tree_path), "newick")
@@ -2808,15 +3123,19 @@ class panDecayIndices:
                 if has_ml:
                     c_lnl = data.get('constrained_lnl', 'N/A')
                     if isinstance(c_lnl, float): c_lnl = f"{c_lnl:.4f}"
+                    elif c_lnl is None: c_lnl = 'N/A'
                     
                     lnl_d = data.get('lnl_diff', 'N/A')
                     if isinstance(lnl_d, float): lnl_d = f"{lnl_d:.4f}"
+                    elif lnl_d is None: lnl_d = 'N/A'
                     
                     au_p = data.get('AU_pvalue', 'N/A')
                     if isinstance(au_p, float): au_p = f"{au_p:.4f}"
+                    elif au_p is None: au_p = 'N/A'
                     
                     sig_au = data.get('significant_AU', 'N/A')
                     if isinstance(sig_au, bool): sig_au = "Yes" if sig_au else "No"
+                    elif sig_au is None: sig_au = 'N/A'
                     
                     row_parts.extend([c_lnl, lnl_d, au_p, sig_au])
                 
@@ -2824,12 +3143,14 @@ class panDecayIndices:
                 if has_parsimony:
                     pars_decay = data.get('pars_decay', 'N/A')
                     if isinstance(pars_decay, (int, float)): pars_decay = str(pars_decay)
+                    elif pars_decay is None: pars_decay = 'N/A'
                     row_parts.append(pars_decay)
                 
                 # Add Bayesian fields if present
                 if has_bayesian:
                     bayes_decay = data.get('bayes_decay', 'N/A')
                     if isinstance(bayes_decay, float): bayes_decay = f"{bayes_decay:.4f}"
+                    elif bayes_decay is None: bayes_decay = 'N/A'
                     
                     bayes_factor = data.get('bayes_factor', 'N/A')
                     if isinstance(bayes_factor, float): 
@@ -2838,6 +3159,7 @@ class panDecayIndices:
                             bayes_factor = f"{bayes_factor:.2e}"
                         else:
                             bayes_factor = f"{bayes_factor:.2f}"
+                    elif bayes_factor is None: bayes_factor = 'N/A'
                     
                     row_parts.extend([bayes_decay, bayes_factor])
                     
@@ -2845,6 +3167,7 @@ class panDecayIndices:
                     if has_posterior:
                         post_prob = data.get('posterior_prob', 'N/A')
                         if isinstance(post_prob, float): post_prob = f"{post_prob:.2f}"
+                        elif post_prob is None: post_prob = 'N/A'
                         row_parts.append(post_prob)
 
                 # Add bootstrap value if available
@@ -2959,13 +3282,61 @@ class panDecayIndices:
                             f.write(f"\n**⚠️ WARNING**: {negative_count}/{len(bayes_decays)} branches have negative Bayes Decay values.\n")
                             f.write("This suggests potential issues with:\n")
                             f.write("- MCMC convergence (consider increasing --bayes-ngen)\n")
-                            f.write("- Harmonic mean estimation reliability\n")
+                            f.write("- Marginal likelihood estimation reliability\n")
                             f.write("- Model specification\n\n")
+                        
+                        # Check for extreme positive values
+                        extreme_count = sum(1 for bd in bayes_decays if bd > 10)
+                        if extreme_count > 0:
+                            f.write(f"\n**⚠️ NOTE**: {extreme_count}/{len(bayes_decays)} branches have Bayes Decay values > 10.\n")
+                            f.write("Very large values may partially reflect:\n")
+                            f.write("- Model dimension differences between constrained/unconstrained trees\n")
+                            f.write("- Prior distribution effects\n")
+                            f.write("- Genuine very strong support for the clade\n\n")
                         
                     bayes_factors = [d['bayes_factor'] for d in self.decay_indices.values() if d.get('bayes_factor') is not None]
                     if bayes_factors:
                         strong_bf_count = sum(1 for bf in bayes_factors if bf > 10)
                         f.write(f"- Branches with strong Bayes Factor support (BF > 10): {strong_bf_count} / {len(bayes_factors)} evaluated\n")
+                
+                # Add convergence diagnostics section if available
+                if has_bayesian and hasattr(self, 'convergence_diagnostics'):
+                    f.write("\n## Bayesian Convergence Diagnostics\n\n")
+                    
+                    # Summary across all runs
+                    all_ess = []
+                    all_psrf = []
+                    all_asdsf = []
+                    convergence_issues = []
+                    
+                    for run_id, conv_data in self.convergence_diagnostics.items():
+                        if conv_data['min_ess'] is not None:
+                            all_ess.append(conv_data['min_ess'])
+                        if conv_data['max_psrf'] is not None:
+                            all_psrf.append(conv_data['max_psrf'])
+                        if conv_data['asdsf'] is not None:
+                            all_asdsf.append(conv_data['asdsf'])
+                        if not conv_data['converged']:
+                            convergence_issues.append(run_id)
+                    
+                    if all_ess:
+                        f.write(f"- Minimum ESS across all runs: {min(all_ess):.0f} (threshold: {self.min_ess})\n")
+                    if all_psrf:
+                        f.write(f"- Maximum PSRF across all runs: {max(all_psrf):.3f} (threshold: {self.max_psrf})\n")
+                    if all_asdsf:
+                        f.write(f"- Final ASDSF range: {min(all_asdsf):.6f} - {max(all_asdsf):.6f} (threshold: {self.max_asdsf})\n")
+                    
+                    if convergence_issues:
+                        f.write(f"\n**⚠️ WARNING**: {len(convergence_issues)} runs did not meet convergence criteria:\n")
+                        for run_id in convergence_issues[:5]:  # Show first 5
+                            f.write(f"  - {run_id}\n")
+                        if len(convergence_issues) > 5:
+                            f.write(f"  - ... and {len(convergence_issues) - 5} more\n")
+                        f.write("\nConsider:\n")
+                        f.write("- Increasing MCMC generations (--bayes-ngen)\n")
+                        f.write("- Running longer burnin (--bayes-burnin)\n")
+                        f.write("- Using more chains (--bayes-chains)\n")
+                        f.write("- Checking model specification\n")
 
             f.write("\n## Detailed Branch Support Results\n\n")
 
@@ -3030,24 +3401,34 @@ class panDecayIndices:
                     
                     bayes_f_raw = data.get('bayes_factor', 'N/A')
                     
-                    # Interpret Bayes Factor support
+                    # Interpret support based on Bayes Decay
                     bf_support = 'N/A'
-                    if isinstance(bayes_f_raw, float):
-                        if bayes_f_raw > 100:
+                    bayes_d_val = data.get('bayes_decay')
+                    if isinstance(bayes_d_val, float):
+                        if bayes_d_val > 5:
                             bf_support = "**Very Strong**"
-                        elif bayes_f_raw > 10:
+                        elif bayes_d_val > 3:
                             bf_support = "**Strong**"
-                        elif bayes_f_raw > 3:
-                            bf_support = "Moderate"
-                        elif bayes_f_raw > 1:
+                        elif bayes_d_val > 1:
+                            bf_support = "Positive"
+                        elif bayes_d_val > 0:
                             bf_support = "Weak"
                         else:
                             bf_support = "None"
                     
                     # Format for display
-                    bayes_f = bayes_f_raw
-                    if isinstance(bayes_f_raw, float): 
-                        bayes_f = f"{bayes_f_raw:.2f}"
+                    bayes_f_display = data.get('bayes_factor_display')
+                    if bayes_f_display:
+                        bayes_f = bayes_f_display
+                    elif isinstance(bayes_f_raw, float):
+                        if bayes_f_raw > 10**6:
+                            bayes_f = ">10^6"
+                        elif bayes_f_raw > 1000:
+                            bayes_f = f"{bayes_f_raw:.2e}"
+                        else:
+                            bayes_f = f"{bayes_f_raw:.2f}"
+                    else:
+                        bayes_f = bayes_f_raw
                     
                     row_parts.append(f"| {bayes_d} | {bayes_f} | {bf_support} ")
 
@@ -3071,22 +3452,32 @@ class panDecayIndices:
                 
             if has_bayesian:
                 f.write("### Bayesian Analysis\n")
-                f.write("- **Bayes Decay**: Marginal log-likelihood difference (unconstrained - constrained). **Positive values** indicate support for the clade, with larger positive values indicating stronger support. **Negative values** suggest the constrained analysis had higher marginal likelihood, which may indicate:\n")
+                f.write("- **Bayes Decay (BD)**: Marginal log-likelihood difference (unconstrained - constrained). This is the primary metric for Bayesian support.\n")
+                f.write("  - **Note**: Bayes Decay = log(Bayes Factor), so BD is more interpretable than BF for large values\n")
+                f.write("  - Interpretation scale:\n")
+                f.write("    - BD 0-1: Weak evidence for clade\n")
+                f.write("    - BD 1-3: Positive evidence\n")
+                f.write("    - BD 3-5: Strong evidence\n")
+                f.write("    - BD > 5: Very strong evidence\n")
+                f.write("  - **⚠️ Important**: BD values > 10 may partially reflect model dimension differences between constrained/unconstrained trees\n")
+                f.write("  - **Negative values** suggest the constrained analysis had higher marginal likelihood, which may indicate:\n")
                 if self.marginal_likelihood == "ss":
-                    f.write("  - Poor chain convergence or insufficient MCMC sampling\n")
-                    f.write("  - Complex posterior distribution requiring more steps\n")
-                    f.write("  - Genuine lack of support for the clade\n")
+                    f.write("    - Poor chain convergence or insufficient MCMC sampling\n")
+                    f.write("    - Complex posterior distribution requiring more steps\n")
+                    f.write("    - Genuine lack of support for the clade\n")
                 else:
-                    f.write("  - Harmonic mean estimator limitations (notoriously unreliable)\n")
-                    f.write("  - Poor MCMC convergence (try increasing generations)\n")
-                    f.write("  - Genuine lack of support for the clade\n")
-                    f.write("  - **Consider using stepping-stone sampling (--marginal-likelihood ss) for more reliable estimates**\n")
-                f.write("- **Bayes Factor**: Exponential of the Bayes Decay value. Represents the ratio of marginal likelihoods. Common interpretations:\n")
-                f.write("  - BF > 100: Very strong support\n")
-                f.write("  - BF > 10: Strong support\n")
-                f.write("  - BF > 3: Moderate support\n")
-                f.write("  - BF > 1: Weak support\n")
-                f.write("  - BF ≤ 1: No support\n\n")
+                    f.write("    - Harmonic mean estimator limitations (notoriously unreliable)\n")
+                    f.write("    - Poor MCMC convergence (try increasing generations)\n")
+                    f.write("    - Genuine lack of support for the clade\n")
+                    f.write("    - **Consider using stepping-stone sampling (--marginal-likelihood ss) for more reliable estimates**\n")
+                f.write("\n- **Bayes Factor (BF)**: Exponential of the Bayes Decay value (BF = e^BD). Represents the ratio of marginal likelihoods.\n")
+                f.write("  - Traditional interpretations:\n")
+                f.write("    - BF > 100: Very strong support\n")
+                f.write("    - BF > 10: Strong support\n")
+                f.write("    - BF > 3: Moderate support\n")
+                f.write("    - BF > 1: Weak support\n")
+                f.write("    - BF ≤ 1: No support\n")
+                f.write("  - **Note**: BF values are capped at 10^6 for display to avoid astronomical numbers\n\n")
                 
             if has_bootstrap:
                 f.write("- **Bootstrap**: Bootstrap support value (percentage of bootstrap replicates in which the clade appears). Higher values (e.g., > 70) suggest stronger support for the clade.\n")
@@ -4089,6 +4480,29 @@ ss_alpha = 0.4
 ss_nsteps = 50
 
 # ==============================================================================
+# CONVERGENCE CHECKING (MrBayes only)
+# ==============================================================================
+
+# Check MCMC convergence diagnostics (default: true)
+check_convergence = true
+
+# Minimum ESS (Effective Sample Size) threshold (default: 200)
+# Values below this indicate poor mixing
+min_ess = 200
+
+# Maximum PSRF (Potential Scale Reduction Factor) threshold (default: 1.01)
+# Values above this indicate lack of convergence between chains
+max_psrf = 1.01
+
+# Maximum ASDSF (Average Standard Deviation of Split Frequencies) (default: 0.01)
+# Values above this indicate lack of convergence between independent runs
+max_asdsf = 0.01
+
+# Fail analysis if convergence criteria not met (default: false)
+# If false, warnings are issued but analysis continues
+convergence_strict = false
+
+# ==============================================================================
 # PARALLEL PROCESSING (MrBayes only)
 # ==============================================================================
 
@@ -4256,6 +4670,11 @@ def parse_config(config_file, args):
                 'constraint_mode': 'constraint_mode',
                 'test_branches': 'test_branches',
                 'constraint_file': 'constraint_file',
+                'check_convergence': 'check_convergence',
+                'min_ess': 'min_ess',
+                'max_psrf': 'max_psrf',
+                'max_asdsf': 'max_asdsf',
+                'convergence_strict': 'convergence_strict',
             }
             
             # Process each parameter
@@ -4273,12 +4692,14 @@ def parse_config(config_file, args):
                     # Convert types as needed
                     if arg_param in ['gamma', 'invariable', 'keep_files', 'debug', 
                                      'site_analysis', 'bootstrap', 'use_mpi', 'use_beagle',
-                                     'visualize', 'html_trees', 'js_cdn', 'keep_tree_files']:
+                                     'visualize', 'html_trees', 'js_cdn', 'keep_tree_files',
+                                     'check_convergence', 'convergence_strict']:
                         value = str_to_bool(value)
-                    elif arg_param in ['gamma_shape', 'prop_invar', 'bayes_burnin', 'ss_alpha']:
+                    elif arg_param in ['gamma_shape', 'prop_invar', 'bayes_burnin', 'ss_alpha',
+                                       'max_psrf', 'max_asdsf']:
                         value = float(value)
                     elif arg_param in ['nst', 'bootstrap_reps', 'bayes_ngen', 'bayes_chains',
-                                       'bayes_sample_freq', 'ss_nsteps', 'mpi_processors']:
+                                       'bayes_sample_freq', 'ss_nsteps', 'mpi_processors', 'min_ess']:
                         value = int(value)
                     
                     setattr(args, arg_param, value)
@@ -4352,7 +4773,7 @@ def main():
     # Bayesian-specific options
     bayesian_opts = parser.add_argument_group('Bayesian Analysis Options')
     bayesian_opts.add_argument("--bayesian-software", choices=["mrbayes", "beast"], 
-                              help="Bayesian software to use (required if analysis includes Bayesian)")
+                              default="mrbayes", help="Bayesian software to use (default: mrbayes)")
     bayesian_opts.add_argument("--mrbayes-path", default="mb", help="Path to MrBayes executable")
     bayesian_opts.add_argument("--beast-path", default="beast", help="Path to BEAST executable")
     bayesian_opts.add_argument("--bayes-model", help="Model for Bayesian analysis (if different from ML model)")
@@ -4377,6 +4798,19 @@ def main():
                              help="BEAGLE precision mode")
     parallel_opts.add_argument("--beagle-scaling", choices=["none", "dynamic", "always"], default="dynamic",
                              help="BEAGLE scaling frequency")
+    
+    # Convergence checking options
+    convergence_opts = parser.add_argument_group('Convergence Checking Options (MrBayes)')
+    convergence_opts.add_argument("--check-convergence", action=argparse.BooleanOptionalAction, default=True,
+                                 help="Check MCMC convergence diagnostics (default: True)")
+    convergence_opts.add_argument("--min-ess", type=int, default=200,
+                                 help="Minimum ESS (Effective Sample Size) threshold (default: 200)")
+    convergence_opts.add_argument("--max-psrf", type=float, default=1.01,
+                                 help="Maximum PSRF (Potential Scale Reduction Factor) threshold (default: 1.01)")
+    convergence_opts.add_argument("--max-asdsf", type=float, default=0.01,
+                                 help="Maximum ASDSF (Average Standard Deviation of Split Frequencies) threshold (default: 0.01)")
+    convergence_opts.add_argument("--convergence-strict", action="store_true",
+                                 help="Fail analysis if convergence criteria not met (default: warn only)")
 
     viz_opts = parser.add_argument_group('Visualization Output (optional)')
     viz_opts.add_argument("--visualize", action="store_true", help="Generate static visualization plots (requires matplotlib, seaborn).")
@@ -4415,9 +4849,8 @@ def main():
     # Convert data_type to lowercase to handle case-insensitive input
     args.data_type = args.data_type.lower()
     
-    # Validate Bayesian analysis arguments
-    if args.analysis in ["bayesian", "both"] and not args.bayesian_software:
-        parser.error("--bayesian-software is required when using Bayesian analysis mode")
+    # Validate Bayesian analysis arguments - bayesian_software now has a default
+    # No validation needed since default is "mrbayes"
     
     if args.analysis == "ml" and args.bayesian_software:
         logger.warning("Bayesian software specified but analysis mode is ML-only. Bayesian options will be ignored.")
@@ -4499,7 +4932,12 @@ def main():
             constraint_mode=args.constraint_mode,
             test_branches=args.test_branches,
             constraint_file=args.constraint_file,
-            config_constraints=getattr(args, 'config_constraints', None)
+            config_constraints=getattr(args, 'config_constraints', None),
+            check_convergence=args.check_convergence,
+            min_ess=args.min_ess,
+            max_psrf=args.max_psrf,
+            max_asdsf=args.max_asdsf,
+            convergence_strict=args.convergence_strict
         )
 
         decay_calc.build_ml_tree() # Can raise exceptions
