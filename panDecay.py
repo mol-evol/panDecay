@@ -51,7 +51,7 @@ class panDecayIndices:
                  bayes_chains=4, bayes_sample_freq=1000, marginal_likelihood="ss",
                  ss_alpha=0.4, ss_nsteps=50, use_mpi=False, mpi_processors=None,
                  mpirun_path="mpirun", use_beagle=False, beagle_device="auto",
-                 beagle_precision="double", beagle_scaling="dynamic", parsimony=False,
+                 beagle_precision="double", beagle_scaling="dynamic",
                  constraint_mode="all", test_branches=None, constraint_file=None,
                  config_constraints=None):
 
@@ -70,11 +70,15 @@ class panDecayIndices:
         self.nst_arg = nst
         self.parsmodel_arg = parsmodel # For discrete data, used in _convert_model_to_paup
         self.user_paup_block = paup_block # Raw user block content
-        self.parsimony = parsimony  # Whether to calculate parsimony decay indices
         self._files_to_cleanup = []
         
-        # Bayesian analysis parameters
+        # Parse analysis mode to set boolean flags
         self.analysis_mode = analysis_mode
+        self.do_ml = "ml" in analysis_mode or analysis_mode == "all"
+        self.do_bayesian = "bayesian" in analysis_mode or analysis_mode == "all"
+        self.do_parsimony = "parsimony" in analysis_mode or analysis_mode == "all"
+        
+        # Bayesian analysis parameters
         self.bayesian_software = bayesian_software
         self.mrbayes_path = mrbayes_path
         self.beast_path = beast_path
@@ -1333,10 +1337,21 @@ class panDecayIndices:
             # Now calculate decay for each clade
             parsimony_decay = {}
             
-            # Use the ML tree clades for consistency
-            if not hasattr(self, 'ml_tree') or not self.ml_tree:
-                logger.warning("ML tree not available for clade identification")
+            # Load the parsimony tree for clade identification
+            pars_tree_path = self.temp_path / PARS_TREE_FN
+            if not pars_tree_path.exists():
+                logger.error("Parsimony tree file not found")
                 return {}
+            
+            # Temporarily use parsimony tree for clade identification if no ML tree
+            original_tree = self.ml_tree
+            if not self.ml_tree:
+                try:
+                    self.ml_tree = Phylo.read(str(pars_tree_path), 'newick')
+                    logger.info("Using parsimony tree for clade identification")
+                except Exception as e:
+                    logger.error(f"Failed to load parsimony tree: {e}")
+                    return {}
             
             branches = self._identify_testable_branches()
             
@@ -1414,7 +1429,15 @@ class panDecayIndices:
                     
         except Exception as e:
             logger.error(f"Parsimony decay analysis failed: {e}")
+            # Restore original tree if we temporarily used parsimony tree
+            if original_tree is None and self.ml_tree is not None:
+                self.ml_tree = original_tree
             return {}
+        
+        finally:
+            # Restore original tree if we temporarily used parsimony tree
+            if original_tree is None and self.ml_tree is not None:
+                self.ml_tree = original_tree
             
         return parsimony_decay
 
@@ -1500,36 +1523,80 @@ class panDecayIndices:
         Returns:
             Dictionary of decay indices
         """
-        # For any analysis mode, we need the ML tree to identify clades
-        if not self.ml_tree:
-            logger.info("ML tree not available. Attempting to build it first...")
-            try:
-                self.build_ml_tree()
-            except Exception as e:
-                logger.error(f"Failed to build ML tree during decay calculation: {e}")
-                return {}
+        # For any analysis mode, we need a tree to identify clades
+        # Build ML tree if needed for ML analysis or if no tree exists
+        if self.do_ml or not self.ml_tree:
+            if not self.ml_tree:
+                logger.info("Building tree to identify clades...")
+                try:
+                    self.build_ml_tree()
+                except Exception as e:
+                    logger.error(f"Failed to build tree: {e}")
+                    return {}
 
         if not self.ml_tree:
-            logger.error("ML tree is missing. Cannot identify clades for decay analysis.")
+            logger.error("Tree is missing. Cannot identify clades for decay analysis.")
             return {}
             
-        # For ML-only and combined modes, we need ML likelihood
-        if self.analysis_mode in ["ml", "both"] and self.ml_likelihood is None:
-            logger.error("ML likelihood is missing. Cannot calculate ML decay indices.")
-            if self.analysis_mode == "ml":
-                return {}
-            # For "both" mode, we can still continue with Bayesian only
+        # Initialize results dictionary
+        self.decay_indices = {}
+        
+        # Calculate ML decay indices if requested
+        if self.do_ml:
+            if self.ml_likelihood is None:
+                logger.error("ML likelihood is missing. Cannot calculate ML decay indices.")
+                if not self.do_bayesian and not self.do_parsimony:
+                    return {}
+                # Continue with other analyses
+            else:
+                logger.info("Calculating ML decay indices...")
+                self.decay_indices = self._calculate_ml_decay_indices(perform_site_analysis)
+        
+        # Calculate Bayesian decay indices if requested
+        if self.do_bayesian:
+            logger.info("Calculating Bayesian decay indices...")
+            bayesian_results = self._calculate_bayesian_decay_indices()
             
-        # Dispatch to appropriate method based on analysis mode
-        if self.analysis_mode == "ml":
-            return self._calculate_ml_decay_indices(perform_site_analysis)
-        elif self.analysis_mode == "bayesian":
-            return self._calculate_bayesian_decay_indices()
-        elif self.analysis_mode == "both":
-            return self._calculate_combined_decay_indices(perform_site_analysis)
+            # Merge Bayesian results with existing results
+            if bayesian_results:
+                for clade_id, bayes_data in bayesian_results.items():
+                    if clade_id in self.decay_indices:
+                        # Add Bayesian fields to existing results
+                        self.decay_indices[clade_id].update({
+                            'bayes_unconstrained_ml': bayes_data.get('unconstrained_ml'),
+                            'bayes_constrained_ml': bayes_data.get('constrained_ml'),
+                            'bayes_decay': bayes_data.get('bayes_decay'),
+                            'bayes_bf': bayes_data.get('bayes_factor')
+                        })
+                    else:
+                        # Create new entry for Bayesian-only results
+                        self.decay_indices[clade_id] = bayes_data
+        
+        # Calculate parsimony decay indices if requested
+        if self.do_parsimony:
+            logger.info("Calculating parsimony decay indices...")
+            parsimony_results = self.run_parsimony_decay_analysis()
+            
+            # Merge parsimony results with existing results
+            if parsimony_results:
+                for clade_id, pars_data in parsimony_results.items():
+                    if clade_id in self.decay_indices:
+                        # Add parsimony fields to existing results
+                        self.decay_indices[clade_id].update({
+                            'pars_decay': pars_data.get('pars_decay'),
+                            'pars_score': pars_data.get('pars_score'),
+                            'pars_constrained_score': pars_data.get('constrained_score')
+                        })
+                    else:
+                        # Create new entry for parsimony-only results
+                        self.decay_indices[clade_id] = pars_data
+        
+        if not self.decay_indices:
+            logger.warning("No branch support values were calculated.")
         else:
-            logger.error(f"Unknown analysis mode: {self.analysis_mode}")
-            return {}
+            logger.info(f"Calculated support values for {len(self.decay_indices)} branches.")
+            
+        return self.decay_indices
     
     def _calculate_ml_decay_indices(self, perform_site_analysis=False):
         """Calculate ML decay indices for all internal branches of the ML tree."""
@@ -1676,19 +1743,6 @@ class panDecayIndices:
         else:
             logger.warning("AU test failed or returned no results. Decay indices will lack AU p-values.")
 
-        # Add parsimony decay if requested
-        if self.parsimony:
-            logger.info("Adding parsimony decay indices...")
-            parsimony_results = self.run_parsimony_decay_analysis()
-            
-            # Merge parsimony results with existing decay indices
-            for clade_id, pars_data in parsimony_results.items():
-                if clade_id in self.decay_indices:
-                    self.decay_indices[clade_id]['pars_decay'] = pars_data['pars_decay']
-                    self.decay_indices[clade_id]['pars_score'] = pars_data['pars_score']
-                    self.decay_indices[clade_id]['pars_constrained_score'] = pars_data['constrained_score']
-                else:
-                    logger.warning(f"Parsimony clade {clade_id} not found in ML results")
 
         if not self.decay_indices:
             logger.warning("No branch support values were calculated.")
@@ -2700,12 +2754,15 @@ class panDecayIndices:
             f.write("=" * 30 + "\n\n")
             
             # Write appropriate header based on analysis type
-            if self.analysis_mode == "ml":
-                f.write("Analysis mode: Maximum Likelihood\n")
-            elif self.analysis_mode == "bayesian":
-                f.write(f"Analysis mode: Bayesian ({self.bayesian_software})\n")
-            elif self.analysis_mode == "both":
-                f.write(f"Analysis mode: Combined ML + Bayesian ({self.bayesian_software})\n")
+            analysis_types = []
+            if self.do_ml:
+                analysis_types.append("Maximum Likelihood")
+            if self.do_bayesian:
+                analysis_types.append(f"Bayesian ({self.bayesian_software})")
+            if self.do_parsimony:
+                analysis_types.append("Parsimony")
+            
+            f.write(f"Analysis mode: {' + '.join(analysis_types)}\n")
             f.write("\n")
             
             # ML tree likelihood (if available)
@@ -2838,7 +2895,7 @@ class panDecayIndices:
             f.write(f"- Analysis mode: `{self.analysis_mode}`\n")
             
             # ML parameters
-            if has_ml or self.analysis_mode in ["ml", "both"]:
+            if has_ml or self.do_ml:
                 if self.user_paup_block:
                     f.write("- ML Model: User-defined PAUP* block\n")
                 else:
@@ -2846,7 +2903,7 @@ class panDecayIndices:
                     f.write(f"- PAUP* `lset` command: `{self.paup_model_cmds}`\n")
             
             # Bayesian parameters
-            if has_bayesian or self.analysis_mode in ["bayesian", "both"]:
+            if has_bayesian or self.do_bayesian:
                 f.write(f"- Bayesian software: `{self.bayesian_software}`\n")
                 f.write(f"- Bayesian model: `{self.bayes_model}`\n")
                 f.write(f"- MCMC generations: `{self.bayes_ngen}`\n")
@@ -3904,8 +3961,9 @@ debug = false
 # ==============================================================================
 
 # Analysis type (default: ml)
-# Options: ml, bayesian, parsimony, all
-# Note: 'all' runs all three analysis types
+# Options: ml, bayesian, parsimony, ml+parsimony, bayesian+parsimony, ml+bayesian, all
+# Note: 'all' runs all three analysis types (ML + Bayesian + Parsimony)
+# Use '+' to combine multiple analyses (e.g., ml+parsimony)
 analysis = ml
 
 # Perform bootstrap analysis (default: false)
@@ -4280,18 +4338,11 @@ def main():
 
     # Analysis mode selection
     analysis_mode = parser.add_argument_group('Analysis Mode')
-    analysis_mode.add_argument("--analysis", choices=["ml", "bayesian", "both"], default="ml",
-                              help="Type of decay analysis to perform: ML-only, Bayesian-only, or both (default: ml)")
-    analysis_mode.add_argument("-M", "--ml-only", action="store_const", const="ml", dest="analysis",
-                              help="Perform ML analysis only (default)")
-    analysis_mode.add_argument("-B", "--bayesian-only", action="store_const", const="bayesian", dest="analysis",
-                              help="Perform Bayesian analysis only")
-    analysis_mode.add_argument("-MB", "--both", action="store_const", const="both", dest="analysis",
-                              help="Perform both ML and Bayesian analyses")
-    
-    # Parsimony analysis option
-    analysis_mode.add_argument("--parsimony", action="store_true", 
-                              help="Also calculate parsimony decay indices (Bremer support)")
+    analysis_mode.add_argument("--analysis", 
+                              choices=["ml", "bayesian", "parsimony", "ml+parsimony", "bayesian+parsimony", "ml+bayesian", "all"], 
+                              default="ml",
+                              help="Type of decay analysis to perform (default: ml). "
+                                   "Options: ml, bayesian, parsimony, ml+parsimony, bayesian+parsimony, ml+bayesian, all")
     
     # Add bootstrap options
     bootstrap_opts = parser.add_argument_group('Bootstrap Analysis (optional)')
@@ -4445,7 +4496,6 @@ def main():
             beagle_device=args.beagle_device,
             beagle_precision=args.beagle_precision,
             beagle_scaling=args.beagle_scaling,
-            parsimony=args.parsimony,
             constraint_mode=args.constraint_mode,
             test_branches=args.test_branches,
             constraint_file=args.constraint_file,

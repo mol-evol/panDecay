@@ -190,7 +190,8 @@ usage: panDecay.py [-h] [--format FORMAT] [--model MODEL] [--gamma] [--invariabl
                   [--base-freq {equal,estimate,empirical}] [--rates {equal,gamma}] [--protein-model PROTEIN_MODEL] 
                   [--nst {1,2,6}] [--parsmodel | --no-parsmodel] [--threads THREADS] [--starting-tree STARTING_TREE] 
                   [--paup-block PAUP_BLOCK] [--temp TEMP] [--keep-files] [--debug] [--site-analysis] 
-                  [--analysis {parsimony,ml,bayesian,all}] [-M] [-B] [-C] [--bayesian-software {mrbayes,beast}]
+                  [--analysis {ml,bayesian,parsimony,ml+parsimony,bayesian+parsimony,ml+bayesian,all}] 
+                  [--bayesian-software {mrbayes,beast}]
                   [--mrbayes-path MRBAYES_PATH] [--beast-path BEAST_PATH] [--bayes-model BAYES_MODEL]
                   [--bayes-ngen BAYES_NGEN] [--bayes-burnin BAYES_BURNIN] [--bayes-chains BAYES_CHAINS]
                   [--bayes-sample-freq BAYES_SAMPLE_FREQ] [--marginal-likelihood {ss,ps,hm}]
@@ -247,11 +248,9 @@ Runtime Control:
   --debug               Enable detailed debug logging (implies --keep-files). (default: False)
 
 Analysis Mode:
-  --analysis {parsimony,ml,bayesian,all}
-                        Analysis type to perform (default: ml)
-  -M, --ml-only         Perform ML analysis only (default)
-  -B, --bayesian-only   Perform Bayesian analysis only
-  -C, --combined        Perform combined analyses (e.g., ML+Bayesian)
+  --analysis {ml,bayesian,parsimony,ml+parsimony,bayesian+parsimony,ml+bayesian,all}
+                        Type of decay analysis to perform (default: ml). 
+                        Options: ml, bayesian, parsimony, ml+parsimony, bayesian+parsimony, ml+bayesian, all
 
 Bayesian Analysis Options:
   --bayesian-software {mrbayes,beast}
@@ -582,40 +581,56 @@ python3 panDecay.py alignment.fas --analysis bayesian --bayesian-software mrbaye
 Run both ML and Bayesian analyses:
 
 ```bash
-python3 panDecay.py alignment.fas --model GTR --gamma -C --bayesian-software mrbayes \
+python3 panDecay.py alignment.fas --model GTR --gamma --analysis ml+bayesian --bayesian-software mrbayes \
     --bayes-ngen 1000000 --output combined_analysis.txt
 ```
 
-### Example 11: Using MPI for Parallel MrBayes
+### Example 11: Combined ML and Parsimony Analysis
+Run both ML and parsimony analyses to compare modern and traditional support values:
+
+```bash
+python3 panDecay.py alignment.fas --model GTR --gamma --analysis ml+parsimony \
+    --output ml_parsimony_analysis.txt
+```
+
+### Example 12: All Three Analysis Types
+Run ML, Bayesian, and parsimony analyses in a single run:
+
+```bash
+python3 panDecay.py alignment.fas --model GTR --gamma --analysis all \
+    --bayesian-software mrbayes --bayes-ngen 1000000 --output complete_analysis.txt
+```
+
+### Example 13: Using MPI for Parallel MrBayes
 If you have MPI-enabled MrBayes installed:
 
 ```bash
-python3 panDecay.py alignment.fas -B --bayesian-software mrbayes --use-mpi \
+python3 panDecay.py alignment.fas --analysis bayesian --bayesian-software mrbayes --use-mpi \
     --mpi-processors 8 --bayes-chains 4 --bayes-ngen 2000000
 ```
 
 This runs 4 chains across 8 processors (2 chains per processor for better mixing).
 
-### Example 12: Using BEAGLE for GPU Acceleration
+### Example 14: Using BEAGLE for GPU Acceleration
 If MrBayes is compiled with BEAGLE support:
 
 ```bash
-python3 panDecay.py alignment.fas -C --bayesian-software mrbayes --use-beagle \
+python3 panDecay.py alignment.fas --analysis ml+bayesian --bayesian-software mrbayes --use-beagle \
     --beagle-device gpu --beagle-precision single --bayes-ngen 5000000
 ```
 
 For CPU-based BEAGLE acceleration:
 
 ```bash
-python3 panDecay.py alignment.fas -C --bayesian-software mrbayes --use-beagle \
+python3 panDecay.py alignment.fas --analysis ml+bayesian --bayesian-software mrbayes --use-beagle \
     --beagle-device cpu --beagle-precision double
 ```
 
-### Example 13: Combined MPI and BEAGLE
+### Example 15: Combined MPI and BEAGLE
 For maximum performance with both MPI and BEAGLE:
 
 ```bash
-python3 panDecay.py large_alignment.fas -B --bayesian-software mrbayes \
+python3 panDecay.py large_alignment.fas --analysis bayesian --bayesian-software mrbayes \
     --use-mpi --mpi-processors 16 --use-beagle --beagle-device gpu \
     --bayes-chains 4 --bayes-ngen 10000000 --bayes-sample-freq 5000
 ```
@@ -644,12 +659,12 @@ make && sudo make install
 For a quick test with minimal MCMC generations:
 
 ```bash
-python3 panDecay.py alignment.fas --both --bayesian-software mrbayes \
+python3 panDecay.py alignment.fas --analysis ml+bayesian --bayesian-software mrbayes \
     --bayes-ngen 10000 --bayes-sample-freq 100 \
     --output quick_test.txt
 ```
 
-### Example 14: Using Configuration Files
+### Example 16: Using Configuration Files
 Generate a template configuration file and use it for analysis:
 
 ```bash
@@ -663,7 +678,7 @@ python3 panDecay.py --config my_analysis.ini
 python3 panDecay.py --config my_analysis.ini --threads 16 --output different_output.txt
 ```
 
-### Example 15: Testing Specific Branches
+### Example 17: Testing Specific Branches
 Test only specific clades of interest:
 
 ```bash
@@ -684,7 +699,7 @@ python3 panDecay.py alignment.fas --constraint-mode exclude \
     --test-branches "Drosophila_melanogaster,Anopheles_gambiae"
 ```
 
-### Example 16: Combined Config File with Constraints
+### Example 18: Combined Config File with Constraints
 Create a configuration file with constraint definitions:
 
 ```ini
