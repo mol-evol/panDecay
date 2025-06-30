@@ -86,3 +86,9 @@ update_tree.py
 
 # Paper directory (private)
 Paper/
+
+# Old code directory (private)
+MLDecay/
+
+# Documentation files (private)
+CLAUDE.md

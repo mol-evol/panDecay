@@ -46,7 +46,7 @@ class panDecayIndices:
                  debug=False, keep_files=False, gamma_shape=None, prop_invar=None,
                  base_freq=None, rates=None, protein_model=None, nst=None,
                  parsmodel=None, paup_block=None, analysis_mode="ml",
-                 bayesian_software=None, mrbayes_path="mb", beast_path="beast",
+                 bayesian_software=None, mrbayes_path="mb",
                  bayes_model=None, bayes_ngen=1000000, bayes_burnin=0.25,
                  bayes_chains=4, bayes_sample_freq=1000, marginal_likelihood="ss",
                  ss_alpha=0.4, ss_nsteps=50, use_mpi=False, mpi_processors=None,
@@ -82,7 +82,6 @@ class panDecayIndices:
         # Bayesian analysis parameters
         self.bayesian_software = bayesian_software
         self.mrbayes_path = mrbayes_path
-        self.beast_path = beast_path
         self.bayes_model = bayes_model or model  # Use ML model if not specified
         self.bayes_ngen = bayes_ngen
         self.bayes_burnin = bayes_burnin
@@ -4446,14 +4445,12 @@ paup = paup
 # ==============================================================================
 
 # Bayesian software (required if analysis includes bayesian)
-# Options: mrbayes, beast
+# Options: mrbayes
 bayesian_software = mrbayes
 
 # Path to MrBayes executable (default: mb)
 mrbayes_path = mb
 
-# Path to BEAST executable (default: beast)
-beast_path = beast
 
 # Model for Bayesian analysis (optional)
 # If not specified, uses same as ML model
@@ -4645,7 +4642,6 @@ def parse_config(config_file, args):
                 'bootstrap_reps': 'bootstrap_reps',
                 'bayesian_software': 'bayesian_software',
                 'mrbayes_path': 'mrbayes_path',
-                'beast_path': 'beast_path',
                 'bayes_model': 'bayes_model',
                 'bayes_ngen': 'bayes_ngen',
                 'bayes_burnin': 'bayes_burnin',
@@ -4772,10 +4768,9 @@ def main():
     
     # Bayesian-specific options
     bayesian_opts = parser.add_argument_group('Bayesian Analysis Options')
-    bayesian_opts.add_argument("--bayesian-software", choices=["mrbayes", "beast"], 
+    bayesian_opts.add_argument("--bayesian-software", choices=["mrbayes"], 
                               default="mrbayes", help="Bayesian software to use (default: mrbayes)")
     bayesian_opts.add_argument("--mrbayes-path", default="mb", help="Path to MrBayes executable")
-    bayesian_opts.add_argument("--beast-path", default="beast", help="Path to BEAST executable")
     bayesian_opts.add_argument("--bayes-model", help="Model for Bayesian analysis (if different from ML model)")
     bayesian_opts.add_argument("--bayes-ngen", type=int, default=1000000, help="Number of MCMC generations")
     bayesian_opts.add_argument("--bayes-burnin", type=float, default=0.25, help="Burnin fraction (0-1)")
@@ -4913,7 +4908,6 @@ def main():
             analysis_mode=args.analysis,
             bayesian_software=args.bayesian_software,
             mrbayes_path=args.mrbayes_path,
-            beast_path=args.beast_path,
             bayes_model=args.bayes_model,
             bayes_ngen=args.bayes_ngen,
             bayes_burnin=args.bayes_burnin,

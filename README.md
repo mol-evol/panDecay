@@ -2,7 +2,7 @@
 
 # panDecay: Phylogenetic Analysis using Decay Indices
 
-panDecay is a Python command-line tool for calculating phylogenetic decay indices across multiple analysis frameworks. It can compute parsimony-based decay indices (traditional Bremer support), Maximum Likelihood (ML)-based decay indices, and Bayesian decay indices (using MrBayes or BEAST)   
+panDecay is a Python command-line tool for calculating phylogenetic decay indices across multiple analysis frameworks. It can compute parsimony-based decay indices (traditional Bremer support), Maximum Likelihood (ML)-based decay indices, and Bayesian decay indices using MrBayes   
 
 ## Table of Contents
 
@@ -77,7 +77,6 @@ Where ML represents the marginal likelihood (not to be confused with maximum lik
 
 panDecay can perform Bayesian analyses using:
 - **MrBayes**: Currently supported with harmonic mean marginal likelihood estimation
-- **BEAST**: Support planned for future versions
 
 ## Features
 
@@ -201,8 +200,8 @@ usage: panDecay.py [-h] [--format FORMAT] [--model MODEL] [--gamma] [--invariabl
                   [--nst {1,2,6}] [--parsmodel | --no-parsmodel] [--threads THREADS] [--starting-tree STARTING_TREE] 
                   [--paup-block PAUP_BLOCK] [--temp TEMP] [--keep-files] [--debug] [--site-analysis] 
                   [--analysis {ml,bayesian,parsimony,ml+parsimony,bayesian+parsimony,ml+bayesian,all}] 
-                  [--bayesian-software {mrbayes,beast}]
-                  [--mrbayes-path MRBAYES_PATH] [--beast-path BEAST_PATH] [--bayes-model BAYES_MODEL]
+                  [--bayesian-software {mrbayes}]
+                  [--mrbayes-path MRBAYES_PATH] [--bayes-model BAYES_MODEL]
                   [--bayes-ngen BAYES_NGEN] [--bayes-burnin BAYES_BURNIN] [--bayes-chains BAYES_CHAINS]
                   [--bayes-sample-freq BAYES_SAMPLE_FREQ] [--marginal-likelihood {ss,ps,hm}]
                   [--ss-alpha SS_ALPHA] [--ss-nsteps SS_NSTEPS] [--bootstrap] [--bootstrap-reps BOOTSTRAP_REPS] 
@@ -263,12 +262,10 @@ Analysis Mode:
                         Options: ml, bayesian, parsimony, ml+parsimony, bayesian+parsimony, ml+bayesian, all
 
 Bayesian Analysis Options:
-  --bayesian-software {mrbayes,beast}
+  --bayesian-software {mrbayes}
                         Bayesian software to use (required if analysis includes Bayesian)
   --mrbayes-path MRBAYES_PATH
                         Path to MrBayes executable (default: mb)
-  --beast-path BEAST_PATH
-                        Path to BEAST executable (default: beast)
   --bayes-model BAYES_MODEL
                         Model for Bayesian analysis (if different from ML model)
   --bayes-ngen BAYES_NGEN
