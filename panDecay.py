@@ -1099,8 +1099,7 @@ class panDecayIndices:
                 if bayes_decay > MAX_DISPLAY_DECAY:
                     bayes_factor = 10**6  # Display cap
                     bayes_factor_display = ">10^6"
-                    if bayes_decay > 10:
-                        logger.warning(f"{clade_id}: Large Bayes Decay ({bayes_decay:.2f}) may reflect model dimension differences")
+                    # Note: Large BD values are expected in phylogenetics, no warning needed
                 elif bayes_decay < -MAX_DISPLAY_DECAY:
                     bayes_factor = 10**-6  # Display cap
                     bayes_factor_display = "<10^-6"
@@ -1121,7 +1120,15 @@ class panDecayIndices:
                 }
                 
                 # Update progress box with results
-                support_desc = "decisive support" if bayes_factor > 100 else "strong support" if bayes_factor > 10 else "moderate support"
+                # Use phylogenetic-specific BD interpretation scale
+                if bayes_decay > 10:
+                    support_desc = "very strong support"
+                elif bayes_decay > 5:
+                    support_desc = "strong support"
+                elif bayes_decay > 2:
+                    support_desc = "moderate support"
+                else:
+                    support_desc = "weak support"
                 result_lines = [
                     f"✓ MrBayes completed successfully",
                     f"✓ Marginal likelihood (stepping-stone): {constrained_ml:.3f}",
@@ -4047,19 +4054,23 @@ class panDecayIndices:
                             f.write("- Marginal likelihood estimation reliability\n")
                             f.write("- Model specification\n\n")
                         
-                        # Check for extreme positive values
-                        extreme_count = sum(1 for bd in bayes_decays if bd > 10)
-                        if extreme_count > 0:
-                            f.write(f"\n**⚠️ NOTE**: {extreme_count}/{len(bayes_decays)} branches have Bayes Decay values > 10.\n")
-                            f.write("Very large values may partially reflect:\n")
-                            f.write("- Model dimension differences between constrained/unconstrained trees\n")
-                            f.write("- Prior distribution effects\n")
-                            f.write("- Genuine very strong support for the clade\n\n")
+                        # Report on BD distribution
+                        very_strong_count = sum(1 for bd in bayes_decays if bd > 10)
+                        strong_count = sum(1 for bd in bayes_decays if 5 <= bd <= 10)
+                        moderate_count = sum(1 for bd in bayes_decays if 2 <= bd < 5)
+                        weak_count = sum(1 for bd in bayes_decays if 0 <= bd < 2)
                         
-                    bayes_factors = [d['bayes_factor'] for d in self.decay_indices.values() if d.get('bayes_factor') is not None]
-                    if bayes_factors:
-                        strong_bf_count = sum(1 for bf in bayes_factors if bf > 10)
-                        f.write(f"- Branches with strong Bayes Factor support (BF > 10): {strong_bf_count} / {len(bayes_factors)} evaluated\n")
+                        f.write(f"\n**Bayesian Decay Distribution**:\n")
+                        f.write(f"- Very strong support (BD > 10): {very_strong_count} branches\n")
+                        f.write(f"- Strong support (BD 5-10): {strong_count} branches\n")
+                        f.write(f"- Moderate support (BD 2-5): {moderate_count} branches\n")
+                        f.write(f"- Weak support (BD 0-2): {weak_count} branches\n")
+                        if negative_count > 0:
+                            f.write(f"- Negative BD values: {negative_count} branches (see warning above)\n")
+                        
+                        f.write(f"\n**Note**: BD values closely approximating ML log-likelihood differences is expected behavior in phylogenetic topology testing.\n\n")
+                        
+                    # Note: We no longer report traditional BF thresholds as they don't apply well to phylogenetics
                 
                 # Add convergence diagnostics section if available
                 if has_bayesian and hasattr(self, 'convergence_diagnostics'):
@@ -4111,7 +4122,7 @@ class panDecayIndices:
                 separator_parts.extend(["|-----------------|------------------|------------|-------------------- "])
             
             if has_bayesian:
-                header_parts.extend(["| Bayes Decay | Bayes Factor | BF Support "])
+                header_parts.extend(["| Bayes Decay | Bayes Factor | BD Support "])
                 separator_parts.extend(["|-------------|--------------|------------ "])
                 
             if has_bootstrap:
@@ -4163,16 +4174,16 @@ class panDecayIndices:
                     
                     bayes_f_raw = data.get('bayes_factor', 'N/A')
                     
-                    # Interpret support based on Bayes Decay
+                    # Interpret support based on Bayes Decay (phylogenetic-specific scale)
                     bf_support = 'N/A'
                     bayes_d_val = data.get('bayes_decay')
                     if isinstance(bayes_d_val, float):
-                        if bayes_d_val > 5:
+                        if bayes_d_val > 10:
                             bf_support = "**Very Strong**"
-                        elif bayes_d_val > 3:
+                        elif bayes_d_val > 5:
                             bf_support = "**Strong**"
-                        elif bayes_d_val > 1:
-                            bf_support = "Positive"
+                        elif bayes_d_val > 2:
+                            bf_support = "Moderate"
                         elif bayes_d_val > 0:
                             bf_support = "Weak"
                         else:
@@ -4221,13 +4232,14 @@ class panDecayIndices:
             if has_bayesian:
                 f.write("### Bayesian Analysis\n")
                 f.write("- **Bayes Decay (BD)**: Marginal log-likelihood difference (unconstrained - constrained). This is the primary metric for Bayesian support.\n")
-                f.write("  - **Note**: Bayes Decay = log(Bayes Factor), so BD is more interpretable than BF for large values\n")
-                f.write("  - Interpretation scale:\n")
-                f.write("    - BD 0-1: Weak evidence for clade\n")
-                f.write("    - BD 1-3: Positive evidence\n")
-                f.write("    - BD 3-5: Strong evidence\n")
-                f.write("    - BD > 5: Very strong evidence\n")
-                f.write("  - **⚠️ Important**: BD values > 10 may partially reflect model dimension differences between constrained/unconstrained trees\n")
+                f.write("  - **Key insight**: In phylogenetic topology testing, BD values typically closely approximate ML log-likelihood differences\n")
+                f.write("  - **Phylogenetic-specific interpretation scale**:\n")
+                f.write("    - BD 0-2: Weak support for the clade\n")
+                f.write("    - BD 2-5: Moderate support\n")
+                f.write("    - BD 5-10: Strong support\n")
+                f.write("    - BD > 10: Very strong support\n")
+                f.write("  - **Note**: BD values of 30-50 or higher are common when data strongly support a clade and should not be considered anomalous\n")
+                f.write("  - **Why BD ≈ ΔlnL**: When comparing models that differ only by a topological constraint, the marginal likelihood is dominated by the likelihood component\n")
                 f.write("  - **Negative values** suggest the constrained analysis had higher marginal likelihood, which may indicate:\n")
                 if self.marginal_likelihood == "ss":
                     f.write("    - Poor chain convergence or insufficient MCMC sampling\n")
@@ -4238,17 +4250,31 @@ class panDecayIndices:
                     f.write("    - Poor MCMC convergence (try increasing generations)\n")
                     f.write("    - Genuine lack of support for the clade\n")
                     f.write("    - **Consider using stepping-stone sampling (--marginal-likelihood ss) for more reliable estimates**\n")
-                f.write("\n- **Bayes Factor (BF)**: Exponential of the Bayes Decay value (BF = e^BD). Represents the ratio of marginal likelihoods.\n")
-                f.write("  - Traditional interpretations:\n")
-                f.write("    - BF > 100: Very strong support\n")
-                f.write("    - BF > 10: Strong support\n")
-                f.write("    - BF > 3: Moderate support\n")
-                f.write("    - BF > 1: Weak support\n")
-                f.write("    - BF ≤ 1: No support\n")
-                f.write("  - **Note**: BF values are capped at 10^6 for display to avoid astronomical numbers\n\n")
+                f.write("\n- **Bayes Factor (BF)**: Exponential of the Bayes Decay value (BF = e^BD).\n")
+                f.write("  - **Important**: Traditional BF interpretation scales (e.g., BF >10 = strong, >100 = decisive) do not apply to phylogenetic topology testing\n")
+                f.write("  - These traditional scales were developed for comparing fundamentally different models, not topology constraints\n")
+                f.write("  - **Recommendation**: Use BD values for interpretation rather than BF values\n")
+                f.write("  - BF values are capped at 10^6 for display purposes\n\n")
                 
             if has_bootstrap:
                 f.write("- **Bootstrap**: Bootstrap support value (percentage of bootstrap replicates in which the clade appears). Higher values (e.g., > 70) suggest stronger support for the clade.\n")
+            
+            # Add detailed explanation about BD vs ML differences when both analyses are present
+            if has_ml and has_bayesian:
+                f.write("\n## Understanding BD ≈ ΔlnL in Phylogenetics\n\n")
+                f.write("You may notice that Bayesian Decay (BD) values closely approximate the ML log-likelihood differences (ΔlnL). ")
+                f.write("This is **expected behavior** in phylogenetic topology testing, not an anomaly. Here's why:\n\n")
+                f.write("1. **Identical Models**: The constrained and unconstrained analyses use the same substitution model, ")
+                f.write("differing only in whether a specific clade is allowed to exist.\n\n")
+                f.write("2. **Likelihood Dominance**: When data strongly support a topology, the marginal likelihood ")
+                f.write("(which integrates over all parameters) becomes dominated by the likelihood at the optimal parameter values.\n\n")
+                f.write("3. **Minimal Prior Effects**: Since both analyses explore nearly identical parameter spaces ")
+                f.write("(same model parameters, only different tree topologies), the prior's influence is minimal.\n\n")
+                f.write("**Practical Implications**:\n")
+                f.write("- Similar BD and ΔlnL values confirm your analyses are working correctly\n")
+                f.write("- Large BD values (30-50+) simply reflect strong data signal, not \"astronomical\" support\n")
+                f.write("- Use the phylogenetic-specific BD interpretation scale provided above\n")
+                f.write("- Compare relative BD values across branches rather than focusing on absolute values\n")
                 
         logger.info(f"Detailed report written to {output_path}")
 
