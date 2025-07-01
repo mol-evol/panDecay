@@ -433,14 +433,14 @@ The following example shows a comprehensive annotated tree from a combined analy
 ![Annotated tree example](./_resources/annotated_tree.png)
 
 In this visualization:
-- Branch labels show multiple support metrics in the format: `Clade_ID[AU=p-value,ΔlnL=value,BD=value,BF=value,PD=value,BS=value]`
+- Branch labels show multiple support metrics in the format: `Clade_X - BS:XX|AU:X.XXXX|ΔlnL:XX.XX|BD:XX.XX|BF:X.XXe+XX|PD:XX`
+- **BS**: Bootstrap support percentage (when available)
 - **AU**: Approximately Unbiased test p-value (lower values = stronger support)
 - **ΔlnL**: Log-likelihood difference (higher values = stronger support)
 - **BD**: Bayesian Decay (higher values = stronger support)
 - **BF**: Bayes Factor (exponential of BD)
 - **PD**: Parsimony Decay (traditional Bremer support)
-- **BS**: Bootstrap support percentage
-- Branch colors may vary by tree viewer; this example uses FigTree's color scheme
+- Branch colors and exact label formatting may vary by tree viewer; this example uses FigTree's visualization
 
 ### Detailed Markdown Report (`<output_stem>.md`)
 A Markdown file providing a more human-readable summary of the analysis parameters, summary statistics, and detailed branch support results in a table format. It also includes a brief interpretation guide. A good markdown viewer is [Joplin](https://joplinapp.org/) or [MarkdownLivePreview](https://markdownlivepreview.com/).
