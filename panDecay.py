@@ -3173,11 +3173,19 @@ class panDecayIndices:
                 if has_bootstrap:
                     taxa_set = frozenset(taxa_list)
                     bs_val = bootstrap_values.get(taxa_set, "N/A")
-                    if isinstance(bs_val, (int, float)):
-                        bs_val = f"{int(bs_val)}"
+                    # Convert any numeric type to string
+                    if bs_val != "N/A" and bs_val is not None:
+                        try:
+                            bs_val = f"{int(float(bs_val))}"
+                        except (ValueError, TypeError):
+                            bs_val = str(bs_val)
+                    elif bs_val is None:
+                        bs_val = "N/A"
                     row_parts.append(bs_val)
 
                 row_parts.append(taxa_str)
+                # Ensure all items are strings before joining
+                row_parts = [str(item) for item in row_parts]
                 f.write("\t".join(row_parts) + "\n")
 
         logger.info(f"Results written to {output_path}")
@@ -3435,8 +3443,14 @@ class panDecayIndices:
                 if has_bootstrap:
                     taxa_set = frozenset(taxa_list)
                     bs_val = bootstrap_values.get(taxa_set, "N/A")
-                    if isinstance(bs_val, (int, float)):
-                        bs_val = f"{int(bs_val)}"
+                    # Convert any numeric type to string
+                    if bs_val != "N/A" and bs_val is not None:
+                        try:
+                            bs_val = f"{int(float(bs_val))}"
+                        except (ValueError, TypeError):
+                            bs_val = str(bs_val)
+                    elif bs_val is None:
+                        bs_val = "N/A"
                     row_parts.append(f"| {bs_val} ")
 
                 row_parts.append(f"| {taxa_sample} |\n")
