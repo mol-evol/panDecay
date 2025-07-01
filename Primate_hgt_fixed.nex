@@ -8,7 +8,7 @@ begin data;
 		5:626-644.
 ]
 	dimensions ntax=12 nchar=8980;
-	format missing=? gap=- matchchar=none datatype=dna interleave;
+	format missing=? gap=- datatype=dna interleave;
 	options gapmode=missing;
 	matrix
 Gibbon                 AAGCTTTACAGGTGCAACCGTCCTCATAATCGCCCACGGACTAACCTCTTCCCTGCTATTCTGCCTTGCA

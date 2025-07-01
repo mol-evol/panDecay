@@ -4,6 +4,7 @@ import os
 import sys
 import argparse
 import configparser
+import json
 import numpy as np
 from Bio import Phylo, AlignIO, SeqIO
 import tempfile
@@ -202,7 +203,19 @@ class panDecayIndices:
              shutil.copy(str(self.alignment_file), self.temp_path / f"original_alignment.{self.alignment_format}")
 
         self.nexus_file_path = self.temp_path / NEXUS_ALIGNMENT_FN
-        self._convert_to_nexus() # Writes to self.nexus_file_path
+        
+        # If input is already NEXUS, copy it directly instead of converting
+        if self.alignment_format.lower() == "nexus":
+            logger.info(f"Input is already NEXUS format, copying directly to temp directory")
+            shutil.copy(str(self.alignment_file), str(self.nexus_file_path))
+        else:
+            self._convert_to_nexus() # Writes to self.nexus_file_path
+            
+        # Validate that NEXUS file exists and has content
+        if not self.nexus_file_path.exists():
+            raise FileNotFoundError(f"NEXUS file was not created at {self.nexus_file_path}")
+        if self.nexus_file_path.stat().st_size == 0:
+            raise ValueError(f"NEXUS file at {self.nexus_file_path} is empty")
 
         self.ml_tree = None
         self.ml_likelihood = None
@@ -524,7 +537,11 @@ class panDecayIndices:
         paup_script_content = f"#NEXUS\nbegin paup;\n" + "\n".join(script_cmds) + "\nquit;\nend;\n"
         ml_search_cmd_path = self.temp_path / ML_SEARCH_NEX_FN
         ml_search_cmd_path.write_text(paup_script_content)
-        if self.debug: logger.debug(f"ML search PAUP* script ({ml_search_cmd_path}):\n{paup_script_content}")
+        if self.debug: 
+            logger.debug(f"ML search PAUP* script ({ml_search_cmd_path}):\n{paup_script_content}")
+        else:
+            # Always log the PAUP* commands being executed for troubleshooting
+            logger.debug(f"Executing PAUP* with model: {self.model_str}, threads: {self.threads}")
 
         try:
             paup_result = self._run_paup_command_file(ML_SEARCH_NEX_FN, ML_LOG_FN, timeout_sec=3600) # 1hr timeout
@@ -4310,13 +4327,12 @@ class panDecayIndices:
                 
         logger.info(f"Detailed report written to {self._get_display_path(output_path)}")
 
-    def write_site_analysis_results(self, output_dir: Path, keep_tree_files=False):
+    def write_site_analysis_results(self, output_dir: Path):
         """
         Write site-specific likelihood analysis results to files.
 
         Args:
             output_dir: Directory to save the site analysis files
-            keep_tree_files: Whether to keep the Newick files used for HTML visualization
         """
         if not self.decay_indices:
             logger.warning("No decay indices available for site analysis output.")
@@ -4403,8 +4419,6 @@ class panDecayIndices:
 
             # Get visualization options
             viz_format = getattr(self, 'viz_format', 'png')
-            generate_html = getattr(self, 'generate_html', True)
-            js_cdn = getattr(self, 'js_cdn', True)
 
             for clade_id, data in self.decay_indices.items():
                 if 'site_data' not in data:
@@ -4501,24 +4515,14 @@ class panDecayIndices:
 
                 logger.info(f"Site likelihood histogram for {clade_id} saved to {hist_path}")
 
-                # Create interactive HTML tree visualization if enabled
-                if generate_html and clade_taxa:
-                    # Create HTML tree visualization
-                    html_path = self.create_interactive_tree_html(output_dir, clade_id, clade_taxa)
-                    if html_path:
-                        logger.info(f"Interactive tree visualization for {clade_id} created at {html_path}")
-
-                if not keep_tree_files and not self.debug and not self.keep_files:
-                    # Only delete original .nwk files, keep .nwk.cleaned files for HTML
-                    for file_path in output_dir.glob("tree_*.nwk"):
-                        if not file_path.name.endswith('.cleaned'):
-                            try:
-                                file_path.unlink()
-                                logger.debug(f"Deleted original tree file: {file_path}")
-                            except Exception as e:
-                                logger.warning(f"Failed to delete tree file {file_path}: {e}")
-                        else:
-                            logger.debug(f"Kept cleaned tree file for HTML: {file_path}")
+                if not self.debug and not self.keep_files:
+                    # Clean up tree files
+                    for file_path in output_dir.glob("tree_*.nwk*"):
+                        try:
+                            file_path.unlink()
+                            logger.debug(f"Deleted tree file: {file_path}")
+                        except Exception as e:
+                            logger.warning(f"Failed to delete tree file {file_path}: {e}")
 
         except ImportError:
             logger.warning("Matplotlib/seaborn not available for site analysis visualization.")
@@ -4558,506 +4562,6 @@ class panDecayIndices:
         except ImportError: logger.error("Matplotlib/Seaborn not found for visualization.")
         except Exception as e: logger.error(f"Failed support distribution plot: {e}")
 
-    def create_interactive_tree_html(self, output_dir, clade_id, highlight_taxa):
-        """
-        Create an interactive HTML tree visualization for a specific clade.
-
-        Args:
-            output_dir: Directory to save the HTML file
-            clade_id: Identifier for the clade
-            highlight_taxa: List of taxa names to highlight in the tree
-
-        Returns:
-            Path to the created HTML file or None if creation failed
-        """
-        try:
-            import json
-            from Bio import Phylo
-
-            # Ensure output directory exists
-            output_dir.mkdir(parents=True, exist_ok=True)
-
-            # Output filenames
-            html_path = output_dir / f"tree_{clade_id}.html"
-            tree_path = output_dir / f"tree_{clade_id}.nwk"
-
-            # Write the ML tree to a Newick file (needed for the HTML to load)
-            Phylo.write(self.ml_tree, str(tree_path), "newick")
-
-            # Clean up the tree file if needed
-            cleaned_tree_path = self._clean_newick_tree(tree_path)
-            
-            # Use the cleaned tree path for HTML references
-            final_tree_path = cleaned_tree_path if cleaned_tree_path != tree_path else tree_path
-
-            # Get tree statistics
-            total_taxa = len(self.ml_tree.get_terminals())
-            highlight_ratio = len(highlight_taxa) / total_taxa if total_taxa > 0 else 0
-
-            # Get site analysis data if available
-            site_data = None
-            if hasattr(self, 'decay_indices') and clade_id in self.decay_indices:
-                clade_data = self.decay_indices[clade_id]
-                if 'site_data' in clade_data:
-                    supporting = clade_data.get('supporting_sites', 0)
-                    conflicting = clade_data.get('conflicting_sites', 0)
-                    support_ratio = clade_data.get('support_ratio', None)
-                    if support_ratio == float('inf'):
-                        support_ratio_str = "Infinity"
-                    elif support_ratio is not None:
-                        support_ratio_str = f"{support_ratio:.2f}"
-                    else:
-                        support_ratio_str = "N/A"
-
-                    weighted_ratio = clade_data.get('weighted_support_ratio', None)
-                    if weighted_ratio == float('inf'):
-                        weighted_ratio_str = "Infinity"
-                    elif weighted_ratio is not None:
-                        weighted_ratio_str = f"{weighted_ratio:.2f}"
-                    else:
-                        weighted_ratio_str = "N/A"
-
-                    site_data = {
-                        'supporting': supporting,
-                        'conflicting': conflicting,
-                        'support_ratio': support_ratio_str,
-                        'weighted_ratio': weighted_ratio_str
-                    }
-
-            # Get AU test and likelihood data
-            au_data = None
-            if hasattr(self, 'decay_indices') and clade_id in self.decay_indices:
-                clade_data = self.decay_indices[clade_id]
-                au_pvalue = clade_data.get('AU_pvalue', None)
-                lnl_diff = clade_data.get('lnl_diff', None)
-
-                if au_pvalue is not None or lnl_diff is not None:
-                    au_data = {
-                        'au_pvalue': f"{au_pvalue:.4f}" if au_pvalue is not None else "N/A",
-                        'lnl_diff': f"{lnl_diff:.4f}" if lnl_diff is not None else "N/A",
-                        'significant': clade_data.get('significant_AU', False)
-                    }
-
-            # Get bootstrap data if available
-            bootstrap_value = None
-            if hasattr(self, 'bootstrap_tree') and self.bootstrap_tree:
-                # Find the corresponding node in the bootstrap tree
-                for node in self.bootstrap_tree.get_nonterminals():
-                    node_taxa = set(leaf.name for leaf in node.get_terminals())
-                    if node_taxa == set(highlight_taxa):
-                        bootstrap_value = int(node.confidence) if node.confidence is not None else None
-                        break
-
-            # Format taxa for title display
-            if len(highlight_taxa) <= 5:
-                taxa_display = ", ".join(highlight_taxa)
-            else:
-                taxa_display = f"{', '.join(sorted(highlight_taxa)[:5])}... (+{len(highlight_taxa)-5} more)"
-
-            # Start building HTML content in parts to avoid f-string backslash issues
-            # Basic structure
-            html_parts = []
-
-            # Header
-            html_parts.append("<!DOCTYPE html>")
-            html_parts.append("<html lang=\"en\">")
-            html_parts.append("<head>")
-            html_parts.append("    <meta charset=\"UTF-8\">")
-            html_parts.append("    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">")
-            html_parts.append(f"    <title>panDecay - Interactive Tree for {clade_id}</title>")
-
-            # CSS
-            html_parts.append("""    <style>
-            body {
-                font-family: Arial, sans-serif;
-                line-height: 1.6;
-                color: #333;
-                max-width: 1200px;
-                margin: 0 auto;
-                padding: 20px;
-            }
-            h1, h2, h3 {
-                color: #2c3e50;
-            }
-            .container {
-                display: flex;
-                flex-wrap: wrap;
-                gap: 20px;
-            }
-            .tree-section {
-                flex: 1;
-                min-width: 500px;
-            }
-            .info-section {
-                flex: 1;
-                min-width: 300px;
-                background-color: #f8f9fa;
-                padding: 15px;
-                border-radius: 5px;
-            }
-            #tree_container {
-                width: 100%;
-                height: 600px;
-                border: 1px solid #ddd;
-                border-radius: 4px;
-                overflow: hidden;
-            }
-            .table {
-                width: 100%;
-                border-collapse: collapse;
-                margin-bottom: 15px;
-            }
-            .table th, .table td {
-                padding: 8px;
-                text-align: left;
-                border-bottom: 1px solid #ddd;
-            }
-            .table th {
-                background-color: #f2f2f2;
-            }
-            .highlight {
-                color: #e74c3c;
-                font-weight: bold;
-            }
-            .significant {
-                background-color: #d4edda;
-            }
-            .not-significant {
-                background-color: #f8d7da;
-            }
-            .buttons {
-                margin: 10px 0;
-            }
-            button {
-                background-color: #4CAF50;
-                color: white;
-                padding: 8px 12px;
-                border: none;
-                border-radius: 4px;
-                cursor: pointer;
-                margin-right: 5px;
-            }
-            button:hover {
-                background-color: #45a049;
-            }
-            .phylotree-node circle {
-                fill: #999;
-            }
-            .highlighted-node circle {
-                fill: #e74c3c !important;
-                r: 5 !important;
-            }
-            .highlighted-node text {
-                fill: #e74c3c !important;
-                font-weight: bold !important;
-            }
-            .highlighted-branch {
-                stroke: #e74c3c !important;
-                stroke-width: 3px !important;
-            }
-            .legend {
-                margin-top: 10px;
-                font-size: 0.9em;
-            }
-            .legend-item {
-                display: inline-block;
-                margin-right: 15px;
-            }
-            .legend-color {
-                display: inline-block;
-                width: 12px;
-                height: 12px;
-                margin-right: 5px;
-                vertical-align: middle;
-            }
-            .download-links {
-                margin-top: 20px;
-            }
-            .download-links a {
-                display: inline-block;
-                margin-right: 10px;
-                padding: 5px 10px;
-                background-color: #f8f9fa;
-                border: 1px solid #ddd;
-                border-radius: 3px;
-                text-decoration: none;
-                color: #333;
-            }
-            .download-links a:hover {
-                background-color: #e9ecef;
-            }
-        </style>""")
-
-            # JavaScript imports based on CDN preference
-            use_cdn = getattr(self, 'js_cdn', True)
-            if use_cdn:
-                html_parts.append("""    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/6.7.0/d3.min.js" integrity="sha512-cd6CHE+XWDQ33ElJqsi0MdNte3S+bQY819f7p3NUHgwQQLXSKjE4cPZTeGNI+vaxZynk1wVU3hoHmow3m089wA==" crossorigin="anonymous"></script>
-        <script src="https://cdn.jsdelivr.net/npm/phylotree@1.4.2/dist/phylotree.min.js"></script>""")
-            else:
-                html_parts.append("""    <!-- Note: Offline mode requires local library files -->
-        <!-- For offline use, download d3.min.js and phylotree.min.js locally -->
-        <script>
-            document.getElementById('tree_container').innerHTML = 
-                '<div style="padding:20px;color:#666;border:2px dashed #ccc;text-align:center;">' +
-                '<h3>Offline Mode</h3><p>Interactive visualization requires online libraries.<br>' +
-                'Use --js-cdn to enable online libraries or download tree file below.</p></div>';
-        </script>""")
-
-            html_parts.append("</head>")
-            html_parts.append("<body>")
-
-            # Body content
-            html_parts.append(f"    <h1>panDecay - Interactive Tree Visualization</h1>")
-            html_parts.append(f"    <h2>Clade: {clade_id} - {taxa_display}</h2>")
-
-            html_parts.append("    <div class=\"container\">")
-            html_parts.append("        <div class=\"tree-section\">")
-            html_parts.append("            <div class=\"buttons\">")
-            html_parts.append("                <button onclick=\"tree.spacing_x(100).spacing_y(20).update()\">Expand Tree</button>")
-            html_parts.append("                <button onclick=\"tree.spacing_x(30).spacing_y(10).update()\">Compact Tree</button>")
-            html_parts.append("                <button onclick=\"resetTree()\">Reset View</button>")
-            html_parts.append("                <button onclick=\"toggleLabels()\">Toggle Labels</button>")
-            html_parts.append("            </div>")
-            html_parts.append("            <div id=\"tree_container\"></div>")
-            html_parts.append("            <div class=\"legend\">")
-            html_parts.append("                <div class=\"legend-item\">")
-            html_parts.append("                    <span class=\"legend-color\" style=\"background-color: #e74c3c;\"></span>")
-            html_parts.append("                    <span>Highlighted Clade</span>")
-            html_parts.append("                </div>")
-            html_parts.append("                <div class=\"legend-item\">")
-            html_parts.append("                    <span class=\"legend-color\" style=\"background-color: #999;\"></span>")
-            html_parts.append("                    <span>Other Nodes</span>")
-            html_parts.append("                </div>")
-            html_parts.append("            </div>")
-            html_parts.append("        </div>")
-
-            # Info section
-            html_parts.append("        <div class=\"info-section\">")
-            html_parts.append("            <h3>Clade Information</h3>")
-            html_parts.append("            <table class=\"table\">")
-            html_parts.append(f"                <tr><th>Number of Taxa:</th><td>{len(highlight_taxa)} of {total_taxa} ({highlight_ratio:.1%})</td></tr>")
-
-            taxa_sample = ", ".join(sorted(highlight_taxa)[:10])
-            if len(highlight_taxa) > 10:
-                taxa_sample += " ..."
-            html_parts.append(f"                <tr><th>Taxa:</th><td>{taxa_sample}</td></tr>")
-
-            # Bootstrap value if available
-            if bootstrap_value is not None:
-                html_parts.append(f"                <tr><th>Bootstrap Support:</th><td>{bootstrap_value}%</td></tr>")
-
-            html_parts.append("            </table>")
-
-            # Branch support section if available
-            if au_data:
-                html_parts.append("            <h3>Branch Support</h3>")
-                html_parts.append("            <table class=\"table\">")
-
-                significance_class = 'significant' if au_data.get('significant') else 'not-significant'
-                significance_text = '(significant)' if au_data.get('significant') else '(not significant)'
-                html_parts.append(f"                <tr><th>AU Test p-value:</th><td class=\"{significance_class}\">{au_data['au_pvalue']} {significance_text}</td></tr>")
-                html_parts.append(f"                <tr><th>Log-Likelihood Difference:</th><td>{au_data['lnl_diff']}</td></tr>")
-
-                html_parts.append("            </table>")
-
-            # Site analysis section if available
-            if site_data:
-                html_parts.append("            <h3>Site Analysis</h3>")
-                html_parts.append("            <table class=\"table\">")
-                html_parts.append(f"                <tr><th>Supporting Sites:</th><td>{site_data['supporting']}</td></tr>")
-                html_parts.append(f"                <tr><th>Conflicting Sites:</th><td>{site_data['conflicting']}</td></tr>")
-                html_parts.append(f"                <tr><th>Support Ratio:</th><td>{site_data['support_ratio']}</td></tr>")
-                html_parts.append(f"                <tr><th>Weighted Support Ratio:</th><td>{site_data['weighted_ratio']}</td></tr>")
-                html_parts.append("            </table>")
-
-            # Download section
-            html_parts.append("            <h3>Downloads</h3>")
-            html_parts.append("            <div class=\"download-links\">")
-            html_parts.append(f"                <a href=\"{final_tree_path.name}\" download>Download Newick Tree</a>")
-            html_parts.append("                <a href=\"#\" onclick=\"saveSvg()\">Download SVG</a>")
-            html_parts.append("            </div>")
-            html_parts.append("        </div>")
-            html_parts.append("    </div>")
-
-            # JavaScript section
-            html_parts.append("    <script>")
-            html_parts.append(f"        // Taxa to highlight")
-            html_parts.append(f"        const highlightTaxa = {json.dumps(list(highlight_taxa))};")
-            html_parts.append("")
-            html_parts.append("        // Create tree")
-            tree_path_js = str(final_tree_path.name).replace('\\', '/')
-            html_parts.append(f"        let tree = new phylotree.phylotree(\"{tree_path_js}\");")
-            html_parts.append("        let showLabels = true;")
-            html_parts.append("")
-            html_parts.append("        // Initialize visualization on page load")
-            html_parts.append("        document.addEventListener(\"DOMContentLoaded\", function() {")
-            html_parts.append("            loadAndDisplayTree();")
-            html_parts.append("        });")
-            html_parts.append("")
-            html_parts.append("        function loadAndDisplayTree() {")
-            html_parts.append(f"            fetch(\"{tree_path_js}\").then(response => {{")
-            html_parts.append("                if (response.ok) {")
-            html_parts.append("                    return response.text();")
-            html_parts.append("                }")
-            html_parts.append("                throw new Error('Tree file not found');")
-            html_parts.append("            })")
-            html_parts.append("            .then(treeData => {")
-            html_parts.append("                // Set up tree visualization")
-            html_parts.append("                tree = new phylotree.phylotree(treeData);")
-            html_parts.append("")
-            html_parts.append("                // Configure tree display settings")
-            html_parts.append("                tree.branch_length(null)  // Use branch lengths from the tree")
-            html_parts.append("                    .branch_name(function(node) {")
-            html_parts.append("                        return node.data.name;")
-            html_parts.append("                    })")
-            html_parts.append("                    .node_span(function(node) {")
-            html_parts.append("                        return showLabels ? 5 : 2;")
-            html_parts.append("                    })")
-            html_parts.append("                    .node_circle_size(function(node) {")
-            html_parts.append("                        return isHighlighted(node) ? 5 : 3;")
-            html_parts.append("                    })")
-            html_parts.append("                    .font_size(14)")
-            html_parts.append("                    .scale_bar_font_size(12)")
-            html_parts.append("                    .node_styler(nodeStyler)")
-            html_parts.append("                    .branch_styler(branchStyler)")
-            html_parts.append("                    .layout_handler(phylotree.layout_handlers.radial)")
-            html_parts.append("                    .spacing_x(40) // Controls horizontal spacing")
-            html_parts.append("                    .spacing_y(15) // Controls vertical spacing")
-            html_parts.append("                    .size([550, 550])")
-            html_parts.append("                    .radial(false); // Start with rectangular layout")
-            html_parts.append("")
-            html_parts.append("                // Get the container")
-            html_parts.append("                let container = document.getElementById('tree_container');")
-            html_parts.append("")
-            html_parts.append("                // Render the tree")
-            html_parts.append("                tree.render(\"#tree_container\");")
-            html_parts.append("            })")
-            html_parts.append("            .catch(error => {")
-            html_parts.append("                console.error(\"Error loading tree data:\", error);")
-            html_parts.append("                const errorMsg = error.message === 'Tree file not found' ?")
-            html_parts.append(f"                    'Tree file \"{tree_path_js}\" not found. Check that files were saved correctly.' :")
-            html_parts.append("                    'Failed to load or parse tree data: ' + error.message;")
-            html_parts.append("                document.getElementById('tree_container').innerHTML =")
-            html_parts.append("                    '<div style=\"padding:20px;color:#d32f2f;border:2px solid #ffcdd2;background:#ffebee;border-radius:4px;\">' +")
-            html_parts.append("                    '<h4 style=\"margin-top:0;\">Visualization Error</h4><p>' + errorMsg + '</p>' +")
-            html_parts.append("                    '<p><strong>Troubleshooting:</strong></p><ul>' +")
-            html_parts.append("                    '<li>Ensure the HTML file is in the same directory as the tree file</li>' +")
-            html_parts.append("                    '<li>Check browser console (F12) for detailed error messages</li>' +")
-            html_parts.append("                    '<li>Try downloading the tree file below to verify it exists</li>' +")
-            html_parts.append("                    '<li>Use a local web server instead of opening file:// URLs</li></ul></div>';")
-            html_parts.append("            });")
-            html_parts.append("        }")
-            html_parts.append("")
-            html_parts.append("        // Style branches that belong to the highlighted clade")
-            html_parts.append("        function branchStyler(dom_element, link_data) {")
-            html_parts.append("            if (isHighlighted(link_data.target)) {")
-            html_parts.append("                dom_element.style.stroke = \"#e74c3c\";")
-            html_parts.append("                dom_element.style.strokeWidth = \"3px\";")
-            html_parts.append("                dom_element.classList.add(\"highlighted-branch\");")
-            html_parts.append("            }")
-            html_parts.append("        }")
-            html_parts.append("")
-            html_parts.append("        // Style nodes that belong to the highlighted clade")
-            html_parts.append("        function nodeStyler(dom_element, node_data) {")
-            html_parts.append("            if (isHighlighted(node_data)) {")
-            html_parts.append("                dom_element.classList.add(\"highlighted-node\");")
-            html_parts.append("            }")
-            html_parts.append("        }")
-            html_parts.append("")
-            html_parts.append("        // Check if a node belongs to the highlighted clade")
-            html_parts.append("        function isHighlighted(node) {")
-            html_parts.append("            if (!node.data) return false;")
-            html_parts.append("")
-            html_parts.append("            // Directly check leaf nodes")
-            html_parts.append("            if (node.children && node.children.length === 0) {")
-            html_parts.append("                return highlightTaxa.includes(node.data.name);")
-            html_parts.append("            }")
-            html_parts.append("")
-            html_parts.append("            // For internal nodes, check if all descendants are in the highlighted taxa")
-            html_parts.append("            let leaves = getAllLeaves(node);")
-            html_parts.append("            let leafNames = leaves.map(leaf => leaf.data.name);")
-            html_parts.append("")
-            html_parts.append("            if (leafNames.length === 0) return false;")
-            html_parts.append("")
-            html_parts.append("            // Check if this node represents exactly our clade")
-            html_parts.append("            // or is contained within our clade")
-            html_parts.append("            return leafNames.every(name => highlightTaxa.includes(name));")
-            html_parts.append("        }")
-            html_parts.append("")
-            html_parts.append("        // Get all leaves (terminal nodes) descending from a node")
-            html_parts.append("        function getAllLeaves(node) {")
-            html_parts.append("            if (!node.children || node.children.length === 0) {")
-            html_parts.append("                return [node];")
-            html_parts.append("            }")
-            html_parts.append("")
-            html_parts.append("            let leaves = [];")
-            html_parts.append("            for (let child of node.children) {")
-            html_parts.append("                leaves = leaves.concat(getAllLeaves(child));")
-            html_parts.append("            }")
-            html_parts.append("            return leaves;")
-            html_parts.append("        }")
-            html_parts.append("")
-            html_parts.append("        // Reset tree to default view")
-            html_parts.append("        function resetTree() {")
-            html_parts.append("            tree.spacing_x(40)")
-            html_parts.append("                .spacing_y(15)")
-            html_parts.append("                .radial(false)")
-            html_parts.append("                .update();")
-            html_parts.append("        }")
-            html_parts.append("")
-            html_parts.append("        // Toggle display of leaf labels")
-            html_parts.append("        function toggleLabels() {")
-            html_parts.append("            showLabels = !showLabels;")
-            html_parts.append("            tree.node_span(function(node) {")
-            html_parts.append("                return showLabels ? 5 : 2;")
-            html_parts.append("            }).update();")
-            html_parts.append("        }")
-            html_parts.append("")
-            html_parts.append("        // Save tree as SVG")
-            html_parts.append("        function saveSvg() {")
-            html_parts.append("            let svg = document.querySelector(\"#tree_container svg\");")
-            html_parts.append("            let serializer = new XMLSerializer();")
-            html_parts.append("            let source = serializer.serializeToString(svg);")
-            html_parts.append("")
-            html_parts.append("            // Add name spaces")
-            html_parts.append("            if (!source.match(/^<svg[^>]+xmlns=\"http:\\/\\/www\\.w3\\.org\\/2000\\/svg\"/)) {")
-            html_parts.append("                source = source.replace(/^<svg/, '<svg xmlns=\"http://www.w3.org/2000/svg\"');")
-            html_parts.append("            }")
-            html_parts.append("            if (!source.match(/^<svg[^>]+\"http:\\/\\/www\\.w3\\.org\\/1999\\/xlink\"/)) {")
-            html_parts.append("                source = source.replace(/^<svg/, '<svg xmlns:xlink=\"http://www.w3.org/1999/xlink\"');")
-            html_parts.append("            }")
-            html_parts.append("")
-            html_parts.append("            // Add XML declaration")
-            html_parts.append("            source = '<?xml version=\"1.0\" standalone=\"no\"?>\\r\\n' + source;")
-            html_parts.append("")
-            html_parts.append("            // Create download link")
-            html_parts.append("            let downloadLink = document.createElement(\"a\");")
-            html_parts.append("            downloadLink.href = \"data:image/svg+xml;charset=utf-8,\" + encodeURIComponent(source);")
-            html_parts.append(f"            downloadLink.download = \"tree_{clade_id}.svg\";")
-            html_parts.append("            document.body.appendChild(downloadLink);")
-            html_parts.append("            downloadLink.click();")
-            html_parts.append("            document.body.removeChild(downloadLink);")
-            html_parts.append("        }")
-            html_parts.append("    </script>")
-            html_parts.append("</body>")
-            html_parts.append("</html>")
-
-            # Join all parts into the complete HTML
-            html_content = "\n".join(html_parts)
-
-            # Write the HTML file
-            with open(html_path, 'w') as f:
-                f.write(html_content)
-
-            logger.info(f"Created interactive tree visualization for {clade_id}: {html_path}")
-            return html_path
-
-        except Exception as e:
-            logger.error(f"Failed to create interactive tree visualization for {clade_id}: {e}")
-            if self.debug:
-                import traceback
-                logger.debug(f"Traceback: {traceback.format_exc()}")
-            return None
 
     def cleanup_intermediate_files(self):
         """
@@ -5135,10 +4639,6 @@ def print_runtime_parameters(args_ns, model_str_for_print):
         print("\nVISUALIZATIONS:")
         print(f"  Enabled, format:    {args_ns.viz_format}")
         print(f"  Tree plot:          {output_p.parent / (output_p.stem + '_tree.' + args_ns.viz_format)}")
-        if args_ns.html_trees:
-            print(f"  HTML trees:         Enabled (using {'CDN' if args_ns.js_cdn else 'embedded'} JavaScript)")
-        else:
-            print(f"  HTML trees:         Disabled")
     print("\n" + "=" * 80 + "\n")
 
     @staticmethod
@@ -5233,14 +4733,6 @@ viz_format = png
 # Options: au, lnl
 annotation = lnl
 
-# Generate interactive HTML trees (default: true)
-html_trees = true
-
-# Use CDN for JavaScript libraries (default: true)
-js_cdn = true
-
-# Keep tree files for HTML visualization (default: false)
-keep_tree_files = false
 
 # ==============================================================================
 # MODEL SETTINGS (for ML and Bayesian analyses)
@@ -5516,9 +5008,6 @@ def parse_config(config_file, args):
                 'visualize': 'visualize',
                 'viz_format': 'viz_format',
                 'annotation': 'annotation',
-                'html_trees': 'html_trees',
-                'js_cdn': 'js_cdn',
-                'keep_tree_files': 'keep_tree_files',
                 'constraint_mode': 'constraint_mode',
                 'test_branches': 'test_branches',
                 'constraint_file': 'constraint_file',
@@ -5544,8 +5033,7 @@ def parse_config(config_file, args):
                     # Convert types as needed
                     if arg_param in ['gamma', 'invariable', 'keep_files', 'debug', 
                                      'site_analysis', 'bootstrap', 'use_mpi', 'use_beagle',
-                                     'visualize', 'html_trees', 'js_cdn', 'keep_tree_files',
-                                     'check_convergence', 'convergence_strict']:
+                                     'visualize', 'check_convergence', 'convergence_strict']:
                         value = str_to_bool(value)
                     elif arg_param in ['gamma_shape', 'prop_invar', 'bayes_burnin', 'ss_alpha',
                                        'max_psrf', 'max_asdsf']:
@@ -5669,9 +5157,6 @@ def main():
     viz_opts.add_argument("--visualize", action="store_true", help="Generate static visualization plots (requires matplotlib, seaborn).")
     viz_opts.add_argument("--viz-format", default="png", choices=["png", "pdf", "svg"], help="Format for static visualizations.")
     viz_opts.add_argument("--annotation", default="lnl", choices=["au", "lnl"], help="Type of support values to visualize in distribution plots (au=AU p-values, lnl=likelihood differences).")
-    viz_opts.add_argument("--html-trees", action=argparse.BooleanOptionalAction, default=True, help="Generate interactive HTML tree visualizations (default: True)")
-    viz_opts.add_argument("--js-cdn", action="store_true", default=True, help="Use CDN for JavaScript libraries (faster but requires internet connection)")
-    viz_opts.add_argument("--keep-tree-files", action="store_true", default=False, help="Keep Newick tree files used for HTML visualization (default: False)")
     viz_opts.add_argument("--output-style", choices=["unicode", "ascii", "minimal"], default="unicode",
                          help="Output formatting style: unicode (modern), ascii (compatible), minimal (basic)")
     
@@ -5851,12 +5336,10 @@ def main():
                 if args.site_analysis:
                     # Pass visualization preferences to the panDecayIndices instance
                     if args.visualize:
-                        decay_calc.generate_html = args.html_trees
-                        decay_calc.js_cdn = args.js_cdn
                         decay_calc.viz_format = args.viz_format
 
                     site_output_dir = output_main_path.parent / f"{output_main_path.stem}_site_analysis"
-                    decay_calc.write_site_analysis_results(site_output_dir, keep_tree_files=args.keep_tree_files)
+                    decay_calc.write_site_analysis_results(site_output_dir)
                     logger.info(f"Site-specific analysis results written to {get_display_path(site_output_dir)}")
 
             decay_calc.cleanup_intermediate_files()
