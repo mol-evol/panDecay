@@ -426,7 +426,21 @@ If bootstrap analysis is performed, additional tree files:
 * `<tree_base>_comprehensive.nwk`: Tree with bootstrap values, AU test p-values, and log-likelihood differences combined in format "BS:80|AU:0.95|ΔlnL:2.34"
 
 These trees can be visualized in standard tree viewers like [FigTree](https://github.com/rambaut/figtree/), [Dendroscope](https://github.com/husonlab/dendroscope3), [iTOL](https://itol.embl.de/), etc. The combined tree is particularly suited for FigTree which handles string labels well.
-<!-- FigTree visualization image would go here -->
+
+#### Example Annotated Tree Visualization
+The following example shows a comprehensive annotated tree from a combined analysis (ML + Bayesian + Parsimony + Bootstrap):
+
+![Annotated tree example](./_resources/annotated_tree.png)
+
+In this visualization:
+- Branch labels show multiple support metrics in the format: `Clade_ID[AU=p-value,ΔlnL=value,BD=value,BF=value,PD=value,BS=value]`
+- **AU**: Approximately Unbiased test p-value (lower values = stronger support)
+- **ΔlnL**: Log-likelihood difference (higher values = stronger support)
+- **BD**: Bayesian Decay (higher values = stronger support)
+- **BF**: Bayes Factor (exponential of BD)
+- **PD**: Parsimony Decay (traditional Bremer support)
+- **BS**: Bootstrap support percentage
+- Branch colors may vary by tree viewer; this example uses FigTree's color scheme
 
 ### Detailed Markdown Report (`<output_stem>.md`)
 A Markdown file providing a more human-readable summary of the analysis parameters, summary statistics, and detailed branch support results in a table format. It also includes a brief interpretation guide. A good markdown viewer is [Joplin](https://joplinapp.org/) or [MarkdownLivePreview](https://markdownlivepreview.com/).
