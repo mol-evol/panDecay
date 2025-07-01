@@ -22,7 +22,7 @@ panDecay is a Python command-line tool for calculating phylogenetic decay indice
     *   [Optional Starting Tree](#optional-starting-tree)
     *   [Optional PAUP\* Block File](#optional-paup-block-file)
 6.  [Output Files](#output-files)
-    *   [Main Results File (`ml_decay_indices.txt`)](#main-results-file-ml_decay_indicestxt)
+    *   [Main Results File (`pan_decay_indices.txt`)](#main-results-file-pan_decay_indicestxt)
     *   [Annotated Trees](#annotated-trees)
     *   [Detailed Markdown Report (`_detailed.md`)](#detailed-markdown-report-_detailedmd)
     *   [Site-Specific Analysis (Optional)](#site-specific-analysis-optional)
@@ -142,6 +142,15 @@ panDecay can perform Bayesian analyses using:
 *   Debug mode and option to keep temporary files
 *   Robust error handling and recovery
 
+### User Interface Features
+*   **Improved Progress Display**: Clear, consistent progress tracking across all analysis types
+    *   Format: "Testing clade X (Y of Z) • N taxa" 
+    *   Shows current test number vs. total testable branches for accurate progress tracking
+    *   Consistent progress boxes with simple dashed formatting for better terminal compatibility
+*   **Clean Output**: Reduced verbose output with important information highlighted
+*   **Relative Path Display**: Shows shortened paths in output messages for better readability
+*   **Informative Error Messages**: Clear error reporting with helpful troubleshooting suggestions
+
 ## Installation
 
 ### Dependencies
@@ -235,7 +244,7 @@ options:
   --gamma               Add Gamma rate heterogeneity (+G) to model. (default: False)
   --invariable          Add invariable sites (+I) to model. (default: False)
   --paup PAUP           Path to PAUP* executable. (default: paup)
-  --output OUTPUT       Output file for summary results. (default: ml_decay_indices.txt)
+  --output OUTPUT       Output file for summary results. (default: pan_decay_indices.txt)
   --tree TREE           Base name for annotated tree files. Three trees will be generated with suffixes: _au.nwk (AU p-values), 
                         _delta_lnl.nwk (likelihood differences), and _combined.nwk (both values). (default: annotated_tree)
   --data-type {dna,protein,discrete}
@@ -389,7 +398,7 @@ A text file specified with `--constraint-file <path>` or `--test-branches @<path
 
 Unless specified with `--output`, `--tree`, etc., output files are created in the current working directory.
 
-### Main Results File (`ml_decay_indices.txt` by default)
+### Main Results File (`pan_decay_indices.txt` by default)
 A tab-delimited text file containing:
 *   The log-likelihood of the best ML tree found (for ML analyses).
 *   For each internal branch tested:

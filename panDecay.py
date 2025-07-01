@@ -1012,9 +1012,8 @@ class panDecayIndices:
         # First, run unconstrained Bayesian analysis
         box_content = [
             "Unconstrained analysis (baseline)",
-            "---",
-            "▶ Running MrBayes without constraints",
-            f"  {self.bayes_ngen:,} generations, {self.bayes_chains} chains"
+            "Running MrBayes without constraints",
+            f"{self.bayes_ngen:,} generations, {self.bayes_chains} chains"
         ]
         logger.info(self._format_progress_box("Bayesian Analysis", box_content))
         
@@ -1050,21 +1049,22 @@ class panDecayIndices:
                 return {}
             logger.info(f"Parsed {len(user_constraints)} user-defined constraints for Bayesian analysis")
         
+        # Count testable branches (same logic as ML analysis)
+        testable_branches = []
         for i, clade_obj in enumerate(internal_clades):
-            clade_log_idx = i + 1  # For filenames and logging (1-based)
+            clade_log_idx = i + 1
             clade_taxa = [leaf.name for leaf in clade_obj.get_terminals()]
             total_taxa_count = len(self.ml_tree.get_terminals())
             
-            # Skip trivial branches (consistent with ML analysis)
             if len(clade_taxa) <= 1 or len(clade_taxa) >= total_taxa_count - 1:
-                logger.info(f"Skipping trivial branch {clade_log_idx} (taxa: {len(clade_taxa)}/{total_taxa_count}).")
                 continue
-            
-            # Check if this clade should be tested based on constraint mode
             if not self.should_test_clade(clade_taxa, user_constraints):
-                logger.info(f"Skipping branch {clade_log_idx} based on constraint mode '{self.constraint_mode}'")
                 continue
-            
+            testable_branches.append((i, clade_obj, clade_log_idx, clade_taxa))
+        
+        logger.info(f"Testing {len(testable_branches)} branches for Bayesian decay...")
+        
+        for branch_num, (i, clade_obj, clade_log_idx, clade_taxa) in enumerate(testable_branches, 1):
             clade_id = f"Clade_{clade_log_idx}"
             
             # Display progress box
@@ -1074,11 +1074,10 @@ class panDecayIndices:
                 taxa_sample += "..."
             
             box_content = [
-                f"Clade {clade_log_idx} of {len([cl for cl in internal_clades if self._should_test_clade_wrapper(cl, user_constraints)])} • {len(clade_taxa)} taxa",
-                "---",
-                f"▶ Testing constraint on: {taxa_sample}",
-                "▶ Running MrBayes with negative constraint",
-                f"  {self.bayes_ngen:,} generations, {self.bayes_chains} chains"
+                f"Testing clade {clade_log_idx} ({branch_num} of {len(testable_branches)}) • {len(clade_taxa)} taxa",
+                f"Testing constraint on: {taxa_sample}",
+                "Running MrBayes with negative constraint",
+                f"{self.bayes_ngen:,} generations, {self.bayes_chains} chains"
             ]
             logger.info(self._format_progress_box("Bayesian Analysis", box_content))
             
@@ -1144,12 +1143,10 @@ class panDecayIndices:
                 else:
                     support_desc = "weak support"
                 result_lines = [
-                    f"✓ MrBayes completed successfully",
-                    f"✓ Marginal likelihood (stepping-stone): {constrained_ml:.3f}",
-                    "---",
-                    "📊 Results:",
-                    f"  • Bayes Decay: {bayes_decay:.2f}",
-                    f"  • Bayes Factor: {bayes_factor_display} ({support_desc})"
+                    f"MrBayes completed successfully",
+                    f"Marginal likelihood (stepping-stone): {constrained_ml:.3f}",
+                    f"Bayes Decay: {bayes_decay:.2f}",
+                    f"Bayes Factor: {bayes_factor_display} ({support_desc})"
                 ]
                 logger.info(self._format_progress_box("Bayesian Analysis Results", result_lines))
                 if bayes_decay < 0:
@@ -1708,26 +1705,24 @@ class panDecayIndices:
         return progress_str
     
     def _format_progress_box(self, title, content_lines, width=78):
-        """Format a progress box with title and content."""
+        """Format a progress box with title and content using simple dashed style."""
         if self.output_style == "minimal":
             return f"\n{title}\n" + "\n".join(content_lines) + "\n"
         
-        box = self._get_box_chars()
+        output = []
         
-        # Title line
-        title_padding = width - len(title) - 4
-        output = [f"{box['tl']}{box['h']} {title} {box['h'] * title_padding}{box['tr']}"]
+        # Title line with dashes
+        output.append(f"--- {title} ---")
         
-        # Content lines
+        # Content lines (no padding needed for simple style)
         for line in content_lines:
-            if line == "---":  # Separator
-                output.append(f"{box['vright']}{box['h'] * (width - 2)}{box['vleft']}")
-            else:
-                padding = width - len(line) - 2
-                output.append(f"{box['v']} {line}{' ' * padding}{box['v']}")
+            if line == "---":  # Skip separator lines in content
+                continue
+            output.append(line)
         
-        # Bottom line
-        output.append(f"{box['bl']}{box['h'] * (width - 2)}{box['br']}")
+        # Bottom dashes (match the longest line)
+        max_len = max(len(line) for line in output)
+        output.append("-" * max_len)
         
         return "\n".join(output)
     
@@ -2145,23 +2140,35 @@ class panDecayIndices:
                     return {}
                 logger.info(f"Parsed {len(user_constraints)} user-defined constraints for parsimony analysis")
             
-            # Process branches with same logic as ML analysis
+            # Count testable branches (same logic as ML analysis)
+            testable_branches = []
             for i, clade_obj in enumerate(branches):
-                clade_log_idx = i + 1  # For filenames and logging (1-based)
+                clade_log_idx = i + 1
                 clade_taxa = [leaf.name for leaf in clade_obj.get_terminals()]
+                
+                if len(clade_taxa) <= 1 or len(clade_taxa) >= total_taxa_count - 1:
+                    continue
+                if not self.should_test_clade(clade_taxa, user_constraints):
+                    continue
+                testable_branches.append((i, clade_obj, clade_log_idx, clade_taxa))
+            
+            logger.info(f"Testing {len(testable_branches)} branches for parsimony decay...")
+            
+            # Process testable branches
+            for branch_num, (i, clade_obj, clade_log_idx, clade_taxa) in enumerate(testable_branches, 1):
                 clade_id = f"Clade_{clade_log_idx}"
                 
-                # Skip trivial branches (consistent with ML analysis)
-                if len(clade_taxa) <= 1 or len(clade_taxa) >= total_taxa_count - 1:
-                    logger.info(f"Skipping trivial branch {clade_log_idx} (taxa: {len(clade_taxa)}/{total_taxa_count}).")
-                    continue
+                # Display progress box
+                taxa_sample = ", ".join(clade_taxa[:2])
+                if len(clade_taxa) > 2:
+                    taxa_sample += "..."
                 
-                # Check if this clade should be tested based on constraint mode
-                if not self.should_test_clade(clade_taxa, user_constraints):
-                    logger.info(f"Skipping branch {clade_log_idx} based on constraint mode '{self.constraint_mode}'")
-                    continue
-                
-                logger.info(f"Calculating parsimony decay for {clade_id} ({len(clade_taxa)} taxa)")
+                box_content = [
+                    f"Testing clade {clade_log_idx} ({branch_num} of {len(testable_branches)}) • {len(clade_taxa)} taxa",
+                    f"Testing constraint on: {taxa_sample}",
+                    "Running PAUP* with converse constraint"
+                ]
+                logger.info(self._format_progress_box("Parsimony Analysis", box_content))
                 
                 # Create constraint forcing non-monophyly
                 # Format taxa names for PAUP* constraint syntax
@@ -2467,11 +2474,17 @@ class panDecayIndices:
             elapsed = time.time() - start_time
             
             # Show progress
-            progress_msg = f"Calculating ML decay indices...\n"
-            progress_msg += self._format_progress_bar(branch_num - 1, len(testable_branches), elapsed_time=elapsed)
-            logger.info(progress_msg)
+            # Display progress box
+            taxa_sample = ", ".join(clade_taxa_names[:2])
+            if len(clade_taxa_names) > 2:
+                taxa_sample += "..."
             
-            logger.info(f"Processing branch {clade_log_idx} (taxa: {len(clade_taxa_names)})")
+            box_content = [
+                f"Testing clade {clade_log_idx} ({branch_num} of {len(testable_branches)}) • {len(clade_taxa_names)} taxa",
+                f"Testing constraint on: {taxa_sample}",
+                "Running PAUP* with reverse constraint"
+            ]
+            logger.info(self._format_progress_box("ML Analysis", box_content))
             rel_constr_tree_fn, constr_lnl = self._generate_and_score_constraint_tree(clade_taxa_names, clade_log_idx)
 
             if rel_constr_tree_fn: # Successfully generated and scored (even if LNL is None)

@@ -51,7 +51,9 @@ oldFiles/
 *.log
 ml_decay_indices.txt
 ml_decay_indices.md
-ml_decay_indices_*.png
+pan_decay_indices.txt
+pan_decay_indices.md
+*_decay_indices_*.png
 annotated_tree_*.nwk
 *_dist_*.png
 
