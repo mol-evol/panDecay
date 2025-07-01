@@ -1655,7 +1655,7 @@ class panDecayIndices:
                     
                     if constrained_score_path.exists():
                         score_content = constrained_score_path.read_text()
-                        logger.debug(f"Constraint {idx} parsimony score file content:\n{score_content}")
+                        logger.debug(f"Constraint {clade_log_idx} parsimony score file content:\n{score_content}")
                         # Use same parsing logic as initial parsimony score
                         for line in score_content.splitlines():
                             # Pattern 1: "Length = 123"
