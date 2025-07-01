@@ -89,7 +89,7 @@ Where ML represents the marginal likelihood (not to be confused with maximum lik
 Note that BD values of 30-50 or higher are common when data strongly support a clade and should not be considered anomalous.
 
 panDecay can perform Bayesian analyses using:
-- **MrBayes**: Currently supported with harmonic mean marginal likelihood estimation
+- **MrBayes**: Currently supported with stepping-stone sampling (default) or harmonic mean marginal likelihood estimation
 
 ## Features
 
@@ -222,20 +222,25 @@ usage: panDecay.py [-h] [--format FORMAT] [--model MODEL] [--gamma] [--invariabl
                   [--nst {1,2,6}] [--parsmodel | --no-parsmodel] [--threads THREADS] [--starting-tree STARTING_TREE] 
                   [--paup-block PAUP_BLOCK] [--temp TEMP] [--keep-files] [--debug] [--site-analysis] 
                   [--analysis {ml,bayesian,parsimony,ml+parsimony,bayesian+parsimony,ml+bayesian,all}] 
-                  [--bayesian-software {mrbayes}]
-                  [--mrbayes-path MRBAYES_PATH] [--bayes-model BAYES_MODEL]
+                  [--bayesian-software {mrbayes}] [--mrbayes-path MRBAYES_PATH] [--bayes-model BAYES_MODEL]
                   [--bayes-ngen BAYES_NGEN] [--bayes-burnin BAYES_BURNIN] [--bayes-chains BAYES_CHAINS]
                   [--bayes-sample-freq BAYES_SAMPLE_FREQ] [--marginal-likelihood {ss,ps,hm}]
-                  [--ss-alpha SS_ALPHA] [--ss-nsteps SS_NSTEPS] [--bootstrap] [--bootstrap-reps BOOTSTRAP_REPS] 
-                  [--visualize] [--viz-format {png,pdf,svg}] [--config CONFIG] [--generate-config GENERATE_CONFIG]
+                  [--ss-alpha SS_ALPHA] [--ss-nsteps SS_NSTEPS] [--use-mpi] [--mpi-processors MPI_PROCESSORS]
+                  [--mpirun-path MPIRUN_PATH] [--use-beagle] [--beagle-device {auto,cpu,gpu}]
+                  [--beagle-precision {single,double}] [--beagle-scaling {none,dynamic,always}]
+                  [--check-convergence | --no-check-convergence] [--min-ess MIN_ESS] [--max-psrf MAX_PSRF]
+                  [--max-asdsf MAX_ASDSF] [--convergence-strict] [--mrbayes-parse-timeout TIMEOUT]
+                  [--bootstrap] [--bootstrap-reps BOOTSTRAP_REPS] [--visualize] [--viz-format {png,pdf,svg}]
+                  [--annotation {au,lnl}] [--output-style {unicode,ascii,minimal}]
+                  [--config CONFIG] [--generate-config GENERATE_CONFIG]
                   [--constraint-mode {all,specific,exclude}] [--test-branches TEST_BRANCHES] 
                   [--constraint-file CONSTRAINT_FILE] [-v]
-                  alignment
+                  [alignment]
 
 panDecay v1.1.0: Calculate phylogenetic decay indices (ML, Bayesian, and parsimony).
 
 positional arguments:
-  alignment             Input alignment file path.
+  alignment             Input alignment file path (can also be provided via config file).
 
 options:
   -h, --help            show this help message and exit
@@ -268,8 +273,8 @@ Model Parameter Overrides (optional):
                         Use parsimony-based branch lengths (discrete data; default: yes for discrete). Use --no-parsmodel to disable. (default: None)
 
 Runtime Control:
-  --threads THREADS     Number of threads for PAUP* (e.g., 4, 'auto' for (total_cores - 2), or 'all'). Using 'auto' or leaving some cores free is
-                        recommended for system stability. (default: auto)
+  --threads THREADS     Number of threads for PAUP* (e.g., 4, 'auto', or 'all'). 'auto' uses: total_cores - 2 (if cores > 2), 
+                        total_cores - 1 (if cores > 1), or 1 core. Leaving some cores free is recommended for system stability. (default: auto)
   --starting-tree STARTING_TREE
                         Path to a user-provided starting tree file (Newick).
   --paup-block PAUP_BLOCK
@@ -285,7 +290,7 @@ Analysis Mode:
 
 Bayesian Analysis Options:
   --bayesian-software {mrbayes}
-                        Bayesian software to use (required if analysis includes Bayesian)
+                        Bayesian software to use (default: mrbayes)
   --mrbayes-path MRBAYES_PATH
                         Path to MrBayes executable (default: mb)
   --bayes-model BAYES_MODEL
@@ -303,6 +308,20 @@ Bayesian Analysis Options:
   --ss-alpha SS_ALPHA   Alpha parameter for stepping-stone sampling (default: 0.4)
   --ss-nsteps SS_NSTEPS Number of steps for stepping-stone sampling (default: 50)
 
+Parallel Processing Options (MrBayes):
+  --use-mpi             Use MPI version of MrBayes for parallel chains (default: False)
+  --mpi-processors MPI_PROCESSORS
+                        Number of processors for MPI (default: number of chains)
+  --mpirun-path MPIRUN_PATH
+                        Path to mpirun executable (default: mpirun)
+  --use-beagle          Use BEAGLE library for likelihood calculations (default: False)
+  --beagle-device {auto,cpu,gpu}
+                        BEAGLE device type (default: auto)
+  --beagle-precision {single,double}
+                        BEAGLE precision level (default: double)
+  --beagle-scaling {none,dynamic,always}
+                        BEAGLE scaling frequency (default: dynamic)
+
 Convergence Checking Options (MrBayes):
   --check-convergence/--no-check-convergence
                         Check MCMC convergence diagnostics (default: True)
@@ -310,6 +329,8 @@ Convergence Checking Options (MrBayes):
   --max-psrf MAX_PSRF   Maximum PSRF (Potential Scale Reduction Factor) threshold (default: 1.01)
   --max-asdsf MAX_ASDSF Maximum ASDSF (Average Standard Deviation of Split Frequencies) threshold (default: 0.01)
   --convergence-strict  Fail analysis if convergence criteria not met (default: warn only)
+  --mrbayes-parse-timeout TIMEOUT
+                        Timeout for parsing MrBayes output files in seconds (default: 30.0)
 
 Bootstrap Analysis (optional):
   --bootstrap           Perform bootstrap analysis to calculate support values. (default: False)
@@ -320,6 +341,9 @@ Visualization Output (optional):
   --visualize           Generate static visualization plots (requires matplotlib, seaborn). (default: False)
   --viz-format {png,pdf,svg}
                         Format for static visualizations. (default: png)
+  --annotation {au,lnl} Type of support values to visualize in distribution plots (au=AU p-values, lnl=likelihood differences). (default: lnl)
+  --output-style {unicode,ascii,minimal}
+                        Output formatting style: unicode (modern), ascii (compatible), minimal (basic). (default: unicode)
 
 Configuration and Constraint Options:
   --config CONFIG       Read parameters from configuration file (INI format)
@@ -706,7 +730,7 @@ brew install beagle-lib
 make && sudo make install
 ```
 
-## Example 13: Quick Bayesian Test
+### Example 16: Quick Bayesian Test
 For a quick test with minimal MCMC generations:
 
 ```bash
@@ -715,7 +739,7 @@ python3 panDecay.py alignment.fas --analysis ml+bayesian --bayesian-software mrb
     --output quick_test.txt
 ```
 
-### Example 16: Using Configuration Files
+### Example 17: Using Configuration Files
 Generate a template configuration file and use it for analysis:
 
 ```bash
@@ -729,7 +753,7 @@ python3 panDecay.py --config my_analysis.ini
 python3 panDecay.py --config my_analysis.ini --threads 16 --output different_output.txt
 ```
 
-### Example 17: Testing Specific Branches
+### Example 18: Testing Specific Branches
 Test only specific clades of interest:
 
 ```bash
@@ -750,7 +774,7 @@ python3 panDecay.py alignment.fas --constraint-mode exclude \
     --test-branches "Drosophila_melanogaster,Anopheles_gambiae"
 ```
 
-### Example 18: Combined Config File with Constraints
+### Example 19: Combined Config File with Constraints
 Create a configuration file with constraint definitions:
 
 ```ini
