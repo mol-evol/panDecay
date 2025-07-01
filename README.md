@@ -80,11 +80,11 @@ Where ML represents the marginal likelihood (not to be confused with maximum lik
 - When data strongly support a topology, the marginal likelihood is dominated by the likelihood component
 - Traditional Bayes Factor interpretation scales (e.g., BF >10 = strong, >100 = decisive) were developed for comparing fundamentally different models and do not apply well to phylogenetic topology testing
 
-**Recommended interpretation for phylogenetic Bayesian decay values**:
-- BD 0-2: Weak support for the clade
-- BD 2-5: Moderate support
-- BD 5-10: Strong support
-- BD >10: Very strong support
+**Interpreting Bayesian decay values**:
+- BD values should be interpreted comparatively across branches rather than using absolute thresholds
+- Compare BD values with other support metrics (ΔlnL, AU test p-values, bootstrap, parsimony decay)
+- BD values may scale with alignment size and sequence diversity
+- Strong support is best identified when multiple metrics concordantly indicate robust clade support
 
 Note that BD values of 30-50 or higher are common when data strongly support a clade and should not be considered anomalous.
 
@@ -814,11 +814,11 @@ python3 panDecay.py --config my_analysis.ini
 *   **Bayesian Decay (BD):**
     *   The primary metric for Bayesian support: marginal log-likelihood difference (unconstrained - constrained)
     *   **Key insight**: In phylogenetic topology testing, BD values typically closely approximate ML log-likelihood differences
-    *   **Phylogenetic-specific interpretation scale**:
-        *   BD 0-2: Weak support for the clade
-        *   BD 2-5: Moderate support for the clade
-        *   BD 5-10: Strong support for the clade
-        *   BD > 10: Very strong support for the clade
+    *   **Interpretation**: BD values should be interpreted comparatively rather than using absolute thresholds:
+        *   Compare BD values across branches to identify relatively well-supported vs poorly-supported clades
+        *   Evaluate BD values alongside other metrics (ΔlnL, AU test, bootstrap, parsimony decay)
+        *   Consider that BD values may scale with alignment properties (size, diversity)
+        *   The strongest evidence for clade support comes from concordance across multiple metrics
     *   **Note**: BD values of 30-50 or higher are common when data strongly support a clade and should not be considered anomalous
     *   **Why traditional BF scales don't apply**: Traditional Bayes factor thresholds were developed for comparing fundamentally different models, not for topology testing where models differ only by a single constraint
     *   **Negative values** suggest potential issues:
