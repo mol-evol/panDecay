@@ -5153,7 +5153,7 @@ def main():
     # Convergence checking options
     convergence_opts = parser.add_argument_group('Convergence Checking Options (MrBayes)')
     convergence_opts.add_argument("--check-convergence", action=argparse.BooleanOptionalAction, default=True,
-                                 help="Check MCMC convergence diagnostics (default: True)")
+                                 help="Check MCMC convergence diagnostics")
     convergence_opts.add_argument("--min-ess", type=int, default=200,
                                  help="Minimum ESS (Effective Sample Size) threshold (default: 200)")
     convergence_opts.add_argument("--max-psrf", type=float, default=1.01,
