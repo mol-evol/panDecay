@@ -54,7 +54,8 @@ class panDecayIndices:
                  beagle_precision="double", beagle_scaling="dynamic",
                  constraint_mode="all", test_branches=None, constraint_file=None,
                  config_constraints=None, check_convergence=True, min_ess=200,
-                 max_psrf=1.01, max_asdsf=0.01, convergence_strict=False):
+                 max_psrf=1.01, max_asdsf=0.01, convergence_strict=False,
+                 mrbayes_parse_timeout=30.0, output_style="unicode"):
 
         self.alignment_file = Path(alignment_file)
         self.alignment_format = alignment_format
@@ -112,6 +113,10 @@ class panDecayIndices:
         self.max_psrf = max_psrf
         self.max_asdsf = max_asdsf
         self.convergence_strict = convergence_strict
+        
+        # Output and parsing parameters
+        self.mrbayes_parse_timeout = mrbayes_parse_timeout
+        self.output_style = output_style
 
         self.data_type = data_type.lower()
         if self.data_type not in ["dna", "protein", "discrete"]:
@@ -1053,7 +1058,15 @@ class panDecayIndices:
                 continue
             
             clade_id = f"Clade_{clade_log_idx}"
-            logger.info(f"Running Bayesian constraint analysis for {clade_id} (taxa: {len(clade_taxa)})")
+            
+            # Display progress box
+            box_content = [
+                f"Clade {clade_log_idx} of {len([cl for cl in internal_clades if self._should_test_clade_wrapper(cl, user_constraints)])} • {len(clade_taxa)} taxa",
+                "---",
+                "▶ Running MrBayes...",
+                f"  Directory: .../{self.temp_path.name}"
+            ]
+            logger.info(self._format_progress_box("Bayesian Analysis", box_content))
             
             # Create constrained NEXUS file
             mrbayes_block = self._generate_mrbayes_nexus(
@@ -1107,7 +1120,17 @@ class panDecayIndices:
                     'taxa': clade_taxa
                 }
                 
-                logger.info(f"{clade_id}: Bayes decay = {bayes_decay:.4f}, BF = {bayes_factor_display}")
+                # Update progress box with results
+                support_desc = "decisive support" if bayes_factor > 100 else "strong support" if bayes_factor > 10 else "moderate support"
+                result_lines = [
+                    f"✓ MrBayes completed successfully",
+                    f"✓ Marginal likelihood (stepping-stone): {constrained_ml:.3f}",
+                    "---",
+                    "📊 Results:",
+                    f"  • Bayes Decay: {bayes_decay:.2f}",
+                    f"  • Bayes Factor: {bayes_factor_display} ({support_desc})"
+                ]
+                logger.info(self._format_progress_box("Bayesian Analysis Results", result_lines))
                 if bayes_decay < 0:
                     logger.warning(f"⚠️  {clade_id} has negative Bayes Decay ({bayes_decay:.4f}), suggesting potential convergence or estimation issues")
             else:
@@ -1500,6 +1523,186 @@ class panDecayIndices:
         
         return posterior_probs
     
+    def _should_test_clade_wrapper(self, clade_obj, user_constraints):
+        """Helper to check if a clade should be tested."""
+        clade_taxa = [leaf.name for leaf in clade_obj.get_terminals()]
+        total_taxa_count = len(self.ml_tree.get_terminals())
+        
+        # Skip trivial branches
+        if len(clade_taxa) <= 1 or len(clade_taxa) >= total_taxa_count - 1:
+            return False
+            
+        # Check constraint mode
+        return self.should_test_clade(clade_taxa, user_constraints)
+    
+    def _get_box_chars(self):
+        """Get box drawing characters based on output style."""
+        if self.output_style == "unicode":
+            return {
+                'h': '─', 'v': '│', 'tl': '╭', 'tr': '╮', 'bl': '╰', 'br': '╯',
+                'cross': '┼', 'hdown': '┬', 'hup': '┴', 'vright': '├', 'vleft': '┤',
+                'h_thick': '═', 'v_thick': '║', 'tl_thick': '╔', 'tr_thick': '╗',
+                'bl_thick': '╚', 'br_thick': '╝'
+            }
+        elif self.output_style == "ascii":
+            return {
+                'h': '-', 'v': '|', 'tl': '+', 'tr': '+', 'bl': '+', 'br': '+',
+                'cross': '+', 'hdown': '+', 'hup': '+', 'vright': '+', 'vleft': '+',
+                'h_thick': '=', 'v_thick': '|', 'tl_thick': '+', 'tr_thick': '+',
+                'bl_thick': '+', 'br_thick': '+'
+            }
+        else:  # minimal
+            return None
+    
+    def _format_table_row(self, values, widths, alignments=None):
+        """Format a table row with proper alignment and spacing."""
+        if alignments is None:
+            alignments = ['<'] * len(values)  # Default left align
+        
+        formatted = []
+        for val, width, align in zip(values, widths, alignments):
+            if align == '>':  # Right align
+                formatted.append(str(val).rjust(width))
+            elif align == '^':  # Center align
+                formatted.append(str(val).center(width))
+            else:  # Left align
+                formatted.append(str(val).ljust(width))
+        
+        return " │ ".join(formatted) if self.output_style == "unicode" else " | ".join(formatted)
+    
+    def _format_support_symbol(self, pvalue):
+        """Convert p-value to support symbol."""
+        if pvalue == 'N/A' or pvalue is None:
+            return 'N/A'
+        try:
+            p = float(pvalue)
+            if p < 0.001:
+                return '***'
+            elif p < 0.01:
+                return '**'
+            elif p < 0.05:
+                return '*'
+            else:
+                return 'ns'
+        except:
+            return 'N/A'
+    
+    def _format_tree_annotation(self, clade_id, annotation_dict, style="compact"):
+        """Format tree node annotations based on style."""
+        if self.output_style == "minimal":
+            # Simple format
+            parts = []
+            if clade_id:
+                parts.append(clade_id)
+            for key, val in annotation_dict.items():
+                if val is not None:
+                    parts.append(f"{key}:{val}")
+            return " ".join(parts) if parts else None
+        
+        if style == "compact":
+            # Compact bracket notation: Clade_5[AU=0.023,LnL=4.57,BD=34.02]
+            if not annotation_dict:
+                return clade_id if clade_id else None
+            
+            formatted_values = []
+            # Order matters for readability
+            order = ['AU', 'LnL', 'BD', 'BF', 'PD', 'PP', 'BS']
+            for key in order:
+                if key in annotation_dict and annotation_dict[key] is not None:
+                    val = annotation_dict[key]
+                    if isinstance(val, float):
+                        if key in ['AU', 'PP']:
+                            formatted_values.append(f"{key}={val:.3f}")
+                        elif key in ['LnL', 'BD']:
+                            formatted_values.append(f"{key}={val:.2f}")
+                        else:
+                            formatted_values.append(f"{key}={val}")
+                    else:
+                        formatted_values.append(f"{key}={val}")
+            
+            if clade_id and formatted_values:
+                return f"{clade_id}[{','.join(formatted_values)}]"
+            elif formatted_values:
+                return f"[{','.join(formatted_values)}]"
+            else:
+                return clade_id
+        
+        elif style == "symbols":
+            # Symbol format with separators
+            symbols = {
+                'AU': '✓', 'LnL': '△', 'BD': '◆', 'BF': '※', 
+                'PD': '#', 'PP': '●', 'BS': '◯'
+            }
+            parts = []
+            if clade_id:
+                parts.append(clade_id)
+            
+            for key, symbol in symbols.items():
+                if key in annotation_dict and annotation_dict[key] is not None:
+                    val = annotation_dict[key]
+                    parts.append(f"{symbol}{key}:{val}")
+            
+            return "[" + "|".join(parts) + "]" if parts else None
+        
+        else:  # original
+            # Original pipe-separated format
+            parts = []
+            if clade_id:
+                parts = [clade_id, "-"]
+            for key, val in annotation_dict.items():
+                if val is not None:
+                    parts.append(f"{key}:{val}")
+            return " ".join(parts) if len(parts) > 2 else clade_id
+    
+    def _format_progress_bar(self, current, total, width=30, elapsed_time=None):
+        """Format a progress bar with percentage and time estimate."""
+        if self.output_style == "minimal":
+            return f"{current}/{total}"
+        
+        percent = current / total if total > 0 else 0
+        filled = int(width * percent)
+        
+        if self.output_style == "unicode":
+            bar = "█" * filled + "░" * (width - filled)
+        else:
+            bar = "#" * filled + "-" * (width - filled)
+        
+        progress_str = f"[{bar}] {percent*100:.0f}% | {current}/{total}"
+        
+        if elapsed_time and current > 0:
+            avg_time = elapsed_time / current
+            remaining = avg_time * (total - current)
+            if remaining > 60:
+                progress_str += f" | Est. time remaining: {remaining/60:.0f}m"
+            else:
+                progress_str += f" | Est. time remaining: {remaining:.0f}s"
+        
+        return progress_str
+    
+    def _format_progress_box(self, title, content_lines, width=78):
+        """Format a progress box with title and content."""
+        if self.output_style == "minimal":
+            return f"\n{title}\n" + "\n".join(content_lines) + "\n"
+        
+        box = self._get_box_chars()
+        
+        # Title line
+        title_padding = width - len(title) - 4
+        output = [f"{box['tl']}{box['h']} {title} {box['h'] * title_padding}{box['tr']}"]
+        
+        # Content lines
+        for line in content_lines:
+            if line == "---":  # Separator
+                output.append(f"{box['vright']}{box['h'] * (width - 2)}{box['vleft']}")
+            else:
+                padding = width - len(line) - 2
+                output.append(f"{box['v']} {line}{' ' * padding}{box['v']}")
+        
+        # Bottom line
+        output.append(f"{box['bl']}{box['h'] * (width - 2)}{box['br']}")
+        
+        return "\n".join(output)
+    
     def _extract_mrbayes_posterior_probs(self, newick_str):
         """
         Extract posterior probabilities from MrBayes extended NEXUS format.
@@ -1507,10 +1710,146 @@ class panDecayIndices:
         """
         import re
         
-        # For now, return empty dict to avoid hanging
-        # We'll focus on getting the decay values which are the main output
-        logger.info("Skipping posterior probability extraction from extended NEXUS format")
-        return {}
+        posterior_probs = {}
+        
+        try:
+            # Add timeout protection
+            import time
+            start_time = time.time()
+            max_time = self.mrbayes_parse_timeout if self.mrbayes_parse_timeout > 0 else float('inf')
+            
+            # Check if this is a large tree and warn
+            if len(newick_str) > 1_000_000:  # 1MB
+                logger.warning(f"Large consensus tree ({len(newick_str)/1_000_000:.1f}MB), parsing may take time...")
+            
+            # Remove the trailing semicolon
+            newick_str = newick_str.rstrip(';')
+            
+            # Pattern to extract taxon names - they appear before [ or : or , or )
+            taxon_pattern = r'[\(,]([^,\(\)\[\]:]+?)(?=\[|:|,|\))'
+            
+            # Pattern to extract prob values from annotations
+            prob_value_pattern = r'&prob=([0-9.eE+-]+)'
+            
+            # First, extract all taxa names to identify terminals vs internals
+            all_taxa = set()
+            for match in re.finditer(taxon_pattern, newick_str):
+                taxon = match.group(1).strip()
+                if taxon:
+                    all_taxa.add(taxon)
+            
+            logger.debug(f"Found {len(all_taxa)} taxa in tree")
+            
+            # Now parse clades by tracking parentheses and their prob values
+            # Strategy: find each closing ) followed by [&prob=...]
+            clade_pattern = r'\)(\[&[^\]]+\])?'
+            
+            # Track position in string and parse clades
+            pos = 0
+            clade_stack = []  # Stack of sets of taxa
+            nodes_processed = 0
+            
+            i = 0
+            while i < len(newick_str):
+                # Check timeout
+                if time.time() - start_time > max_time:
+                    logger.warning(f"Posterior probability extraction timed out after {max_time}s")
+                    break
+                
+                # Progress logging
+                if nodes_processed > 0 and nodes_processed % 1000 == 0:
+                    elapsed = time.time() - start_time
+                    logger.info(f"  Processed {nodes_processed} nodes in {elapsed:.1f}s...")
+                    
+                char = newick_str[i]
+                
+                if char == '(':
+                    # Start of a new clade
+                    clade_stack.append(set())
+                    i += 1
+                    
+                elif char == ')':
+                    # End of a clade - check for posterior probability
+                    nodes_processed += 1
+                    if clade_stack:
+                        current_clade = clade_stack.pop()
+                        
+                        # Look ahead for [&prob=...]
+                        j = i + 1
+                        while j < len(newick_str) and newick_str[j].isspace():
+                            j += 1
+                            
+                        if j < len(newick_str) and newick_str[j] == '[':
+                            # Find the closing ]
+                            k = j + 1
+                            bracket_depth = 1
+                            while k < len(newick_str) and bracket_depth > 0:
+                                if newick_str[k] == '[':
+                                    bracket_depth += 1
+                                elif newick_str[k] == ']':
+                                    bracket_depth -= 1
+                                k += 1
+                            
+                            if k <= len(newick_str):
+                                annotation = newick_str[j:k]
+                                # Extract prob value
+                                prob_match = re.search(prob_value_pattern, annotation)
+                                if prob_match and len(current_clade) > 1:
+                                    # Only store multi-taxa clades (not terminals)
+                                    prob_value = float(prob_match.group(1))
+                                    clade_key = frozenset(current_clade)
+                                    posterior_probs[clade_key] = prob_value
+                                    
+                                i = k  # Skip past the annotation
+                                continue
+                        
+                        # Add this clade's taxa to parent clade if any
+                        if clade_stack:
+                            clade_stack[-1].update(current_clade)
+                    
+                    i += 1
+                    
+                elif char not in '[]():,':
+                    # Possible start of a taxon name
+                    taxon_start = i
+                    while i < len(newick_str) and newick_str[i] not in '[]():,':
+                        i += 1
+                    
+                    taxon = newick_str[taxon_start:i].strip()
+                    if taxon and not taxon[0].isdigit():  # Skip branch lengths
+                        # Add to current clade
+                        if clade_stack:
+                            clade_stack[-1].add(taxon)
+                        
+                        # Skip any following annotations
+                        while i < len(newick_str) and newick_str[i] == '[':
+                            # Skip annotation
+                            bracket_depth = 1
+                            i += 1
+                            while i < len(newick_str) and bracket_depth > 0:
+                                if newick_str[i] == '[':
+                                    bracket_depth += 1
+                                elif newick_str[i] == ']':
+                                    bracket_depth -= 1
+                                i += 1
+                else:
+                    i += 1
+            
+            logger.info(f"Extracted posterior probabilities for {len(posterior_probs)} clades")
+            
+            # Debug: show some extracted values
+            if self.debug and posterior_probs:
+                for clade, prob in list(posterior_probs.items())[:3]:
+                    taxa_list = sorted(list(clade))[:3]
+                    logger.debug(f"  Clade {','.join(taxa_list)}{'...' if len(clade) > 3 else ''}: PP={prob:.3f}")
+            
+        except Exception as e:
+            logger.warning(f"Failed to extract posterior probabilities: {e}")
+            if self.debug:
+                import traceback
+                logger.debug(traceback.format_exc())
+        
+        return posterior_probs
 
     def _parse_mrbayes_convergence_diagnostics(self, nexus_file_path, output_prefix):
         """
@@ -2077,21 +2416,34 @@ class panDecayIndices:
                 return {}
             logger.info(f"Parsed {len(user_constraints)} user-defined constraints")
 
+        # Count testable branches
+        testable_branches = []
         for i, clade_obj in enumerate(internal_clades):
-            clade_log_idx = i + 1 # For filenames and logging (1-based)
+            clade_log_idx = i + 1
             clade_taxa_names = [leaf.name for leaf in clade_obj.get_terminals()]
             total_taxa_count = len(self.ml_tree.get_terminals())
-
-            if len(clade_taxa_names) <= 1 or len(clade_taxa_names) >= total_taxa_count -1:
-                logger.info(f"Skipping trivial branch {clade_log_idx} (taxa: {len(clade_taxa_names)}/{total_taxa_count}).")
-                continue
             
-            # Check if this clade should be tested based on constraint mode
-            if not self.should_test_clade(clade_taxa_names, user_constraints):
-                logger.info(f"Skipping branch {clade_log_idx} based on constraint mode '{self.constraint_mode}'")
+            if len(clade_taxa_names) <= 1 or len(clade_taxa_names) >= total_taxa_count - 1:
                 continue
-
-            logger.info(f"Processing branch {clade_log_idx}/{len(internal_clades)} (taxa: {len(clade_taxa_names)})")
+            if not self.should_test_clade(clade_taxa_names, user_constraints):
+                continue
+            testable_branches.append((i, clade_obj, clade_log_idx, clade_taxa_names))
+        
+        logger.info(f"Testing {len(testable_branches)} branches for ML decay...")
+        
+        # Track time for progress estimation
+        import time
+        start_time = time.time()
+        
+        for branch_num, (i, clade_obj, clade_log_idx, clade_taxa_names) in enumerate(testable_branches, 1):
+            elapsed = time.time() - start_time
+            
+            # Show progress
+            progress_msg = f"Calculating ML decay indices...\n"
+            progress_msg += self._format_progress_bar(branch_num - 1, len(testable_branches), elapsed_time=elapsed)
+            logger.info(progress_msg)
+            
+            logger.info(f"Processing branch {clade_log_idx} (taxa: {len(clade_taxa_names)})")
             rel_constr_tree_fn, constr_lnl = self._generate_and_score_constraint_tree(clade_taxa_names, clade_log_idx)
 
             if rel_constr_tree_fn: # Successfully generated and scored (even if LNL is None)
@@ -2942,14 +3294,19 @@ class panDecayIndices:
                                 annotation_parts.append(f"PP:{post_prob:.2f}")
                             break
 
-                    # Add the clade ID to the beginning of annotation if we have one
-                    if clade_id and annotation_parts:
-                        # Create clear separation between clade name and metrics
-                        clade_part = clade_id
-                        metrics_part = "|".join(annotation_parts)
-                        node_annotations[node_taxa_set] = f"{clade_part} - {metrics_part}"
-                    elif annotation_parts:
-                        node_annotations[node_taxa_set] = "|".join(annotation_parts)
+                    # Format annotations using the new method
+                    if clade_id or annotation_parts:
+                        # Convert annotation_parts to dict format
+                        ann_dict = {}
+                        for part in annotation_parts:
+                            if ':' in part:
+                                key, val = part.split(':', 1)
+                                ann_dict[key] = val
+                        
+                        # Use compact format for combined tree
+                        formatted = self._format_tree_annotation(clade_id, ann_dict, style="compact")
+                        if formatted:
+                            node_annotations[node_taxa_set] = formatted
 
                 # Now, we'll manually construct a combined tree by using string replacement on the base tree
                 # First, make a working copy of the ML tree
@@ -3208,6 +3565,234 @@ class panDecayIndices:
                 logger.debug(f"Traceback: {traceback.format_exc()}")
             return tree_files  # Return any successfully created files
 
+    def _write_support_table(self, f, has_ml, has_bayesian, has_parsimony, has_posterior, has_bootstrap):
+        """Write the formatted support values table."""
+        box = self._get_box_chars()
+        
+        # Build header structure
+        if self.output_style == "unicode":
+            # Top border
+            f.write("┌──────────┬──────┬")
+            if has_ml:
+                f.write("────────────────────────────────┬")
+            if has_bayesian:
+                f.write("──────────────────────┬")
+            if has_parsimony:
+                f.write("───────────────────────┬")
+            f.write("\n")
+            
+            # Main headers
+            f.write("│ Clade ID │ Taxa │")
+            if has_ml:
+                f.write("    Maximum Likelihood          │")
+            if has_bayesian:
+                f.write("      Bayesian        │")
+            if has_parsimony:
+                f.write("      Parsimony        │")
+            f.write("\n")
+            
+            # Sub-headers
+            f.write("│          │      ├")
+            if has_ml:
+                f.write("──────────┬──────────┬──────────┼")
+            if has_bayesian:
+                f.write("────────┬─────────────┼")
+            if has_parsimony:
+                f.write("───────────────────────┤")
+            f.write("\n")
+            
+            # Column names
+            f.write("│          │      │")
+            if has_ml:
+                f.write(" LnL Diff │ AU p-val │ Support  │")
+            if has_bayesian:
+                f.write(" BD     │ BF          │")
+            if has_parsimony:
+                f.write(" Decay │ Post.Prob     │" if has_posterior else " Decay                 │")
+            f.write("\n")
+            
+            # Bottom border
+            f.write("├──────────┼──────┼")
+            if has_ml:
+                f.write("──────────┼──────────┼──────────┼")
+            if has_bayesian:
+                f.write("────────┼─────────────┼")
+            if has_parsimony:
+                f.write("───────┼───────────────┤" if has_posterior else "───────────────────────┤")
+            f.write("\n")
+        else:
+            # ASCII version
+            header_parts = ["Clade ID", "Taxa"]
+            if has_ml:
+                header_parts.extend(["LnL Diff", "AU p-val", "Support"])
+            if has_bayesian:
+                header_parts.extend(["BD", "BF"])
+            if has_parsimony:
+                header_parts.append("P.Decay")
+                if has_posterior:
+                    header_parts.append("Post.Prob")
+            
+            f.write(self._format_table_row(header_parts, [10, 6] + [10] * (len(header_parts) - 2)) + "\n")
+            f.write("-" * (sum([10, 6] + [10] * (len(header_parts) - 2)) + 3 * (len(header_parts) - 1)) + "\n")
+        
+        # Data rows
+        for clade_id, data in sorted(self.decay_indices.items()):
+            taxa_list = sorted(data.get('taxa', []))
+            num_taxa = len(taxa_list)
+            
+            row_values = [clade_id, str(num_taxa)]
+            
+            if has_ml:
+                lnl_diff = data.get('lnl_diff')
+                au_pval = data.get('AU_pvalue')
+                
+                if lnl_diff is not None:
+                    row_values.append(f"{lnl_diff:.3f}")
+                else:
+                    row_values.append("N/A")
+                    
+                if au_pval is not None:
+                    row_values.append(f"{au_pval:.4f}")
+                    row_values.append(self._format_support_symbol(au_pval))
+                else:
+                    row_values.extend(["N/A", "N/A"])
+            
+            if has_bayesian:
+                bd = data.get('bayes_decay')
+                bf_display = data.get('bayes_factor_display')
+                
+                if bd is not None:
+                    row_values.append(f"{bd:.2f}")
+                else:
+                    row_values.append("N/A")
+                    
+                row_values.append(bf_display if bf_display else "N/A")
+            
+            if has_parsimony:
+                pd = data.get('pars_decay')
+                row_values.append(str(pd) if pd is not None else "N/A")
+                
+                if has_posterior:
+                    pp = data.get('posterior_prob')
+                    row_values.append(f"{pp:.2f}" if pp is not None else "N/A")
+            
+            if self.output_style == "unicode":
+                f.write("│ " + " │ ".join(row_values) + " │\n")
+            else:
+                f.write(self._format_table_row(row_values, [10, 6] + [10] * (len(row_values) - 2)) + "\n")
+        
+        # Bottom border
+        if self.output_style == "unicode":
+            f.write("└──────────┴──────┴")
+            if has_ml:
+                f.write("──────────┴──────────┴──────────┴")
+            if has_bayesian:
+                f.write("────────┴─────────────┴")
+            if has_parsimony:
+                f.write("───────┴───────────────┘" if has_posterior else "───────────────────────┘")
+            f.write("\n")
+    
+    def write_formatted_results(self, output_path: Path):
+        """Write results in formatted table style based on output_style setting."""
+        if self.output_style == "minimal" or not self.decay_indices:
+            # Fall back to original method for minimal style
+            return self.write_results(output_path)
+        
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Check which types of results we have
+        has_ml = any(d.get('lnl_diff') is not None for d in self.decay_indices.values())
+        has_bayesian = any(d.get('bayes_decay') is not None for d in self.decay_indices.values())
+        has_parsimony = any(d.get('pars_decay') is not None for d in self.decay_indices.values())
+        has_posterior = any(d.get('posterior_prob') is not None for d in self.decay_indices.values())
+        has_bootstrap = hasattr(self, 'bootstrap_tree') and self.bootstrap_tree
+        
+        box = self._get_box_chars()
+        
+        with output_path.open('w') as f:
+            # Header section
+            if self.output_style == "unicode":
+                f.write("═" * 100 + "\n")
+                f.write(" " * 30 + "panDecay Branch Support Analysis Results" + " " * 30 + "\n")
+                f.write("═" * 100 + "\n\n")
+            else:
+                f.write("=" * 100 + "\n")
+                f.write(" " * 30 + "panDecay Branch Support Analysis Results" + " " * 30 + "\n")
+                f.write("=" * 100 + "\n\n")
+            
+            # Analysis summary
+            f.write("Analysis Summary\n")
+            f.write("─" * 16 + "\n" if self.output_style == "unicode" else "-" * 16 + "\n")
+            
+            if self.ml_likelihood is not None:
+                f.write(f"• ML tree log-likelihood: {self.ml_likelihood:.3f}\n")
+            
+            analysis_types = []
+            if self.do_ml:
+                analysis_types.append("Maximum Likelihood")
+            if self.do_bayesian:
+                analysis_types.append(f"Bayesian ({self.bayesian_software})")
+            if self.do_parsimony:
+                analysis_types.append("Parsimony")
+            
+            f.write(f"• Analysis types: {' + '.join(analysis_types)}\n")
+            f.write(f"• Total clades analyzed: {len(self.decay_indices)}\n\n")
+            
+            # Branch support table
+            f.write("Branch Support Values\n")
+            f.write("─" * 21 + "\n" if self.output_style == "unicode" else "-" * 21 + "\n")
+            
+            # Write the formatted table
+            self._write_support_table(f, has_ml, has_bayesian, has_parsimony, has_posterior, has_bootstrap)
+            
+            # Support legend
+            f.write("\nSupport Legend: *** = p < 0.001, ** = p < 0.01, * = p < 0.05, ns = not significant\n")
+            f.write("BD = Bayes Decay (log scale), BF = Bayes Factor, Post.Prob = Posterior Probability\n")
+            
+            # Clade details section
+            f.write("\nClade Details\n")
+            f.write("─" * 13 + "\n" if self.output_style == "unicode" else "-" * 13 + "\n")
+            
+            for clade_id, data in sorted(self.decay_indices.items()):
+                taxa_list = sorted(data.get('taxa', []))
+                support_levels = []
+                
+                if has_ml and data.get('AU_pvalue') is not None:
+                    p = data.get('AU_pvalue', 1.0)
+                    if p < 0.05:
+                        support_levels.append("ML")
+                
+                if has_bayesian and data.get('bayes_factor') is not None:
+                    bf = data.get('bayes_factor', 0)
+                    if bf > 10:
+                        support_levels.append("Bayes")
+                        
+                if has_parsimony and data.get('pars_decay') is not None:
+                    pd = data.get('pars_decay', 0)
+                    if pd > 3:
+                        support_levels.append("Parsimony")
+                
+                support_str = f"Strong support: {'/'.join(support_levels)}" if support_levels else "Weak support"
+                
+                f.write(f"→ {clade_id} ({support_str})\n")
+                
+                # Format taxa list with wrapping
+                taxa_str = "  Taxa: "
+                line_len = len(taxa_str)
+                for i, taxon in enumerate(taxa_list):
+                    if i > 0:
+                        if line_len + len(taxon) + 2 > 80:  # Wrap at 80 chars
+                            f.write(",\n        ")
+                            line_len = 8
+                        else:
+                            f.write(", ")
+                            line_len += 2
+                    f.write(taxon)
+                    line_len += len(taxon)
+                f.write("\n\n")
+        
+        logger.info(f"Results written to {output_path}")
+    
     def write_results(self, output_path: Path):
         if not self.decay_indices:
             logger.warning("No branch support results to write.")
@@ -4990,6 +5575,8 @@ def main():
                                  help="Maximum ASDSF (Average Standard Deviation of Split Frequencies) threshold (default: 0.01)")
     convergence_opts.add_argument("--convergence-strict", action="store_true",
                                  help="Fail analysis if convergence criteria not met (default: warn only)")
+    convergence_opts.add_argument("--mrbayes-parse-timeout", type=float, default=30.0,
+                                 help="Timeout for parsing MrBayes consensus trees in seconds (0 to disable, default: 30)")
 
     viz_opts = parser.add_argument_group('Visualization Output (optional)')
     viz_opts.add_argument("--visualize", action="store_true", help="Generate static visualization plots (requires matplotlib, seaborn).")
@@ -4998,6 +5585,8 @@ def main():
     viz_opts.add_argument("--html-trees", action=argparse.BooleanOptionalAction, default=True, help="Generate interactive HTML tree visualizations (default: True)")
     viz_opts.add_argument("--js-cdn", action="store_true", default=True, help="Use CDN for JavaScript libraries (faster but requires internet connection)")
     viz_opts.add_argument("--keep-tree-files", action="store_true", default=False, help="Keep Newick tree files used for HTML visualization (default: False)")
+    viz_opts.add_argument("--output-style", choices=["unicode", "ascii", "minimal"], default="unicode",
+                         help="Output formatting style: unicode (modern), ascii (compatible), minimal (basic)")
     
     # Configuration file and constraint selection options
     config_opts = parser.add_argument_group('Configuration and Constraint Options')
@@ -5115,7 +5704,9 @@ def main():
             min_ess=args.min_ess,
             max_psrf=args.max_psrf,
             max_asdsf=args.max_asdsf,
-            convergence_strict=args.convergence_strict
+            convergence_strict=args.convergence_strict,
+            mrbayes_parse_timeout=args.mrbayes_parse_timeout,
+            output_style=args.output_style
         )
 
         decay_calc.build_ml_tree() # Can raise exceptions
@@ -5138,7 +5729,7 @@ def main():
                         break  # Only need to do this once if any site_data exists
 
             output_main_path = Path(args.output)
-            decay_calc.write_results(output_main_path)
+            decay_calc.write_formatted_results(output_main_path)
 
             report_path = output_main_path.with_suffix(".md")
             decay_calc.generate_detailed_report(report_path)
