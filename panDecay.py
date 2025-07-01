@@ -1277,10 +1277,17 @@ class panDecayIndices:
             Dictionary mapping clade (as frozenset of taxa) to posterior probability
         """
         try:
+            logger.debug(f"Parsing MrBayes consensus tree from: {con_tree_path}")
+            
+            if not con_tree_path.exists():
+                logger.warning(f"MrBayes consensus tree file not found: {con_tree_path}")
+                return {}
+            
             posterior_probs = {}
             
             # Read the consensus tree file
             tree_content = con_tree_path.read_text()
+            logger.debug(f"Consensus tree file has {len(tree_content)} characters")
             
             # Find the tree line (starts with "tree con_50")
             tree_line = None
@@ -1302,38 +1309,71 @@ class panDecayIndices:
             
             newick_str = parts[1].strip()
             
-            # Remove [&U] or other tree attributes
+            # Debug: log the original newick string
+            if self.debug or True:  # Always log for debugging
+                logger.info(f"Original newick string: {newick_str[:300]}...")
+            
+            # Remove [&U] or other tree attributes at the beginning
             if newick_str.startswith("["):
                 end_bracket = newick_str.find("]")
                 if end_bracket != -1:
                     newick_str = newick_str[end_bracket+1:].strip()
             
-            # Parse the tree to extract clades and their posterior probabilities
-            # This is a simplified parser - for production use, consider using Bio.Phylo
-            # or another proper Newick parser that handles posterior probabilities
+            logger.debug(f"Newick after removing tree attributes: {newick_str[:200]}...")
             
-            # For now, log that we found the tree
-            logger.info(f"Found consensus tree with posterior probabilities")
+            # MrBayes puts posterior probabilities in square brackets after clades
+            # We need to convert these to BioPython confidence values
+            # First, let's parse the tree without the posterior probabilities
+            
+            # Create a version without posterior probabilities for BioPython
+            import re
+            # Pattern to match posterior probabilities in square brackets
+            prob_pattern = r'\)\[([0-9.]+)\]'
+            
+            # Extract posterior probabilities before removing them
+            prob_matches = list(re.finditer(prob_pattern, newick_str))
+            logger.info(f"Found {len(prob_matches)} posterior probability annotations in consensus tree")
+            
+            # Also check for other possible formats
+            if len(prob_matches) == 0:
+                # Check if posterior probs might be in a different format
+                alt_patterns = [
+                    r'\)(\d+\.\d+):',  # )0.95:
+                    r'\)(\d+):',       # )95:
+                    r'\{(\d+\.\d+)\}', # {0.95}
+                ]
+                for pattern in alt_patterns:
+                    alt_matches = list(re.finditer(pattern, newick_str))
+                    if alt_matches:
+                        logger.info(f"Found {len(alt_matches)} matches with alternative pattern: {pattern}")
+            
+            # Remove the posterior probabilities for BioPython parsing
+            clean_newick = re.sub(r'\[[0-9.]+\]', '', newick_str)
+            logger.debug(f"Clean newick for BioPython: {clean_newick[:200]}...")
             
             # Parse using BioPython
             from io import StringIO
-            tree_io = StringIO(newick_str)
+            tree_io = StringIO(clean_newick)
             
             try:
                 tree = Phylo.read(tree_io, "newick")
+                logger.debug(f"Successfully parsed tree with {len(list(tree.get_nonterminals()))} internal nodes")
                 
-                # Extract posterior probabilities from internal nodes
-                for node in tree.get_nonterminals():
-                    if node.confidence is not None and node != tree.root:
-                        # Get taxa in this clade
-                        clade_taxa = frozenset(term.name for term in node.get_terminals())
-                        posterior_probs[clade_taxa] = float(node.confidence)
-                        
+                # Now we need to match the posterior probabilities to the clades
+                # This is tricky because we need to traverse the tree in the same order
+                # as the Newick string
+                
+                # Alternative approach: manually parse the Newick string to extract clades
+                # and their posterior probabilities
+                posterior_probs = self._manual_parse_mrbayes_tree(newick_str)
+                
                 logger.info(f"Extracted posterior probabilities for {len(posterior_probs)} clades")
                 
             except Exception as e:
                 logger.warning(f"Could not parse consensus tree with BioPython: {e}")
-                # Could implement manual parsing here if needed
+                logger.debug("Falling back to manual parsing")
+                # Fall back to manual parsing
+                posterior_probs = self._manual_parse_mrbayes_tree(newick_str)
                 
             return posterior_probs
             
@@ -1343,6 +1383,131 @@ class panDecayIndices:
                 import traceback
                 logger.debug(traceback.format_exc())
             return {}
+
+    def _manual_parse_mrbayes_tree(self, newick_str):
+        """
+        Manually parse MrBayes consensus tree to extract clades and posterior probabilities.
+        
+        MrBayes format: (taxon1,taxon2)[0.95]
+        
+        Args:
+            newick_str: Newick string with posterior probabilities in square brackets
+            
+        Returns:
+            Dictionary mapping frozensets of taxa to posterior probabilities
+        """
+        import re
+        
+        posterior_probs = {}
+        
+        # First, let's use a more robust approach to parse the tree
+        # We'll recursively parse the tree structure
+        
+        def parse_clade(s, pos=0):
+            """Recursively parse a clade from the Newick string."""
+            taxa_in_clade = set()
+            
+            # Skip whitespace
+            while pos < len(s) and s[pos].isspace():
+                pos += 1
+            
+            if pos >= len(s):
+                return taxa_in_clade, pos
+            
+            if s[pos] == '(':
+                # This is an internal node
+                pos += 1  # Skip '('
+                
+                # Parse all children
+                while pos < len(s) and s[pos] != ')':
+                    child_taxa, pos = parse_clade(s, pos)
+                    taxa_in_clade.update(child_taxa)
+                    
+                    # Skip whitespace and commas
+                    while pos < len(s) and (s[pos].isspace() or s[pos] == ','):
+                        pos += 1
+                
+                if pos < len(s) and s[pos] == ')':
+                    pos += 1  # Skip ')'
+                    
+                    # Check for posterior probability
+                    while pos < len(s) and s[pos].isspace():
+                        pos += 1
+                    
+                    if pos < len(s) and s[pos] == '[':
+                        # Parse posterior probability
+                        pos += 1  # Skip '['
+                        prob_start = pos
+                        while pos < len(s) and s[pos] != ']':
+                            pos += 1
+                        
+                        if pos < len(s):
+                            prob_str = s[prob_start:pos]
+                            try:
+                                posterior_prob = float(prob_str)
+                                clade_set = frozenset(taxa_in_clade)
+                                if len(clade_set) > 1:  # Don't include single-taxon clades
+                                    posterior_probs[clade_set] = posterior_prob
+                                    if self.debug:
+                                        logger.debug(f"Found clade {sorted(list(taxa_in_clade))[:3]}{'...' if len(taxa_in_clade) > 3 else ''} with PP={posterior_prob}")
+                            except ValueError:
+                                logger.warning(f"Could not parse posterior probability: {prob_str}")
+                            
+                            pos += 1  # Skip ']'
+                    
+                    # Skip branch length if present
+                    while pos < len(s) and s[pos].isspace():
+                        pos += 1
+                    
+                    if pos < len(s) and s[pos] == ':':
+                        pos += 1  # Skip ':'
+                        # Skip the branch length
+                        while pos < len(s) and (s[pos].isdigit() or s[pos] in '.eE-+'):
+                            pos += 1
+                
+            else:
+                # This is a leaf node (taxon name)
+                taxon_start = pos
+                while pos < len(s) and s[pos] not in '(),:;[]' and not s[pos].isspace():
+                    pos += 1
+                
+                taxon = s[taxon_start:pos].strip()
+                if taxon:
+                    taxa_in_clade.add(taxon)
+                    logger.debug(f"Found taxon: {taxon}")
+                
+                # Skip branch length if present
+                while pos < len(s) and s[pos].isspace():
+                    pos += 1
+                
+                if pos < len(s) and s[pos] == ':':
+                    pos += 1  # Skip ':'
+                    # Skip the branch length
+                    while pos < len(s) and (s[pos].isdigit() or s[pos] in '.eE-+'):
+                        pos += 1
+            
+            return taxa_in_clade, pos
+        
+        # Parse the entire tree
+        try:
+            all_taxa, _ = parse_clade(newick_str)
+            logger.info(f"Parsed tree with {len(all_taxa)} taxa")
+            logger.debug(f"All taxa: {sorted(all_taxa)}")
+            
+            # Filter out the root clade (contains all taxa)
+            posterior_probs = {k: v for k, v in posterior_probs.items() if len(k) < len(all_taxa)}
+            
+            logger.info(f"Manual parsing found {len(posterior_probs)} clades with posterior probabilities")
+            for clade, prob in sorted(posterior_probs.items(), key=lambda x: x[1], reverse=True)[:5]:
+                logger.debug(f"  Top clade {sorted(clade)}: PP={prob:.3f}")
+            
+        except Exception as e:
+            logger.error(f"Error in manual tree parsing: {e}")
+            if self.debug:
+                import traceback
+                logger.debug(traceback.format_exc())
+        
+        return posterior_probs
 
     def _parse_mrbayes_convergence_diagnostics(self, nexus_file_path, output_prefix):
         """
