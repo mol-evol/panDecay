@@ -1036,8 +1036,20 @@ class panDecayIndices:
         
         # Create NEXUS file with MrBayes block
         nexus_content = self.nexus_file_path.read_text()
+        
+        # Remove PAUP-specific 'options' commands that MrBayes doesn't understand
+        nexus_lines = nexus_content.split('\n')
+        filtered_lines = []
+        for line in nexus_lines:
+            # Skip lines that contain 'options' command (case-insensitive)
+            if line.strip().lower().startswith('options'):
+                logger.debug(f"Filtering out PAUP-specific line for MrBayes: {line.strip()}")
+                continue
+            filtered_lines.append(line)
+        
+        filtered_nexus = '\n'.join(filtered_lines)
         mrbayes_block = self._generate_mrbayes_nexus()
-        combined_nexus = nexus_content + "\n" + mrbayes_block
+        combined_nexus = filtered_nexus + "\n" + mrbayes_block
         
         unconstrained_nexus = self.temp_path / "unc.nex"
         unconstrained_nexus.write_text(combined_nexus)
@@ -1103,7 +1115,7 @@ class panDecayIndices:
                 clade_taxa=clade_taxa, 
                 constraint_id=clade_id
             )
-            combined_nexus = nexus_content + "\n" + mrbayes_block
+            combined_nexus = filtered_nexus + "\n" + mrbayes_block
             
             constrained_nexus = self.temp_path / f"c_{clade_log_idx}.nex"
             constrained_nexus.write_text(combined_nexus)
