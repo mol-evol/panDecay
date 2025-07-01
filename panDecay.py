@@ -1607,20 +1607,20 @@ class panDecayIndices:
             return " ".join(parts) if parts else None
         
         if style == "compact":
-            # Compact bracket notation: Clade_5[AU=0.023,LnL=4.57,BD=34.02]
+            # Compact bracket notation: Clade_5[AU=0.023,ΔlnL=4.57,BD=34.02]
             if not annotation_dict:
                 return clade_id if clade_id else None
             
             formatted_values = []
             # Order matters for readability
-            order = ['AU', 'LnL', 'BD', 'BF', 'PD', 'PP', 'BS']
+            order = ['AU', 'ΔlnL', 'BD', 'BF', 'PD', 'PP', 'BS']
             for key in order:
                 if key in annotation_dict and annotation_dict[key] is not None:
                     val = annotation_dict[key]
                     if isinstance(val, float):
                         if key in ['AU', 'PP']:
                             formatted_values.append(f"{key}={val:.3f}")
-                        elif key in ['LnL', 'BD']:
+                        elif key in ['ΔlnL', 'BD']:
                             formatted_values.append(f"{key}={val:.2f}")
                         else:
                             formatted_values.append(f"{key}={val}")
@@ -1637,7 +1637,7 @@ class panDecayIndices:
         elif style == "symbols":
             # Symbol format with separators
             symbols = {
-                'AU': '✓', 'LnL': '△', 'BD': '◆', 'BF': '※', 
+                'AU': '✓', 'ΔlnL': '△', 'BD': '◆', 'BF': '※', 
                 'PD': '#', 'PP': '●', 'BS': '◯'
             }
             parts = []
@@ -3194,7 +3194,7 @@ class panDecayIndices:
                 logger.error(f"Failed to create AU tree: {e}")
 
             # Create log-likelihood difference annotated tree
-            lnl_tree_path = output_dir / f"{base_filename}_lnl.nwk"
+            lnl_tree_path = output_dir / f"{base_filename}_delta_lnl.nwk"
             try:
                 temp_tree_for_lnl = self.temp_path / f"ml_tree_for_lnl_annotation.nwk"
                 Phylo.write(self.ml_tree, str(temp_tree_for_lnl), "newick")
@@ -3218,11 +3218,11 @@ class panDecayIndices:
                     if matched_data and 'lnl_diff' in matched_data and matched_data['lnl_diff'] is not None:
                         lnl_diff = abs(matched_data['lnl_diff'])
                         # Create clear separation between clade name and LnL difference
-                        node.name = f"{matched_clade_id} - LnL:{lnl_diff:.4f}"
+                        node.name = f"{matched_clade_id} - ΔlnL:{lnl_diff:.4f}"
                         annotated_nodes_count += 1
 
                 Phylo.write(lnl_tree, str(lnl_tree_path), "newick")
-                logger.info(f"Annotated tree with {annotated_nodes_count} branch values written to {lnl_tree_path} (type: lnl).")
+                logger.info(f"Annotated tree with {annotated_nodes_count} branch values written to {lnl_tree_path} (type: delta_lnl).")
                 tree_files['lnl'] = lnl_tree_path
             except Exception as e:
                 logger.error(f"Failed to create LNL tree: {e}")
@@ -3272,7 +3272,7 @@ class panDecayIndices:
                                 annotation_parts.append(f"AU:{au_val:.4f}")
 
                             if lnl_val is not None:
-                                annotation_parts.append(f"LnL:{abs(lnl_val):.4f}")
+                                annotation_parts.append(f"ΔlnL:{abs(lnl_val):.4f}")
                                 
                             if bayes_decay is not None:
                                 annotation_parts.append(f"BD:{bayes_decay:.4f}")
@@ -3428,7 +3428,7 @@ class panDecayIndices:
                                 annotation_parts.append(f"AU:{au_val:.4f}")
 
                             if lnl_val is not None:
-                                annotation_parts.append(f"LnL:{abs(lnl_val):.4f}")
+                                annotation_parts.append(f"ΔlnL:{abs(lnl_val):.4f}")
                                 
                             if bayes_decay is not None:
                                 annotation_parts.append(f"BD:{bayes_decay:.4f}")
@@ -3611,7 +3611,7 @@ class panDecayIndices:
             # Column names
             f.write("│          │      │")
             if has_ml:
-                f.write(" LnL Diff │ AU p-val │ Support  │")
+                f.write(" ΔlnL     │ AU p-val │ Support  │")
             if has_bayesian:
                 f.write(" BD     │ BF          │")
             if has_parsimony:
@@ -3631,7 +3631,7 @@ class panDecayIndices:
             # ASCII version
             header_parts = ["Clade ID", "Taxa"]
             if has_ml:
-                header_parts.extend(["LnL Diff", "AU p-val", "Support"])
+                header_parts.extend(["ΔlnL", "AU p-val", "Support"])
             if has_bayesian:
                 header_parts.extend(["BD", "BF"])
             if has_parsimony:
@@ -3852,7 +3852,7 @@ class panDecayIndices:
             header_parts = ["Clade_ID", "Num_Taxa"]
             
             if has_ml:
-                header_parts.extend(["Constrained_lnL", "LnL_Diff_from_ML", "AU_p-value", "Significant_AU (p<0.05)"])
+                header_parts.extend(["Constrained_lnL", "Delta_LnL", "AU_p-value", "Significant_AU (p<0.05)"])
             if has_parsimony:
                 header_parts.append("Pars_Decay")
             if has_bayesian:
@@ -4118,7 +4118,7 @@ class panDecayIndices:
             separator_parts = ["|----------|------------ "]
             
             if has_ml:
-                header_parts.extend(["| Constrained lnL | LnL Diff from ML | AU p-value | Significant (AU) "])
+                header_parts.extend(["| Constrained lnL | ΔlnL (from ML) | AU p-value | Significant (AU) "])
                 separator_parts.extend(["|-----------------|------------------|------------|-------------------- "])
             
             if has_bayesian:
@@ -4226,7 +4226,7 @@ class panDecayIndices:
             
             if has_ml:
                 f.write("### ML Analysis\n")
-                f.write("- **LnL Diff from ML**: Log-likelihood of the best tree *without* the clade minus ML tree's log-likelihood. More negative (larger absolute difference) implies stronger support for the clade's presence in the ML tree.\n")
+                f.write("- **ΔlnL (from ML)**: Log-likelihood difference between the constrained tree (without the clade) and the ML tree. Calculated as: constrained_lnL - ML_lnL. Larger positive values indicate stronger support for the clade's presence in the ML tree.\n")
                 f.write("- **AU p-value**: P-value from the Approximately Unbiased test comparing the ML tree against the alternative (constrained) tree. Lower p-values (e.g., < 0.05) suggest the alternative tree (where the clade is broken) is significantly worse than the ML tree, thus supporting the clade.\n\n")
                 
             if has_bayesian:
@@ -5065,7 +5065,7 @@ def print_runtime_parameters(args_ns, model_str_for_print):
     output_p = Path(args_ns.output) # Use Path for consistent name generation
     print("\nOUTPUT SETTINGS:")
     print(f"  Results file:       {output_p}")
-    print(f"  Annotated trees:    {args_ns.tree}_au.nwk, {args_ns.tree}_lnl.nwk, {args_ns.tree}_combined.nwk")
+    print(f"  Annotated trees:    {args_ns.tree}_au.nwk, {args_ns.tree}_delta_lnl.nwk, {args_ns.tree}_combined.nwk")
     print(f"  Detailed report:    {output_p.with_suffix('.md')}")
     if args_ns.temp: print(f"  Temp directory:     {args_ns.temp}")
     if args_ns.debug: print(f"  Debug mode:         Enabled (log: mldecay_debug.log, if configured)")
@@ -5527,7 +5527,7 @@ def main():
 
     parser.add_argument("--paup", default="paup", help="Path to PAUP* executable.")
     parser.add_argument("--output", default="ml_decay_indices.txt", help="Output file for summary results.")
-    parser.add_argument("--tree", default="annotated_tree", help="Base name for annotated tree files. Three trees will be generated with suffixes: _au.nwk (AU p-values), _lnl.nwk (likelihood differences), and _combined.nwk (both values).")
+    parser.add_argument("--tree", default="annotated_tree", help="Base name for annotated tree files. Three trees will be generated with suffixes: _au.nwk (AU p-values), _delta_lnl.nwk (likelihood differences), and _combined.nwk (both values).")
     parser.add_argument("--site-analysis", action="store_true", help="Perform site-specific likelihood analysis to identify supporting/conflicting sites for each branch.")
     parser.add_argument("--data-type", default="dna", choices=["dna", "protein", "discrete"], help="Type of sequence data.")
     # Model parameter overrides

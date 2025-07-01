@@ -237,7 +237,7 @@ options:
   --paup PAUP           Path to PAUP* executable. (default: paup)
   --output OUTPUT       Output file for summary results. (default: ml_decay_indices.txt)
   --tree TREE           Base name for annotated tree files. Three trees will be generated with suffixes: _au.nwk (AU p-values), 
-                        _lnl.nwk (likelihood differences), and _combined.nwk (both values). (default: annotated_tree)
+                        _delta_lnl.nwk (likelihood differences), and _combined.nwk (both values). (default: annotated_tree)
   --data-type {dna,protein,discrete}
                         Type of sequence data. (default: dna)
   --site-analysis       Perform site-specific likelihood analysis to identify supporting/conflicting sites for each branch. (default: False)
@@ -397,7 +397,7 @@ A tab-delimited text file containing:
     *   `Num_Taxa`: Number of taxa in the clade defined by this branch.
     *   **ML Metrics** (when ML analysis is performed):
         *   `Constrained_lnL`: Log-likelihood of the best tree found when this clade was constrained to be non-monophyletic.
-        *   `LnL_Diff_from_ML`: Difference between `Constrained_lnL` and the ML tree's likelihood.
+        *   `Delta_LnL`: Log-likelihood difference (ΔlnL) between the constrained tree and the ML tree (constrained_lnL - ML_lnL).
         *   `AU_p-value`: The p-value from the Approximately Unbiased test.
         *   `Significant_AU (p<0.05)`: "Yes" if AU p-value < 0.05, "No" otherwise.
     *   **Bayesian Metrics** (when Bayesian analysis is performed):
@@ -409,12 +409,12 @@ A tab-delimited text file containing:
 ### Annotated Trees
 panDecay generates several different annotated tree files:
 * `<tree_base>_au.nwk`: Tree with AU test p-values as branch labels
-* `<tree_base>_lnl.nwk`: Tree with log-likelihood differences as branch labels
-* `<tree_base>_combined.nwk`: Tree with both values as branch labels in the format "AU:0.95|LnL:2.34"
+* `<tree_base>_delta_lnl.nwk`: Tree with log-likelihood differences (ΔlnL) as branch labels
+* `<tree_base>_combined.nwk`: Tree with both values as branch labels in the format "AU:0.95|ΔlnL:2.34"
 
 If bootstrap analysis is performed, additional tree files:
 * `<tree_base>_bootstrap.nwk`: Tree with bootstrap support values
-* `<tree_base>_comprehensive.nwk`: Tree with bootstrap values, AU test p-values, and log-likelihood differences combined in format "BS:80|AU:0.95|LnL:2.34"
+* `<tree_base>_comprehensive.nwk`: Tree with bootstrap values, AU test p-values, and log-likelihood differences combined in format "BS:80|AU:0.95|ΔlnL:2.34"
 
 These trees can be visualized in standard tree viewers like [FigTree](https://github.com/rambaut/figtree/), [Dendroscope](https://github.com/husonlab/dendroscope3), [iTOL](https://itol.embl.de/), etc. The combined tree is particularly suited for FigTree which handles string labels well.
 <!-- FigTree visualization image would go here -->
@@ -434,7 +434,7 @@ This feature allows you to identify which alignment positions support or conflic
 
 ### Visualizations (Optional)
 If `--visualize` is used, static plots are generated (requires `matplotlib` and `seaborn`):
-*   **Support Distribution Plot** (`<output_stem>_dist_au.<viz_format>` and `<output_stem>_dist_lnl.<viz_format>`): Histograms showing the distribution of AU p-values and LNL differences across all tested branches.
+*   **Support Distribution Plot** (`<output_stem>_dist_au.<viz_format>` and `<output_stem>_dist_delta_lnl.<viz_format>`): Histograms showing the distribution of AU p-values and ΔlnL values across all tested branches.
 
 # Understanding the Site Analysis Plots in panDecay
 
@@ -753,9 +753,9 @@ python3 panDecay.py --config my_analysis.ini
 
 *   **ML Tree Log-Likelihood:** The baseline score for your optimal tree.
 *   **Constrained Log-Likelihood (`Constrained_lnL`):** The score of the best tree found when a particular clade was forced to be non-monophyletic. This score will typically be worse (more positive, since they are -lnL) than the ML tree's score.
-*   **Log-Likelihood Difference (`LnL_Diff_from_ML`):**
+*   **Log-Likelihood Difference (`Delta_LnL` or `ΔlnL`):**
     *   Calculated as `Constrained_lnL - ML_lnL`.
-    *   A larger positive value (i.e., the constrained tree is much worse) indicates stronger support for the original clade. This is the "decay" value in the likelihood sense.
+    *   A larger positive value (i.e., the constrained tree has much worse likelihood) indicates stronger support for the original clade. This is the "decay" value in the likelihood sense.
 *   **AU p-value:**
     *   Tests the null hypothesis that the ML tree is not significantly better than the constrained alternative tree (where the clade is broken).
     *   A **low p-value (e.g., < 0.05)** leads to rejecting the null hypothesis. This means the constrained tree is significantly worse, providing statistical support for the original clade's monophyly.
@@ -763,7 +763,7 @@ python3 panDecay.py --config my_analysis.ini
 *   **Bootstrap Value (if bootstrap analysis performed):**
     *   Percentage of bootstrap replicates in which the clade appears.
     *   Higher values (e.g., > 70%) indicate stronger support.
-    *   Bootstrap is a widely-used and well-understood method, providing a complementary measure of support to the AU test and LnL differences.
+    *   Bootstrap is a widely-used and well-understood method, providing a complementary measure of support to the AU test and ΔlnL values.
 *   **Bayesian Decay (BD):**
     *   The primary metric for Bayesian support: marginal log-likelihood difference (unconstrained - constrained)
     *   **Key insight**: In phylogenetic topology testing, BD values typically closely approximate ML log-likelihood differences
@@ -788,7 +788,7 @@ python3 panDecay.py --config my_analysis.ini
 * **Positive delta lnL values** indicate sites that conflict with the branch (they become more likely when the branch is removed).
 * **Values near zero** indicate sites that are neutral regarding this branch.
 
-Generally, clades with large positive `LnL_Diff_from_ML` values, low `AU_p-value`s, high bootstrap values, and many supporting sites are considered well-supported.
+Generally, clades with large positive `ΔlnL` values, low `AU_p-value`s, high bootstrap values, and many supporting sites are considered well-supported.
 
 ## Troubleshooting
 
