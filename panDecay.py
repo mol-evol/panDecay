@@ -1026,8 +1026,7 @@ class panDecayIndices:
         bayesian_results = {}
         
         # Get all clades from ML tree (same as in ML analysis)
-        internal_nodes = [node for node in self.ml_tree.get_nonterminals() 
-                         if node is not self.ml_tree.root]
+        internal_clades = [cl for cl in self.ml_tree.get_nonterminals() if cl and cl.clades]
         
         # Parse user constraints if constraint mode is not "all"
         user_constraints = []
@@ -1038,15 +1037,22 @@ class panDecayIndices:
                 return {}
             logger.info(f"Parsed {len(user_constraints)} user-defined constraints for Bayesian analysis")
         
-        for idx, node in enumerate(internal_nodes, start=3):
-            clade_taxa = [term.name for term in node.get_terminals()]
-            clade_id = f"Clade_{idx}"
+        for i, clade_obj in enumerate(internal_clades):
+            clade_log_idx = i + 1  # For filenames and logging (1-based)
+            clade_taxa = [leaf.name for leaf in clade_obj.get_terminals()]
+            total_taxa_count = len(self.ml_tree.get_terminals())
+            
+            # Skip trivial branches (consistent with ML analysis)
+            if len(clade_taxa) <= 1 or len(clade_taxa) >= total_taxa_count - 1:
+                logger.info(f"Skipping trivial branch {clade_log_idx} (taxa: {len(clade_taxa)}/{total_taxa_count}).")
+                continue
             
             # Check if this clade should be tested based on constraint mode
             if not self.should_test_clade(clade_taxa, user_constraints):
-                logger.info(f"Skipping {clade_id} based on constraint mode '{self.constraint_mode}'")
+                logger.info(f"Skipping branch {clade_log_idx} based on constraint mode '{self.constraint_mode}'")
                 continue
             
+            clade_id = f"Clade_{clade_log_idx}"
             logger.info(f"Running Bayesian constraint analysis for {clade_id} (taxa: {len(clade_taxa)})")
             
             # Create constrained NEXUS file
@@ -1056,17 +1062,17 @@ class panDecayIndices:
             )
             combined_nexus = nexus_content + "\n" + mrbayes_block
             
-            constrained_nexus = self.temp_path / f"c_{idx}.nex"
+            constrained_nexus = self.temp_path / f"c_{clade_log_idx}.nex"
             constrained_nexus.write_text(combined_nexus)
             
             # Debug: save first constraint file for inspection
-            if idx == 3 and self.debug:
+            if clade_log_idx == 3 and self.debug:
                 debug_copy = self.temp_path.parent / "debug_mrbayes_constraint.nex"
                 debug_copy.write_text(combined_nexus)
                 logger.info(f"Debug: Saved constraint file to {debug_copy}")
             
             # Run constrained analysis
-            constrained_ml = self._run_mrbayes(constrained_nexus, f"c_{idx}")
+            constrained_ml = self._run_mrbayes(constrained_nexus, f"c_{clade_log_idx}")
             
             if constrained_ml is not None:
                 # Calculate Bayesian decay (marginal likelihood difference)
@@ -1593,6 +1599,7 @@ class panDecayIndices:
                     return {}
             
             branches = self._identify_testable_branches()
+            total_taxa_count = len(self.ml_tree.get_terminals())
             
             # Parse user constraints if constraint mode is not "all"
             user_constraints = []
@@ -1603,28 +1610,23 @@ class panDecayIndices:
                     return {}
                 logger.info(f"Parsed {len(user_constraints)} user-defined constraints for parsimony analysis")
             
-            # Process branches to extract taxon names
-            processed_branches = []
-            for clade in branches:
-                if clade and clade.clades:
-                    clade_taxa_names = [term.name for term in clade.get_terminals()]
-                    processed_branches.append((clade, clade_taxa_names))
-            
-            for idx, (node, clade_taxa) in enumerate(processed_branches, 1):
-                clade_id = f"Clade_{idx + 2}"  # Same numbering as ML analysis
+            # Process branches with same logic as ML analysis
+            for i, clade_obj in enumerate(branches):
+                clade_log_idx = i + 1  # For filenames and logging (1-based)
+                clade_taxa = [leaf.name for leaf in clade_obj.get_terminals()]
+                clade_id = f"Clade_{clade_log_idx}"
                 
-                # Skip trivial branches
-                num_taxa = len(clade_taxa)
-                total_taxa = len(self.alignment)
-                if num_taxa <= 1 or num_taxa >= total_taxa - 1:
+                # Skip trivial branches (consistent with ML analysis)
+                if len(clade_taxa) <= 1 or len(clade_taxa) >= total_taxa_count - 1:
+                    logger.info(f"Skipping trivial branch {clade_log_idx} (taxa: {len(clade_taxa)}/{total_taxa_count}).")
                     continue
                 
                 # Check if this clade should be tested based on constraint mode
                 if not self.should_test_clade(clade_taxa, user_constraints):
-                    logger.info(f"Skipping {clade_id} based on constraint mode '{self.constraint_mode}'")
+                    logger.info(f"Skipping branch {clade_log_idx} based on constraint mode '{self.constraint_mode}'")
                     continue
                 
-                logger.info(f"Calculating parsimony decay for {clade_id} ({num_taxa} taxa)")
+                logger.info(f"Calculating parsimony decay for {clade_id} ({len(clade_taxa)} taxa)")
                 
                 # Create constraint forcing non-monophyly
                 # Format taxa names for PAUP* constraint syntax
@@ -1636,19 +1638,19 @@ class panDecayIndices:
                     f"set criterion=parsimony;",
                     f"constraint broken_clade (MONOPHYLY) = {clade_spec}",
                     f"hsearch start=stepwise addseq=random nreps=10 swap=tbr multrees=yes enforce=yes converse=yes constraints=broken_clade;",
-                    f"savetrees file=pars_constraint_{idx}.tre replace=yes;",
-                    f"pscores 1 / scorefile=pars_constraint_score_{idx}.txt replace=yes;"
+                    f"savetrees file=pars_constraint_{clade_log_idx}.tre replace=yes;",
+                    f"pscores 1 / scorefile=pars_constraint_score_{clade_log_idx}.txt replace=yes;"
                 ]
                 
                 constraint_script = f"#NEXUS\nbegin paup;\n" + "\n".join(constraint_cmds) + "\nquit;\nend;\n"
-                constraint_path = self.temp_path / f"pars_constraint_{idx}.nex"
+                constraint_path = self.temp_path / f"pars_constraint_{clade_log_idx}.nex"
                 constraint_path.write_text(constraint_script)
                 
                 try:
-                    self._run_paup_command_file(f"pars_constraint_{idx}.nex", f"paup_pars_constraint_{idx}.log")
+                    self._run_paup_command_file(f"pars_constraint_{clade_log_idx}.nex", f"paup_pars_constraint_{clade_log_idx}.log")
                     
                     # Parse constrained score
-                    constrained_score_path = self.temp_path / f"pars_constraint_score_{idx}.txt"
+                    constrained_score_path = self.temp_path / f"pars_constraint_score_{clade_log_idx}.txt"
                     constrained_score = None
                     
                     if constrained_score_path.exists():
