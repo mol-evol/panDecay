@@ -7,25 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+- **HTML tree visualization functionality**
+  - Removed all HTML-based interactive tree visualization code (~600 lines)
+  - HTML visualization was causing persistent browser compatibility and CORS issues
+  - Users should use dedicated tree visualization software (e.g., FigTree) with the generated Newick files
+
 ### Fixed
-- **Interactive tree visualization now works properly**
-  - Fixed file path mismatch where HTML referenced `.nwk` files but only `.nwk.cleaned` files existed
-  - Updated JavaScript libraries from phylotree@1.0.0-alpha.3 to phylotree@1.4.2 and D3.js to v6.7.0 for better stability
-  - Improved error handling with detailed troubleshooting messages when tree files are missing
-  - Fixed file cleanup logic to preserve cleaned tree files needed by HTML visualizations
-  - Added better offline mode support with informative fallback messages
-- **User interface improvements**
-  - Consistent progress display format across ML, Bayesian, and parsimony analyses
-  - Fixed confusing progress counters (e.g., "Clade 11 of 9") to show "Testing clade X (Y of Z)"
-  - Simplified progress box styling with dashed borders for better terminal compatibility
-  - Reduced verbose output while maintaining essential information
-  - Changed default output filename from `ml_decay_indices.txt` to `pan_decay_indices.txt`
-  - Updated all output to use relative paths instead of full absolute paths
+- **MrBayes compatibility**
+  - Fixed "Could not find command 'options'" error by filtering PAUP*-specific commands from NEXUS files
+  - MrBayes now properly processes NEXUS files that contain PAUP* options blocks
+- **Program hanging issues**
+  - Fixed redundant NEXUS-to-NEXUS conversion that was causing >1000% CPU usage
+  - Resolved multiple PAUP* processes spawning issue
+- **Documentation accuracy**
+  - Updated Bayesian analysis default from harmonic mean to stepping-stone sampling
+  - Added missing command-line arguments (MPI, BEAGLE, visualization options)
+  - Fixed duplicate default values in help text
+  - Added annotated tree visualization example
 
 ### Changed
-- Enhanced error messages for interactive tree visualization with specific troubleshooting steps
-- Updated documentation with comprehensive troubleshooting guide for interactive visualizations
-- Improved progress tracking logic to pre-calculate testable branches for accurate progress reporting
+- **Bayesian decay interpretation guidance**
+  - Removed arbitrary cutoff values (0-2, 2-5, 5-10, >10)
+  - Now emphasizes comparative interpretation across branches
+  - Recommends evaluating BD values alongside other support metrics
+  - Notes that BD values may scale with alignment properties
+- **Documentation improvements**
+  - Added visual examples including annotated tree and site-specific analysis plots
+  - Updated tree format documentation to match actual FigTree output
+  - Clarified that strong support is best identified through concordance across multiple metrics
 
 ## [1.1.0] - 2025-06-29
 
