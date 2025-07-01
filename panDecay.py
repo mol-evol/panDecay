@@ -366,7 +366,7 @@ class panDecayIndices:
             logger.error(f"PAUP* command file not found: {paup_cmd_file}")
             raise FileNotFoundError(f"PAUP* command file not found: {paup_cmd_file}")
 
-        logger.info(f"Running PAUP* command file: {paup_cmd_filename_str} (Log: {log_filename_str})")
+        logger.debug(f"Running PAUP* command file: {paup_cmd_filename_str} (Log: {log_filename_str})")
 
         # stdout_content and stderr_content will be filled for logging/debugging if needed
         stdout_capture = ""
@@ -585,7 +585,7 @@ class panDecayIndices:
                     logger.debug(f"Original tree content: '{content}'")
                     logger.debug(f"Cleaned tree content: '{clean_content}'")
 
-                logger.info(f"Cleaned tree file {tree_path} - removed metadata after semicolon")
+                logger.debug(f"Cleaned tree file {tree_path} - removed metadata after semicolon")
                 return cleaned_path
 
             return tree_path  # No cleaning needed
@@ -898,7 +898,7 @@ class panDecayIndices:
                 # Standard MrBayes command
                 cmd = [self.mrbayes_path, nexus_filename]
             
-            logger.info(f"Running MrBayes: {' '.join(cmd)} in directory {self.temp_path}")
+            logger.debug(f"Running MrBayes: {' '.join(cmd)} in directory {self.temp_path}")
             logger.debug(f"Working directory: {self.temp_path}")
             logger.debug(f"NEXUS file: {nexus_file}")
             
@@ -922,8 +922,8 @@ class panDecayIndices:
                         logger.error(f"MrBayes error: {line}")
                 return None
             
-            # Log successful completion
-            logger.info(f"MrBayes completed successfully for {output_prefix}")
+            # Log successful completion at debug level to avoid redundancy
+            logger.debug(f"MrBayes completed successfully for {output_prefix}")
             
             # Parse marginal likelihood from output
             ml_value = None
@@ -1280,7 +1280,7 @@ class panDecayIndices:
             if found_data:
                 # Average the marginal likelihoods from both runs
                 ml_value = (run1_sum + run2_sum) / 2.0
-                logger.info(f"Calculated stepping-stone marginal likelihood for {output_prefix}: {ml_value}")
+                logger.debug(f"Calculated stepping-stone marginal likelihood for {output_prefix}: {ml_value}")
                 logger.debug(f"Run1 ML: {run1_sum}, Run2 ML: {run2_sum}")
                 return ml_value
             
@@ -1661,6 +1661,13 @@ class panDecayIndices:
                     parts.append(f"{key}:{val}")
             return " ".join(parts) if len(parts) > 2 else clade_id
     
+    def _get_display_path(self, path):
+        """Get a display-friendly path (relative if possible, otherwise absolute)."""
+        try:
+            return str(path.relative_to(Path.cwd()))
+        except ValueError:
+            return str(path)
+    
     def _format_progress_bar(self, current, total, width=30, elapsed_time=None):
         """Format a progress bar with percentage and time estimate."""
         if self.output_style == "minimal":
@@ -1976,16 +1983,16 @@ class panDecayIndices:
         if not self.check_convergence:
             return True
         
-        # Log convergence metrics
-        logger.info(f"Convergence diagnostics for {output_prefix}:")
+        # Log convergence metrics at debug level (main info shown in results box)
+        logger.debug(f"Convergence diagnostics for {output_prefix}:")
         if convergence_data['min_ess'] is not None:
-            logger.info(f"  Minimum ESS: {convergence_data['min_ess']:.0f}")
+            logger.debug(f"  Minimum ESS: {convergence_data['min_ess']:.0f}")
         if convergence_data['max_psrf'] is not None:
-            logger.info(f"  Maximum PSRF: {convergence_data['max_psrf']:.3f}")
+            logger.debug(f"  Maximum PSRF: {convergence_data['max_psrf']:.3f}")
         if convergence_data['asdsf'] is not None:
-            logger.info(f"  Final ASDSF: {convergence_data['asdsf']:.6f}")
+            logger.debug(f"  Final ASDSF: {convergence_data['asdsf']:.6f}")
         
-        # Log warnings
+        # Log warnings at warning level
         for warning in convergence_data['warnings']:
             logger.warning(f"  ⚠️  {warning}")
         
@@ -3188,7 +3195,7 @@ class panDecayIndices:
                         annotated_nodes_count += 1
 
                 Phylo.write(au_tree, str(au_tree_path), "newick")
-                logger.info(f"Annotated tree with {annotated_nodes_count} branch values written to {au_tree_path} (type: au).")
+                logger.info(f"Annotated tree with {annotated_nodes_count} branch values written to {self._get_display_path(au_tree_path)} (type: au).")
                 tree_files['au'] = au_tree_path
             except Exception as e:
                 logger.error(f"Failed to create AU tree: {e}")
@@ -3222,7 +3229,7 @@ class panDecayIndices:
                         annotated_nodes_count += 1
 
                 Phylo.write(lnl_tree, str(lnl_tree_path), "newick")
-                logger.info(f"Annotated tree with {annotated_nodes_count} branch values written to {lnl_tree_path} (type: delta_lnl).")
+                logger.info(f"Annotated tree with {annotated_nodes_count} branch values written to {self._get_display_path(lnl_tree_path)} (type: delta_lnl).")
                 tree_files['lnl'] = lnl_tree_path
             except Exception as e:
                 logger.error(f"Failed to create LNL tree: {e}")
@@ -3336,7 +3343,7 @@ class panDecayIndices:
                 # Write the modified tree
                 Phylo.write(combined_tree, str(combined_tree_path), "newick")
 
-                logger.info(f"Annotated tree with {annotated_nodes_count} branch values written to {combined_tree_path} (type: combined).")
+                logger.info(f"Annotated tree with {annotated_nodes_count} branch values written to {self._get_display_path(combined_tree_path)} (type: combined).")
                 tree_files['combined'] = combined_tree_path
             except Exception as e:
                 logger.error(f"Failed to create combined tree: {e}")
@@ -3374,7 +3381,7 @@ class panDecayIndices:
                     
                     # Write the ML tree with bootstrap values
                     Phylo.write(ml_tree_for_bootstrap, str(bootstrap_tree_path), "newick")
-                    logger.info(f"Bootstrap tree (ML topology with bootstrap values) written to {bootstrap_tree_path}")
+                    logger.info(f"Bootstrap tree (ML topology with bootstrap values) written to {self._get_display_path(bootstrap_tree_path)}")
                     tree_files['bootstrap'] = bootstrap_tree_path
                 except Exception as e:
                     logger.error(f"Failed to write bootstrap tree: {e}")
@@ -3476,7 +3483,7 @@ class panDecayIndices:
 
                     # Write the tree
                     Phylo.write(comprehensive_tree, str(comprehensive_tree_path), "newick")
-                    logger.info(f"Comprehensive tree with {annotated_nodes_count} branch values written to {comprehensive_tree_path}")
+                    logger.info(f"Comprehensive tree with {annotated_nodes_count} branch values written to {self._get_display_path(comprehensive_tree_path)}")
                     tree_files['comprehensive'] = comprehensive_tree_path
                 except Exception as e:
                     logger.error(f"Failed to create comprehensive tree: {e}")
@@ -3515,7 +3522,7 @@ class panDecayIndices:
                             annotated_nodes_count += 1
 
                     Phylo.write(bd_tree, str(bayes_decay_tree_path), "newick")
-                    logger.info(f"Annotated tree with {annotated_nodes_count} Bayes decay values written to {bayes_decay_tree_path}")
+                    logger.info(f"Annotated tree with {annotated_nodes_count} Bayes decay values written to {self._get_display_path(bayes_decay_tree_path)}")
                     tree_files['bayes_decay'] = bayes_decay_tree_path
                 except Exception as e:
                     logger.error(f"Failed to create Bayes decay tree: {e}")
@@ -3558,7 +3565,7 @@ class panDecayIndices:
                             annotated_nodes_count += 1
 
                     Phylo.write(bf_tree, str(bayes_factor_tree_path), "newick")
-                    logger.info(f"Annotated tree with {annotated_nodes_count} Bayes factor values written to {bayes_factor_tree_path}")
+                    logger.info(f"Annotated tree with {annotated_nodes_count} Bayes factor values written to {self._get_display_path(bayes_factor_tree_path)}")
                     tree_files['bayes_factor'] = bayes_factor_tree_path
                 except Exception as e:
                     logger.error(f"Failed to create Bayes factor tree: {e}")
@@ -3798,7 +3805,7 @@ class panDecayIndices:
                     line_len += len(taxon)
                 f.write("\n\n")
         
-        logger.info(f"Results written to {output_path}")
+        logger.info(f"Results written to {self._get_display_path(output_path)}")
     
     def write_results(self, output_path: Path):
         if not self.decay_indices:
@@ -3950,7 +3957,7 @@ class panDecayIndices:
                 row_parts = [str(item) for item in row_parts]
                 f.write("\t".join(row_parts) + "\n")
 
-        logger.info(f"Results written to {output_path}")
+        logger.info(f"Results written to {self._get_display_path(output_path)}")
 
     def generate_detailed_report(self, output_path: Path):
         # Basic check
@@ -4276,7 +4283,7 @@ class panDecayIndices:
                 f.write("- Use the phylogenetic-specific BD interpretation scale provided above\n")
                 f.write("- Compare relative BD values across branches rather than focusing on absolute values\n")
                 
-        logger.info(f"Detailed report written to {output_path}")
+        logger.info(f"Detailed report written to {self._get_display_path(output_path)}")
 
     def write_site_analysis_results(self, output_dir: Path, keep_tree_files=False):
         """
@@ -4329,7 +4336,7 @@ class panDecayIndices:
 
                 f.write(f"{clade_id}\t{supporting}\t{conflicting}\t{neutral}\t{ratio_str}\t{sum_supporting:.4f}\t{sum_conflicting:.4f}\t{weighted_ratio_str}\n")
 
-        logger.info(f"Site analysis summary written to {summary_path}")
+        logger.info(f"Site analysis summary written to {self._get_display_path(summary_path)}")
 
         # For each branch, write detailed site data
         for clade_id, data in self.decay_indices.items():
@@ -4361,7 +4368,7 @@ class panDecayIndices:
 
                         f.write(f"{site_num}\t{ml_lnl:.6f}\t{constrained_lnl:.6f}\t{delta_lnl:.6f}\t{supports}\n")
 
-            logger.info(f"Detailed site data for {clade_id} written to {site_data_path}")
+            logger.info(f"Detailed site data for {clade_id} written to {self._get_display_path(site_data_path)}")
 
         # Generate site analysis visualizations
         try:
@@ -5043,6 +5050,13 @@ class panDecayIndices:
 
 
 # --- Main Execution Logic ---
+def get_display_path(path):
+    """Get a display-friendly path (relative if possible, otherwise absolute)."""
+    try:
+        return str(Path(path).relative_to(Path.cwd()))
+    except ValueError:
+        return str(path)
+
 def print_runtime_parameters(args_ns, model_str_for_print):
     """Prints a summary of runtime parameters."""
     # (args_ns is the namespace from argparse.ArgumentParser)
@@ -5751,7 +5765,7 @@ def main():
                     if 'site_data' in data:
                         site_output_dir = Path(args.output).parent / f"{Path(args.output).stem}_site_analysis"
                         decay_calc.write_site_analysis_results(site_output_dir)
-                        logger.info(f"Site-specific analysis results written to {site_output_dir}")
+                        logger.info(f"Site-specific analysis results written to {get_display_path(site_output_dir)}")
                         break  # Only need to do this once if any site_data exists
 
             output_main_path = Path(args.output)
@@ -5767,7 +5781,7 @@ def main():
             if tree_files:
                 logger.info(f"Successfully created {len(tree_files)} annotated trees.")
                 for tree_type, path in tree_files.items():
-                    logger.info(f"  - {tree_type} tree: {path}")
+                    logger.info(f"  - {tree_type} tree: {get_display_path(path)}")
             else:
                 logger.warning("Failed to create annotated trees.")
 
@@ -5796,7 +5810,7 @@ def main():
 
                     site_output_dir = output_main_path.parent / f"{output_main_path.stem}_site_analysis"
                     decay_calc.write_site_analysis_results(site_output_dir, keep_tree_files=args.keep_tree_files)
-                    logger.info(f"Site-specific analysis results written to {site_output_dir}")
+                    logger.info(f"Site-specific analysis results written to {get_display_path(site_output_dir)}")
 
             decay_calc.cleanup_intermediate_files()
             logger.info("panDecay analysis completed successfully.")
