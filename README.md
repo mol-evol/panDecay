@@ -320,6 +320,11 @@ Visualization Output (optional):
   --visualize           Generate static visualization plots (requires matplotlib, seaborn). (default: False)
   --viz-format {png,pdf,svg}
                         Format for static visualizations. (default: png)
+  --html-trees          Generate interactive HTML tree visualizations for site analysis (default: True)
+  --no-html-trees       Disable HTML tree generation
+  --js-cdn              Use CDN for JavaScript libraries in HTML visualizations (requires internet; default: True)
+  --no-js-cdn           Disable CDN usage (HTML trees will show offline message)
+  --keep-tree-files     Keep Newick tree files needed for HTML visualizations (default: False)
 
 Configuration and Constraint Options:
   --config CONFIG       Read parameters from configuration file (INI format)
@@ -438,8 +443,27 @@ If `--site-analysis` is used, additional output files are generated in a directo
 2. **`site_data_Clade_X.txt`**: For each branch, detailed site-by-site likelihood differences.
 3. **`site_plot_Clade_X.png`**: Visualization of site-specific support/conflict (if matplotlib is available).
 4. **`site_hist_Clade_X.png`**: Histogram showing the distribution of site likelihood differences.
+5. **`tree_Clade_X.html`**: Interactive tree visualization for each clade (if `--visualize` is used).
 
 This feature allows you to identify which alignment positions support or conflict with each branch in the tree.
+
+### Interactive Tree Visualizations
+When using `--site-analysis --visualize`, panDecay generates interactive HTML tree visualizations for each tested clade:
+
+* **`tree_Clade_X.html`**: Interactive tree viewer highlighting the specific clade
+* Features:
+  - **Zoom and pan**: Navigate large trees easily
+  - **Highlighted clades**: The tested clade is shown in red
+  - **Toggle labels**: Show/hide taxon names
+  - **Export options**: Download tree as SVG or Newick format
+  - **Clade information**: View support values, site analysis results, and bootstrap values
+  
+**Important**: For functional HTML visualizations, you must use `--keep-tree-files` or `--debug` to preserve the necessary tree files:
+```bash
+python3 panDecay.py alignment.fas --site-analysis --visualize --keep-tree-files
+```
+
+The HTML files use modern JavaScript libraries (D3.js v6.7.0 and phylotree v1.4.2) loaded via CDN by default. For offline use, add `--no-js-cdn` (visualization will show an informative message).
 
 ### Visualizations (Optional)
 If `--visualize` is used, static plots are generated (requires `matplotlib` and `seaborn`):
@@ -588,6 +612,26 @@ python3 panDecay.py alignment.fas --model GTR --gamma --site-analysis --visualiz
 ```
 
 This will generate site-specific likelihood analyses in addition to the standard branch support results.
+
+### Example 7a: Interactive Tree Visualizations
+Generate interactive HTML tree visualizations with site analysis:
+
+```bash
+# Essential: use --keep-tree-files for functional HTML visualizations
+python3 panDecay.py alignment.fas --model GTR --gamma --site-analysis \
+    --visualize --keep-tree-files --output interactive_results.txt
+```
+
+This creates `interactive_results_site_analysis/` directory with:
+- Static plots (PNG): `site_plot_Clade_X.png`, `site_hist_Clade_X.png`
+- Interactive HTML trees: `tree_Clade_X.html` (requires internet for JS libraries)
+- Tree data files: `tree_Clade_X.nwk.cleaned`
+
+For offline use without CDN dependencies:
+```bash
+python3 panDecay.py alignment.fas --model GTR --gamma --site-analysis \
+    --visualize --keep-tree-files --no-js-cdn --output offline_results.txt
+```
 
 ### Example 8: Bootstrap Analysis
 Perform bootstrap analysis (100 replicates by default) alongside ML decay indices:
@@ -818,6 +862,14 @@ Generally, clades with large positive `ΔlnL` values, low `AU_p-value`s, high bo
     *   Path errors with spaces: panDecay handles paths with spaces automatically by using relative paths for MrBayes execution.
     *   No Bayesian output: Check the debug log for specific errors. Ensure your alignment is compatible with MrBayes (e.g., taxon names without special characters).
 *   **Bayesian analysis takes too long**: Reduce the number of generations (`--bayes-ngen 50000`) or increase sampling frequency (`--bayes-sample-freq 500`) for testing. Production runs typically need at least 1 million generations.
+*   **Interactive tree visualization not working**: 
+    *   **Tree not displaying in HTML files**: The most common issue is missing tree files. The HTML requires both the `.html` file and the corresponding `.nwk.cleaned` file in the same directory. If using `--no-keep-tree-files`, the visualization may not work.
+    *   **Use `--keep-tree-files`**: Always use this option when you want functional HTML visualizations: `--site-analysis --visualize --keep-tree-files`
+    *   **Browser compatibility**: Modern browsers (Chrome, Firefox, Safari, Edge) are recommended. Ensure JavaScript is enabled.
+    *   **Network requirements**: Online mode (`--js-cdn`, default) requires internet connection to load D3.js and phylotree libraries. For offline use, use `--no-js-cdn` but note that visualization will be disabled with a helpful message.
+    *   **File protocol limitations**: Some browsers restrict file:// URLs. If opening HTML files locally, consider using a simple web server: `python3 -m http.server 8000` in the results directory, then open `http://localhost:8000/tree_Clade_X.html`
+    *   **Console errors**: Open browser developer tools (F12) and check the console for detailed error messages. Common issues include network timeouts or JavaScript parsing errors.
+    *   **Library incompatibility**: panDecay uses D3.js v6.7.0 and phylotree v1.4.2. If these versions become unavailable, the visualization may fail. Check the browser console for specific library loading errors.
 
 ## Understanding Bayes Factors in Phylogenetic Topology Testing
 

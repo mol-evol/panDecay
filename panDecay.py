@@ -4509,12 +4509,16 @@ class panDecayIndices:
                         logger.info(f"Interactive tree visualization for {clade_id} created at {html_path}")
 
                 if not keep_tree_files and not self.debug and not self.keep_files:
+                    # Only delete original .nwk files, keep .nwk.cleaned files for HTML
                     for file_path in output_dir.glob("tree_*.nwk"):
-                        try:
-                            file_path.unlink()
-                            logger.debug(f"Deleted tree file for HTML: {file_path}")
-                        except Exception as e:
-                            logger.warning(f"Failed to delete tree file {file_path}: {e}")
+                        if not file_path.name.endswith('.cleaned'):
+                            try:
+                                file_path.unlink()
+                                logger.debug(f"Deleted original tree file: {file_path}")
+                            except Exception as e:
+                                logger.warning(f"Failed to delete tree file {file_path}: {e}")
+                        else:
+                            logger.debug(f"Kept cleaned tree file for HTML: {file_path}")
 
         except ImportError:
             logger.warning("Matplotlib/seaborn not available for site analysis visualization.")
@@ -4582,6 +4586,9 @@ class panDecayIndices:
 
             # Clean up the tree file if needed
             cleaned_tree_path = self._clean_newick_tree(tree_path)
+            
+            # Use the cleaned tree path for HTML references
+            final_tree_path = cleaned_tree_path if cleaned_tree_path != tree_path else tree_path
 
             # Get tree statistics
             total_taxa = len(self.ml_tree.get_terminals())
@@ -4784,11 +4791,17 @@ class panDecayIndices:
             # JavaScript imports based on CDN preference
             use_cdn = getattr(self, 'js_cdn', True)
             if use_cdn:
-                html_parts.append("""    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
-        <script src="https://cdn.jsdelivr.net/npm/phylotree@1.0.0-alpha.3/dist/phylotree.js"></script>""")
+                html_parts.append("""    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/6.7.0/d3.min.js" integrity="sha512-cd6CHE+XWDQ33ElJqsi0MdNte3S+bQY819f7p3NUHgwQQLXSKjE4cPZTeGNI+vaxZynk1wVU3hoHmow3m089wA==" crossorigin="anonymous"></script>
+        <script src="https://cdn.jsdelivr.net/npm/phylotree@1.4.2/dist/phylotree.min.js"></script>""")
             else:
-                html_parts.append("""    <!-- Embedded D3 and Phylotree libraries would go here -->
-        <!-- This would make the file much larger -->""")
+                html_parts.append("""    <!-- Note: Offline mode requires local library files -->
+        <!-- For offline use, download d3.min.js and phylotree.min.js locally -->
+        <script>
+            document.getElementById('tree_container').innerHTML = 
+                '<div style="padding:20px;color:#666;border:2px dashed #ccc;text-align:center;">' +
+                '<h3>Offline Mode</h3><p>Interactive visualization requires online libraries.<br>' +
+                'Use --js-cdn to enable online libraries or download tree file below.</p></div>';
+        </script>""")
 
             html_parts.append("</head>")
             html_parts.append("<body>")
@@ -4860,7 +4873,7 @@ class panDecayIndices:
             # Download section
             html_parts.append("            <h3>Downloads</h3>")
             html_parts.append("            <div class=\"download-links\">")
-            html_parts.append(f"                <a href=\"{tree_path.name}\" download>Download Newick Tree</a>")
+            html_parts.append(f"                <a href=\"{final_tree_path.name}\" download>Download Newick Tree</a>")
             html_parts.append("                <a href=\"#\" onclick=\"saveSvg()\">Download SVG</a>")
             html_parts.append("            </div>")
             html_parts.append("        </div>")
@@ -4872,7 +4885,7 @@ class panDecayIndices:
             html_parts.append(f"        const highlightTaxa = {json.dumps(list(highlight_taxa))};")
             html_parts.append("")
             html_parts.append("        // Create tree")
-            tree_path_js = str(tree_path.name).replace('\\', '/')
+            tree_path_js = str(final_tree_path.name).replace('\\', '/')
             html_parts.append(f"        let tree = new phylotree.phylotree(\"{tree_path_js}\");")
             html_parts.append("        let showLabels = true;")
             html_parts.append("")
@@ -4921,8 +4934,17 @@ class panDecayIndices:
             html_parts.append("            })")
             html_parts.append("            .catch(error => {")
             html_parts.append("                console.error(\"Error loading tree data:\", error);")
+            html_parts.append("                const errorMsg = error.message === 'Tree file not found' ?")
+            html_parts.append(f"                    'Tree file \"{tree_path_js}\" not found. Check that files were saved correctly.' :")
+            html_parts.append("                    'Failed to load or parse tree data: ' + error.message;")
             html_parts.append("                document.getElementById('tree_container').innerHTML =")
-            html_parts.append("                    \"<p style='color:red;padding:20px;'>Error loading tree data. Check console for details.</p>\";")
+            html_parts.append("                    '<div style=\"padding:20px;color:#d32f2f;border:2px solid #ffcdd2;background:#ffebee;border-radius:4px;\">' +")
+            html_parts.append("                    '<h4 style=\"margin-top:0;\">Visualization Error</h4><p>' + errorMsg + '</p>' +")
+            html_parts.append("                    '<p><strong>Troubleshooting:</strong></p><ul>' +")
+            html_parts.append("                    '<li>Ensure the HTML file is in the same directory as the tree file</li>' +")
+            html_parts.append("                    '<li>Check browser console (F12) for detailed error messages</li>' +")
+            html_parts.append("                    '<li>Try downloading the tree file below to verify it exists</li>' +")
+            html_parts.append("                    '<li>Use a local web server instead of opening file:// URLs</li></ul></div>';")
             html_parts.append("            });")
             html_parts.append("        }")
             html_parts.append("")

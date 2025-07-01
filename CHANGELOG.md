@@ -5,6 +5,28 @@ All notable changes to panDecay will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **Interactive tree visualization now works properly**
+  - Fixed file path mismatch where HTML referenced `.nwk` files but only `.nwk.cleaned` files existed
+  - Updated JavaScript libraries from phylotree@1.0.0-alpha.3 to phylotree@1.4.2 and D3.js to v6.7.0 for better stability
+  - Improved error handling with detailed troubleshooting messages when tree files are missing
+  - Fixed file cleanup logic to preserve cleaned tree files needed by HTML visualizations
+  - Added better offline mode support with informative fallback messages
+- **User interface improvements**
+  - Consistent progress display format across ML, Bayesian, and parsimony analyses
+  - Fixed confusing progress counters (e.g., "Clade 11 of 9") to show "Testing clade X (Y of Z)"
+  - Simplified progress box styling with dashed borders for better terminal compatibility
+  - Reduced verbose output while maintaining essential information
+  - Changed default output filename from `ml_decay_indices.txt` to `pan_decay_indices.txt`
+  - Updated all output to use relative paths instead of full absolute paths
+
+### Changed
+- Enhanced error messages for interactive tree visualization with specific troubleshooting steps
+- Updated documentation with comprehensive troubleshooting guide for interactive visualizations
+- Improved progress tracking logic to pre-calculate testable branches for accurate progress reporting
+
 ## [1.1.0] - 2025-06-29
 
 ### Added
