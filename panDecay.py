@@ -1010,7 +1010,13 @@ class panDecayIndices:
             logger.warning(f"Bayesian analysis may take a long time (~{estimated_time:.0f} seconds per run)")
         
         # First, run unconstrained Bayesian analysis
-        logger.info("Running unconstrained Bayesian analysis...")
+        box_content = [
+            "Unconstrained analysis (baseline)",
+            "---",
+            "▶ Running MrBayes without constraints",
+            f"  {self.bayes_ngen:,} generations, {self.bayes_chains} chains"
+        ]
+        logger.info(self._format_progress_box("Bayesian Analysis", box_content))
         
         # Create NEXUS file with MrBayes block
         nexus_content = self.nexus_file_path.read_text()
@@ -1062,11 +1068,17 @@ class panDecayIndices:
             clade_id = f"Clade_{clade_log_idx}"
             
             # Display progress box
+            # Show first few taxa names for context
+            taxa_sample = ", ".join(clade_taxa[:2])
+            if len(clade_taxa) > 2:
+                taxa_sample += "..."
+            
             box_content = [
                 f"Clade {clade_log_idx} of {len([cl for cl in internal_clades if self._should_test_clade_wrapper(cl, user_constraints)])} • {len(clade_taxa)} taxa",
                 "---",
-                "▶ Running MrBayes...",
-                f"  Directory: .../{self.temp_path.name}"
+                f"▶ Testing constraint on: {taxa_sample}",
+                "▶ Running MrBayes with negative constraint",
+                f"  {self.bayes_ngen:,} generations, {self.bayes_chains} chains"
             ]
             logger.info(self._format_progress_box("Bayesian Analysis", box_content))
             
