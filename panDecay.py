@@ -35,9 +35,11 @@ AU_LOG_FN = "paup_au.log"
 
 class panDecayIndices:
     """
-    Implements ML-based phylogenetic decay indices (Bremer support) using PAUP*.
-    Calculates support by comparing optimal tree likelihood with constrained trees,
-    using PAUP*'s backbone constraint followed by reverse constraints and AU test.
+    Implements phylogenetic decay indices (Bremer support) using multiple approaches.
+    Calculates support by comparing optimal trees with constrained trees using:
+    - ML (Maximum Likelihood) with AU test
+    - Bayesian analysis with marginal likelihood comparisons
+    - Parsimony analysis with step differences
     """
 
     def __init__(self, alignment_file, alignment_format="fasta", model="GTR+G",
@@ -948,7 +950,7 @@ class panDecayIndices:
             if output_prefix == "unc":
                 con_tree_path = self.temp_path / f"{nexus_file.name}.con.tre"
                 if con_tree_path.exists():
-                    logger.info(f"Parsing posterior probabilities from {con_tree_path}")
+                    logger.debug(f"Parsing posterior probabilities from {con_tree_path}")
                     self.posterior_probs = self._parse_mrbayes_posterior_probs(con_tree_path)
                 else:
                     logger.warning(f"Consensus tree not found: {con_tree_path}")
@@ -1341,7 +1343,7 @@ class panDecayIndices:
             
             # Debug: log the original newick string
             if self.debug or True:  # Always log for debugging
-                logger.info(f"Original newick string: {newick_str[:300]}...")
+                logger.debug(f"Original newick string: {newick_str[:300]}...")
             
             # Remove [&U] or other tree attributes at the beginning
             if newick_str.startswith("["):
@@ -1397,7 +1399,7 @@ class panDecayIndices:
                 # Use regex to extract clades and their posterior probabilities
                 posterior_probs = self._extract_mrbayes_posterior_probs(newick_str)
                 
-                logger.info(f"Extracted posterior probabilities for {len(posterior_probs)} clades")
+                logger.debug(f"Extracted posterior probabilities for {len(posterior_probs)} clades")
                 
             except Exception as e:
                 logger.warning(f"Could not parse consensus tree with BioPython: {e}")
@@ -1849,7 +1851,7 @@ class panDecayIndices:
                 else:
                     i += 1
             
-            logger.info(f"Extracted posterior probabilities for {len(posterior_probs)} clades")
+            logger.debug(f"Extracted posterior probabilities for {len(posterior_probs)} clades")
             
             # Debug: show some extracted values
             if self.debug and posterior_probs:
@@ -2578,8 +2580,6 @@ class panDecayIndices:
         Returns:
             Dictionary of decay indices with Bayesian metrics
         """
-        logger.info("Calculating Bayesian decay indices...")
-        
         # Run Bayesian decay analysis
         bayesian_results = self.run_bayesian_decay_analysis()
         
@@ -5137,9 +5137,9 @@ format = fasta
 # Options: dna, protein, discrete
 data_type = dna
 
-# Output file prefix (default: ml_decay_indices)
+# Output file prefix (default: pan_decay_indices)
 # This will generate files like: myanalysis.txt, myanalysis_tree.nwk, etc.
-output = ml_decay_indices.txt
+output = pan_decay_indices.txt
 
 # Base name for annotated tree files (default: annotated_tree)
 tree = annotated_tree
@@ -5540,7 +5540,7 @@ def main():
     parser.add_argument("--invariable", action="store_true", help="Add invariable sites (+I) to model.")
 
     parser.add_argument("--paup", default="paup", help="Path to PAUP* executable.")
-    parser.add_argument("--output", default="ml_decay_indices.txt", help="Output file for summary results.")
+    parser.add_argument("--output", default="pan_decay_indices.txt", help="Output file for summary results.")
     parser.add_argument("--tree", default="annotated_tree", help="Base name for annotated tree files. Three trees will be generated with suffixes: _au.nwk (AU p-values), _delta_lnl.nwk (likelihood differences), and _combined.nwk (both values).")
     parser.add_argument("--site-analysis", action="store_true", help="Perform site-specific likelihood analysis to identify supporting/conflicting sites for each branch.")
     parser.add_argument("--data-type", default="dna", choices=["dna", "protein", "discrete"], help="Type of sequence data.")
