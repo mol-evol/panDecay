@@ -4455,6 +4455,37 @@ class panDecayIndices:
 
             f.write("\n## Detailed Branch Support Results\n\n")
 
+            # Add normalized support rankings if effect sizes are available
+            if has_bayesian and self.normalize_bd and any(method.startswith('effect_size') for method in self.bd_normalization_methods):
+                effect_size_data = []
+                for clade_id, data in self.decay_indices.items():
+                    # Get the primary effect size (prefer standard, then robust, then weighted)
+                    effect_size = data.get('effect_size') or data.get('effect_size_robust') or data.get('effect_size_weighted')
+                    if effect_size is not None:
+                        bd_value = data.get('bayes_decay', 0)
+                        bd_per_site = data.get('bd_per_site', 0)
+                        effect_size_data.append((clade_id, effect_size, bd_value, bd_per_site))
+                
+                if effect_size_data:
+                    # Sort by effect size (descending)
+                    effect_size_data.sort(key=lambda x: x[1], reverse=True)
+                    
+                    f.write("### Normalized Support Rankings (by Effect Size)\n\n")
+                    f.write("Effect sizes enable cross-study comparison by normalizing for dataset variability.\n\n")
+                    
+                    # Show top 5 highest effect sizes
+                    f.write("**Strongest standardized support:**\n")
+                    for i, (clade_id, es, bd, bd_ps) in enumerate(effect_size_data[:5], 1):
+                        f.write(f"{i}. {clade_id}: ES={es:.3f}, BD={bd:.2f}, BD/site={bd_ps:.6f}\n")
+                    
+                    # Show bottom 5 if we have more than 5 clades
+                    if len(effect_size_data) > 5:
+                        f.write(f"\n**Weakest standardized support:**\n")
+                        for i, (clade_id, es, bd, bd_ps) in enumerate(effect_size_data[-5:], len(effect_size_data)-4):
+                            f.write(f"{i}. {clade_id}: ES={es:.3f}, BD={bd:.2f}, BD/site={bd_ps:.6f}\n")
+                    
+                    f.write(f"\n")
+
             # Build dynamic table header based on available data
             header_parts = ["| Clade ID | Taxa Count "]
             separator_parts = ["|----------|------------ "]
@@ -4466,6 +4497,27 @@ class panDecayIndices:
             if has_bayesian:
                 header_parts.append("| Bayes Decay ")
                 separator_parts.append("|------------- ")
+                
+                # Add normalized BD metrics if enabled
+                if self.normalize_bd:
+                    if "per_site" in self.bd_normalization_methods:
+                        header_parts.append("| BD/site ")
+                        separator_parts.append("|--------- ")
+                    if "relative" in self.bd_normalization_methods:
+                        header_parts.append("| BD% ")
+                        separator_parts.append("|----- ")
+                    if "effect_size" in self.bd_normalization_methods:
+                        header_parts.append("| Effect Size ")
+                        separator_parts.append("|------------- ")
+                    if "effect_size_robust" in self.bd_normalization_methods:
+                        header_parts.append("| ES Robust ")
+                        separator_parts.append("|----------- ")
+                    if "effect_size_weighted" in self.bd_normalization_methods:
+                        header_parts.append("| ES Weighted ")
+                        separator_parts.append("|------------- ")
+                    if "signal_to_noise" in self.bd_normalization_methods:
+                        header_parts.append("| Signal/Noise ")
+                        separator_parts.append("|-------------- ")
                 
             if has_bootstrap:
                 header_parts.append("| Bootstrap ")
@@ -4515,6 +4567,38 @@ class panDecayIndices:
                     if isinstance(bayes_d, float): bayes_d = f"{bayes_d:.4f}"
                     
                     row_parts.append(f"| {bayes_d} ")
+                    
+                    # Add normalized BD metrics if enabled
+                    if self.normalize_bd:
+                        if "per_site" in self.bd_normalization_methods:
+                            bd_per_site = data.get('bd_per_site', 'N/A')
+                            if isinstance(bd_per_site, float): bd_per_site = f"{bd_per_site:.6f}"
+                            row_parts.append(f"| {bd_per_site} ")
+                        
+                        if "relative" in self.bd_normalization_methods:
+                            bd_relative = data.get('bd_relative', 'N/A')
+                            if isinstance(bd_relative, float): bd_relative = f"{bd_relative*100:.3f}%"
+                            row_parts.append(f"| {bd_relative} ")
+                        
+                        if "effect_size" in self.bd_normalization_methods:
+                            effect_size = data.get('effect_size', 'N/A')
+                            if isinstance(effect_size, float): effect_size = f"{effect_size:.3f}"
+                            row_parts.append(f"| {effect_size} ")
+                        
+                        if "effect_size_robust" in self.bd_normalization_methods:
+                            effect_size_robust = data.get('effect_size_robust', 'N/A')
+                            if isinstance(effect_size_robust, float): effect_size_robust = f"{effect_size_robust:.3f}"
+                            row_parts.append(f"| {effect_size_robust} ")
+                        
+                        if "effect_size_weighted" in self.bd_normalization_methods:
+                            effect_size_weighted = data.get('effect_size_weighted', 'N/A')
+                            if isinstance(effect_size_weighted, float): effect_size_weighted = f"{effect_size_weighted:.3f}"
+                            row_parts.append(f"| {effect_size_weighted} ")
+                        
+                        if "signal_to_noise" in self.bd_normalization_methods:
+                            signal_to_noise = data.get('signal_to_noise', 'N/A')
+                            if isinstance(signal_to_noise, float): signal_to_noise = f"{signal_to_noise:.3f}"
+                            row_parts.append(f"| {signal_to_noise} ")
 
                 # Bootstrap column if available
                 if has_bootstrap:
@@ -4558,8 +4642,18 @@ class panDecayIndices:
                         f.write("    - **BD%**: Relative BD as percentage of unconstrained marginal likelihood\n")
                         f.write("      - Provides context relative to total likelihood magnitude\n")
                         f.write("      - Useful for comparing datasets with different likelihood scales\n")
+                    if "effect_size" in self.bd_normalization_methods:
+                        f.write("    - **Effect Size**: BD normalized by standard deviation of site-specific signals (Cohen's d framework)\n")
+                        f.write("      - Creates signal-to-noise ratio suitable for cross-study comparison\n")
+                        f.write("      - Interpretation: 0.2-0.5 (small), 0.5-0.8 (medium), 0.8-1.2 (large), ≥1.2 (very large)\n")
+                    if "effect_size_robust" in self.bd_normalization_methods:
+                        f.write("    - **ES Robust**: Effect size using Median Absolute Deviation (MAD) - less sensitive to outlier sites\n")
+                    if "effect_size_weighted" in self.bd_normalization_methods:
+                        f.write("    - **ES Weighted**: Effect size weighted by site information content\n")
+                    if "signal_to_noise" in self.bd_normalization_methods:
+                        f.write("    - **Signal/Noise**: Raw signal-to-noise ratio of site-specific support\n")
                     f.write("    - **Why normalize?**: Raw BD values scale with dataset size, making cross-study comparisons misleading\n")
-                    f.write("    - **Recommendation**: Use normalized values for publications and meta-analyses\n")
+                    f.write("    - **Recommendation**: Use effect sizes for cross-study comparisons and meta-analyses\n")
                 f.write("  - **Negative values** suggest the constrained analysis had higher marginal likelihood, which may indicate:\n")
                 if self.marginal_likelihood == "ss":
                     f.write("    - Poor chain convergence or insufficient MCMC sampling\n")
