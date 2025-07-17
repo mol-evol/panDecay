@@ -6310,12 +6310,8 @@ def run_smoke_tests():
     print("\n🎉 All smoke tests passed! Effect size calculations are working correctly.")
     return True
 
-def main():
-    # Check if we're running smoke tests
-    if len(sys.argv) == 2 and sys.argv[1] == '--smoke-test':
-        success = run_smoke_tests()
-        sys.exit(0 if success else 1)
-    
+def _create_argument_parser():
+    """Create and configure the command-line argument parser."""
     parser = argparse.ArgumentParser(
         description=f"panDecay v{VERSION}: Calculate phylogenetic decay indices (ML, Bayesian, and parsimony).",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter # Shows defaults in help
@@ -6444,6 +6440,16 @@ def main():
     config_opts.add_argument("--constraint-file", help="File containing constraint definitions (one per line)")
     
     parser.add_argument("-v", "--version", action="version", version=f"%(prog)s {VERSION}")
+    return parser
+
+
+def main():
+    # Check if we're running smoke tests
+    if len(sys.argv) == 2 and sys.argv[1] == '--smoke-test':
+        success = run_smoke_tests()
+        sys.exit(0 if success else 1)
+    
+    parser = _create_argument_parser()
     args = parser.parse_args()
     
     
