@@ -16,6 +16,7 @@ import multiprocessing
 import time
 import datetime
 import glob
+import traceback
 from pathlib import Path
 
 VERSION = "1.1.0"
@@ -33,6 +34,21 @@ ML_LOG_FN = "paup_ml.log"
 AU_TEST_NEX_FN = "au_test.nex"
 AU_TEST_SCORE_FN = "au_test_results.txt"
 AU_LOG_FN = "paup_au.log"
+
+# --- Analysis Timeout Constants (seconds) ---
+DEFAULT_ML_TIMEOUT = 3600  # 1 hour for ML tree search
+DEFAULT_CONSTRAINT_TIMEOUT = 600  # 10 minutes for constraint analysis
+DEFAULT_SITE_ANALYSIS_TIMEOUT = 600  # 10 minutes for site-specific analysis
+
+# --- MrBayes Analysis Constants ---
+DEFAULT_PRINT_FREQ = 1000  # Print frequency for MrBayes MCMC
+DEFAULT_DIAG_FREQ = 5000   # Diagnostics frequency for MrBayes MCMC
+DEFAULT_MAX_TREES = 100    # Maximum trees to keep in memory during search
+
+# --- Convergence Diagnostic Constants ---
+DEFAULT_MIN_ESS = 200      # Minimum effective sample size
+DEFAULT_MAX_PSRF = 1.01    # Maximum potential scale reduction factor
+DEFAULT_MAX_ASDSF = 0.01   # Maximum average standard deviation of split frequencies
 
 
 class panDecayIndices:
@@ -57,8 +73,8 @@ class panDecayIndices:
                  mpirun_path="mpirun", use_beagle=False, beagle_device="auto",
                  beagle_precision="double", beagle_scaling="dynamic",
                  constraint_mode="all", test_branches=None, constraint_file=None,
-                 config_constraints=None, check_convergence=True, min_ess=200,
-                 max_psrf=1.01, max_asdsf=0.01, convergence_strict=False,
+                 config_constraints=None, check_convergence=True, min_ess=DEFAULT_MIN_ESS,
+                 max_psrf=DEFAULT_MAX_PSRF, max_asdsf=DEFAULT_MAX_ASDSF, convergence_strict=False,
                  mrbayes_parse_timeout=30.0, output_style="unicode",
                  normalize_ld=True, dataset_relative=False):
 
@@ -569,7 +585,7 @@ class panDecayIndices:
             logger.debug(f"Executing PAUP* with model: {self.model_str}, threads: {self.threads}")
 
         try:
-            paup_result = self._run_paup_command_file(ML_SEARCH_NEX_FN, ML_LOG_FN, timeout_sec=3600) # 1hr timeout
+            paup_result = self._run_paup_command_file(ML_SEARCH_NEX_FN, ML_LOG_FN, timeout_sec=DEFAULT_ML_TIMEOUT)
 
             self.ml_likelihood = self._parse_likelihood_from_score_file(self.temp_path / ML_SCORE_FN)
             logger.info(f"DIAGNOSTIC: ML likelihood from score file: {self.ml_likelihood}")
@@ -640,7 +656,6 @@ class panDecayIndices:
         except Exception as e:
             logger.warning(f"Error cleaning Newick tree {tree_path}: {e}")
             if self.debug:
-                import traceback
                 logger.debug(f"Traceback for tree cleaning error: {traceback.format_exc()}")
             return tree_path  # Return original path if cleaning fails
 
@@ -724,8 +739,7 @@ class panDecayIndices:
                 except Exception as parse_error:
                     logger.error(f"Error parsing bootstrap tree: {parse_error}")
                     if self.debug:
-                        import traceback
-                        logger.debug(f"Traceback for bootstrap parse error: {traceback.format_exc()}")
+                                logger.debug(f"Traceback for bootstrap parse error: {traceback.format_exc()}")
                     return None
             else:
                 logger.error(f"Bootstrap tree file not found or empty: {bootstrap_tree_path}")
@@ -733,7 +747,6 @@ class panDecayIndices:
         except Exception as e:
             logger.error(f"Bootstrap analysis failed: {e}")
             if self.debug:
-                import traceback
                 logger.debug(f"Traceback: {traceback.format_exc()}")
             return None
 
@@ -763,7 +776,7 @@ class panDecayIndices:
         script_cmds = [f"execute {NEXUS_ALIGNMENT_FN};", self._get_paup_model_setup_cmds()]
         script_cmds.extend([
             f"constraints clade_constraint (MONOPHYLY) = {clade_spec}",
-            "set maxtrees=100 increase=auto;" # Sensible default for constrained search
+            f"set maxtrees={DEFAULT_MAX_TREES} increase=auto;" # Sensible default for constrained search
         ])
 
         if self.user_paup_block is None: # Standard search
@@ -791,7 +804,7 @@ class panDecayIndices:
         if self.debug: logger.debug(f"Constraint search {tree_idx} script ({cmd_file_path}):\n{paup_script_content}")
 
         try:
-            self._run_paup_command_file(constr_cmd_fn, constr_log_fn, timeout_sec=600)
+            self._run_paup_command_file(constr_cmd_fn, constr_log_fn, timeout_sec=DEFAULT_CONSTRAINT_TIMEOUT)
 
             score_file_path = self.temp_path / constr_score_fn
             constrained_lnl = self._parse_likelihood_from_score_file(score_file_path)
@@ -938,12 +951,12 @@ class panDecayIndices:
             # The ss command includes its own MCMC run
             blocks.append(f"    ss ngen={self.bayes_ngen} samplefreq={self.bayes_sample_freq} "
                          f"nchains={self.bayes_chains} alpha={self.ss_alpha} nsteps={self.ss_nsteps} "
-                         f"savebrlens=yes printfreq=1000 diagnfreq=5000;")
+                         f"savebrlens=yes printfreq={DEFAULT_PRINT_FREQ} diagnfreq={DEFAULT_DIAG_FREQ};")
             logger.debug(f"Added stepping stone sampling: alpha={self.ss_alpha}, nsteps={self.ss_nsteps}")
         else:
             # Regular MCMC for harmonic mean estimation
             blocks.append(f"    mcmc ngen={self.bayes_ngen} samplefreq={self.bayes_sample_freq} "
-                         f"nchains={self.bayes_chains} savebrlens=yes printfreq=1000 diagnfreq=5000;")
+                         f"nchains={self.bayes_chains} savebrlens=yes printfreq={DEFAULT_PRINT_FREQ} diagnfreq={DEFAULT_DIAG_FREQ};")
         
         # Summary commands
         burnin_samples = int(self.bayes_ngen / self.bayes_sample_freq * self.bayes_burnin)
@@ -1071,7 +1084,6 @@ class panDecayIndices:
         except Exception as e:
             logger.error(f"Unexpected error running MrBayes for {nexus_file}: {e}")
             if self.debug:
-                import traceback
                 logger.debug(traceback.format_exc())
             return None
 
@@ -1404,7 +1416,6 @@ class panDecayIndices:
         except Exception as e:
             logger.error(f"Error parsing MrBayes lstat file: {e}")
             if self.debug:
-                import traceback
                 logger.debug(traceback.format_exc())
             return None
 
@@ -1491,7 +1502,6 @@ class panDecayIndices:
         except Exception as e:
             logger.error(f"Error parsing MrBayes stepping-stone file: {e}")
             if self.debug:
-                import traceback
                 logger.debug(traceback.format_exc())
             return None
 
@@ -1539,7 +1549,7 @@ class panDecayIndices:
             newick_str = parts[1].strip()
             
             # Debug: log the original newick string
-            if self.debug or True:  # Always log for debugging
+            if self.debug:
                 logger.debug(f"Original newick string: {newick_str[:300]}...")
             
             # Remove [&U] or other tree attributes at the beginning
@@ -1609,7 +1619,6 @@ class panDecayIndices:
         except Exception as e:
             logger.error(f"Error parsing MrBayes posterior probabilities: {e}")
             if self.debug:
-                import traceback
                 logger.debug(traceback.format_exc())
             return {}
 
@@ -1724,7 +1733,6 @@ class panDecayIndices:
         except Exception as e:
             logger.error(f"Error in manual tree parsing: {e}")
             if self.debug:
-                import traceback
                 logger.debug(traceback.format_exc())
         
         return posterior_probs
@@ -2059,7 +2067,6 @@ class panDecayIndices:
         except Exception as e:
             logger.warning(f"Failed to extract posterior probabilities: {e}")
             if self.debug:
-                import traceback
                 logger.debug(traceback.format_exc())
         
         return posterior_probs
@@ -2164,7 +2171,6 @@ class panDecayIndices:
         except Exception as e:
             logger.error(f"Error parsing convergence diagnostics: {e}")
             if self.debug:
-                import traceback
                 logger.debug(traceback.format_exc())
             return convergence_data
     
@@ -3389,7 +3395,7 @@ class panDecayIndices:
 
         try:
             # Run PAUP* to calculate site likelihoods
-            self._run_paup_command_file(site_script_file, site_log_file, timeout_sec=600)
+            self._run_paup_command_file(site_script_file, site_log_file, timeout_sec=DEFAULT_SITE_ANALYSIS_TIMEOUT)
 
             # Parse the site likelihood file
             site_lnl_path = self.temp_path / site_lnl_file
@@ -3517,7 +3523,6 @@ class panDecayIndices:
         except Exception as e:
             logger.error(f"Failed to calculate site likelihoods for branch {branch_id}: {e}")
             if self.debug:
-                import traceback
                 logger.debug(f"Traceback for site likelihood calculation error:\n{traceback.format_exc()}")
             return None
 
@@ -3755,7 +3760,6 @@ class panDecayIndices:
         except Exception as e:
             logger.error(f"Error parsing AU test results: {e}")
             if self.debug:
-                import traceback
                 logger.debug(f"AU test parsing traceback: {traceback.format_exc()}")
             return None
 
@@ -3830,7 +3834,6 @@ class panDecayIndices:
         except Exception as e:
             logger.error(f"Error parsing AU test score file: {e}")
             if self.debug:
-                import traceback
                 logger.debug(f"Score file parsing error: {traceback.format_exc()}")
             return None
 
@@ -4034,7 +4037,6 @@ class panDecayIndices:
                 tree_files['combined'] = combined_tree_path
             except Exception as e:
                 logger.error(f"Failed to create combined tree: {e}")
-                import traceback
                 logger.debug(f"Traceback: {traceback.format_exc()}")
 
             # Handle bootstrap tree if bootstrap analysis was performed
@@ -4168,8 +4170,7 @@ class panDecayIndices:
                 except Exception as e:
                     logger.error(f"Failed to create comprehensive tree: {e}")
                     if self.debug:
-                        import traceback
-                        logger.debug(f"Traceback: {traceback.format_exc()}")
+                                logger.debug(f"Traceback: {traceback.format_exc()}")
 
             # Create Bayesian-specific trees if Bayesian results are available
             has_bayesian = any(d.get('bayes_decay') is not None for d in self.decay_indices.values())
@@ -4224,7 +4225,6 @@ class panDecayIndices:
         except Exception as e:
             logger.error(f"Failed to annotate trees: {e}")
             if hasattr(self, 'debug') and self.debug:
-                import traceback
                 logger.debug(f"Traceback: {traceback.format_exc()}")
             return tree_files  # Return any successfully created files
 
@@ -5413,7 +5413,6 @@ class panDecayIndices:
         except Exception as e:
             logger.error(f"Error creating site analysis visualizations: {e}")
             if self.debug:
-                import traceback
                 logger.debug(f"Visualization error traceback: {traceback.format_exc()}")
 
     def visualize_support_distribution(self, output_path: Path, value_type="au", **kwargs):
@@ -6596,7 +6595,6 @@ def main():
     except Exception as e:
         logger.error(f"panDecay analysis terminated with an error: {e}")
         if args.debug: # Print traceback in debug mode
-            import traceback
             logger.debug("Full traceback:\n%s", traceback.format_exc())
         sys.exit(1)
 
