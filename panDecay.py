@@ -1798,7 +1798,7 @@ class panDecayIndices:
                 return '*'
             else:
                 return 'ns'
-        except:
+        except (ValueError, TypeError):
             return 'N/A'
     
     def _format_tree_annotation(self, clade_id, annotation_dict, style="compact"):
