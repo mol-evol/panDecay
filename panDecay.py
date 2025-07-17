@@ -155,6 +155,133 @@ class ExternalToolRunner:
             return None
 
 
+class DatasetNormalizer:
+    """Handles dataset-relative normalization calculations for cross-study comparisons."""
+    
+    def __init__(self, debug=False):
+        self.debug = debug
+    
+    def calculate_dataset_relative_metrics(self, ld_values, method_prefix=""):
+        """
+        Calculate dataset-relative normalization metrics after all LD values are computed.
+        
+        Args:
+            ld_values: List or array of likelihood decay values across all branches
+            method_prefix: Optional prefix for method names (e.g., "ml_" or "bayes_")
+            
+        Returns:
+            Dictionary with dataset statistics and per-branch relative metrics
+        """
+        if not ld_values or len(ld_values) == 0:
+            logger.warning("No LD values provided for dataset-relative calculations")
+            return {}
+            
+        ld_array = np.array(ld_values)
+        
+        # Calculate dataset statistics
+        min_ld = np.min(ld_array)
+        max_ld = np.max(ld_array)
+        mean_ld = np.mean(ld_array)
+        std_ld = np.std(ld_array, ddof=1) if len(ld_array) > 1 else 0
+        
+        logger.info(f"Dataset LD statistics ({method_prefix}): min={min_ld:.3f}, max={max_ld:.3f}, mean={mean_ld:.3f}, std={std_ld:.3f}")
+        
+        # Calculate relative metrics for each branch
+        relative_metrics = {}
+        
+        for i, ld_value in enumerate(ld_values):
+            branch_metrics = {}
+            
+            # Dataset-relative (0-1 scaling)
+            if max_ld > min_ld:
+                dataset_relative = (ld_value - min_ld) / (max_ld - min_ld)
+            else:
+                dataset_relative = 0.5  # All values identical
+            branch_metrics['dataset_relative'] = dataset_relative
+            
+            # Percentile rank (1-100%)
+            rank = np.sum(ld_array < ld_value) + 0.5 * np.sum(ld_array == ld_value)
+            percentile_rank = (rank / len(ld_array)) * 100
+            branch_metrics['percentile_rank'] = percentile_rank
+            
+            # Z-score (standard deviations from mean)
+            if std_ld > 0:
+                z_score = (ld_value - mean_ld) / std_ld
+            else:
+                z_score = 0.0  # All values identical
+            branch_metrics['z_score'] = z_score
+            
+            relative_metrics[i] = branch_metrics
+            
+        # Add dataset statistics
+        relative_metrics['_dataset_stats'] = {
+            'min_ld': min_ld,
+            'max_ld': max_ld,
+            'mean_ld': mean_ld,
+            'std_ld': std_ld,
+            'n_branches': len(ld_values)
+        }
+        
+        return relative_metrics
+
+    def apply_dataset_relative_normalizations(self, decay_indices, dataset_relative=True):
+        """
+        Apply dataset-relative normalizations to computed decay indices.
+        
+        Args:
+            decay_indices: Dictionary containing decay index results
+            dataset_relative: Whether to apply dataset-relative normalizations
+        """
+        if not dataset_relative:
+            logger.info("Dataset-relative normalization disabled")
+            return
+            
+        logger.info("Applying dataset-relative normalizations for cross-study comparisons...")
+        
+        # Collect likelihood decay values for each analysis type
+        analysis_types = ['ml', 'bayes', 'pars']
+        ld_keys = ['lnl_diff', 'bayes_decay', 'pars_decay']
+        
+        for analysis_type, ld_key in zip(analysis_types, ld_keys):
+            # Collect LD values for this analysis type
+            ld_values = []
+            valid_clades = []
+            
+            for clade_id, data in decay_indices.items():
+                ld_value = data.get(ld_key)
+                if ld_value is not None and not np.isnan(ld_value):
+                    ld_values.append(ld_value)
+                    valid_clades.append(clade_id)
+            
+            if len(ld_values) < 2:
+                logger.warning(f"Insufficient {analysis_type} LD values for dataset-relative calculations (n={len(ld_values)})")
+                continue
+                
+            # Calculate relative metrics
+            relative_metrics = self.calculate_dataset_relative_metrics(ld_values, f"{analysis_type}_")
+            
+            # Apply metrics back to decay_indices
+            valid_idx = 0
+            for clade_id in valid_clades:
+                if valid_idx in relative_metrics:
+                    branch_metrics = relative_metrics[valid_idx]
+                    
+                    # Add relative metrics with analysis-specific prefix
+                    decay_indices[clade_id][f"{analysis_type}_dataset_relative"] = branch_metrics['dataset_relative']
+                    decay_indices[clade_id][f"{analysis_type}_percentile_rank"] = branch_metrics['percentile_rank']
+                    decay_indices[clade_id][f"{analysis_type}_z_score"] = branch_metrics['z_score']
+                    
+                    if self.debug:
+                        logger.debug(f"Applied {analysis_type} relative metrics to {clade_id}: "
+                                   f"rel={branch_metrics['dataset_relative']:.3f}, "
+                                   f"pct={branch_metrics['percentile_rank']:.1f}, "
+                                   f"z={branch_metrics['z_score']:.2f}")
+                        
+                    valid_idx += 1
+        
+        logger.info("Dataset-relative normalizations applied successfully")
+
+
 class panDecayIndices:
     """
     Implements phylogenetic decay indices (Bremer support) using multiple approaches.
@@ -312,6 +439,9 @@ class panDecayIndices:
                 mpi_processors=self.mpi_processors,
                 mpirun_path=self.mpirun_path
             )
+
+            # Initialize dataset normalizer for debug/keep_files mode
+            self._dataset_normalizer = DatasetNormalizer(debug=self.debug)
         else: # Auto-cleanup
             self._temp_dir_obj = tempfile.TemporaryDirectory(prefix="mldecay_")
             self.temp_path = Path(self._temp_dir_obj.name)
@@ -328,6 +458,9 @@ class panDecayIndices:
             mpi_processors=self.mpi_processors,
             mpirun_path=self.mpirun_path
         )
+
+        # Initialize dataset normalizer
+        self._dataset_normalizer = DatasetNormalizer(debug=self.debug)
 
         # --- PAUP* Model Settings ---
         self.parsmodel = False # Default, will be set by _convert_model_to_paup if discrete
@@ -2669,7 +2802,7 @@ class panDecayIndices:
             
         # Calculate dataset-relative normalizations if requested
         if self.decay_indices and self.normalize_ld:
-            self._apply_dataset_relative_normalizations()
+            self._dataset_normalizer.apply_dataset_relative_normalizations(self.decay_indices, self.dataset_relative)
             
         return self.decay_indices
     
