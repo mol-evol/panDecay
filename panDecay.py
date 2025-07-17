@@ -51,6 +51,110 @@ DEFAULT_MAX_PSRF = 1.01    # Maximum potential scale reduction factor
 DEFAULT_MAX_ASDSF = 0.01   # Maximum average standard deviation of split frequencies
 
 
+class ExternalToolRunner:
+    """Handles execution of external phylogenetic software (PAUP*, MrBayes)."""
+    
+    def __init__(self, temp_path, paup_path="paup", mrbayes_path="mb", 
+                 debug=False, use_mpi=False, mpi_processors=None, mpirun_path="mpirun"):
+        self.temp_path = temp_path
+        self.paup_path = paup_path
+        self.mrbayes_path = mrbayes_path
+        self.debug = debug
+        self.use_mpi = use_mpi
+        self.mpi_processors = mpi_processors
+        self.mpirun_path = mpirun_path
+    
+    def run_paup_command_file(self, paup_cmd_filename_str: str, log_filename_str: str, timeout_sec: int = None):
+        """Execute a PAUP* command file and capture output."""
+        paup_cmd_file_path = self.temp_path / paup_cmd_filename_str
+        combined_log_file_path = self.temp_path / log_filename_str
+        
+        cmd = [self.paup_path, str(paup_cmd_file_path)]
+        logger.info(f"Running PAUP* command file: {paup_cmd_filename_str} (Log: {log_filename_str})")
+        
+        with open(combined_log_file_path, 'w') as f_log:
+            process = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, 
+                text=True, cwd=str(self.temp_path)
+            )
+            
+            stdout_lines = []
+            for line in iter(process.stdout.readline, ''):
+                f_log.write(line)
+                f_log.flush()
+                stdout_lines.append(line)
+                
+                if timeout_sec and len(stdout_lines) % 100 == 0:
+                    if process.poll() is None:
+                        try:
+                            process.wait(timeout=1)
+                        except subprocess.TimeoutExpired:
+                            continue
+            
+            process.wait()
+            stdout_content = ''.join(stdout_lines)
+            
+        logger.info(f"PAUP* output saved to: {combined_log_file_path}")
+        
+        if self.debug and stdout_content:
+            stdout_sample = stdout_content[:500] + "..." if len(stdout_content) > 500 else stdout_content
+            logger.debug(f"PAUP* stdout sample (from capture):\n{stdout_sample}")
+        
+        if process.returncode != 0:
+            logger.error(f"PAUP* failed with return code {process.returncode}")
+            raise RuntimeError(f"PAUP* execution failed")
+            
+        return process.returncode
+    
+    def parse_likelihood_from_score_file(self, score_file_path):
+        """Parse likelihood value from PAUP* score file."""
+        if not score_file_path.exists():
+            logger.error(f"Score file does not exist: {score_file_path}")
+            return None
+            
+        try:
+            content = score_file_path.read_text().strip()
+            if self.debug:
+                logger.debug(f"Score file ({score_file_path}) content:\n{content}")
+                
+            lines = [line.strip() for line in content.split('\n') if line.strip()]
+            if len(lines) < 2:
+                logger.error(f"Score file has insufficient data: {len(lines)} lines")
+                return None
+                
+            header = lines[0].split('\t')
+            lnl_col_idx = None
+            for i, col in enumerate(header):
+                if 'lnL' in col or 'logL' in col:
+                    lnl_col_idx = i
+                    break
+                    
+            if lnl_col_idx is None:
+                logger.error(f"Could not find likelihood column in header: {header}")
+                return None
+                
+            if self.debug:
+                logger.debug(f"Found LNL column at index {lnl_col_idx} in header: {header}")
+                
+            data_line = lines[1].split('\t')
+            if len(data_line) <= lnl_col_idx:
+                logger.error(f"Data line has insufficient columns: {len(data_line)} vs expected {lnl_col_idx + 1}")
+                return None
+                
+            likelihood_str = data_line[lnl_col_idx].strip()
+            likelihood = float(likelihood_str)
+            
+            if self.debug:
+                logger.debug(f"Parsed log-likelihood from {score_file_path}: {likelihood}")
+                
+            return likelihood
+            
+        except Exception as e:
+            logger.error(f"Error parsing likelihood from {score_file_path}: {e}")
+            traceback.print_exc()
+            return None
+
+
 class panDecayIndices:
     """
     Implements phylogenetic decay indices (Bremer support) using multiple approaches.
@@ -121,6 +225,10 @@ class panDecayIndices:
         self.beagle_device = beagle_device
         self.beagle_precision = beagle_precision
         self.beagle_scaling = beagle_scaling
+        
+        # Initialize external tool runner
+        # Note: temp_path will be set in _setup_temp_directory() 
+        self._external_runner = None  # Will be initialized after temp_path is set
         
         # Constraint selection parameters
         self.constraint_mode = constraint_mode
@@ -193,11 +301,33 @@ class panDecayIndices:
                 self.temp_path = debug_runs_path / self.work_dir_name
                 self.temp_path.mkdir(parents=True, exist_ok=True)
             logger.info(f"Using temporary directory: {self.temp_path}")
+            
+            # Initialize external tool runner for debug/keep_files mode
+            self._external_runner = ExternalToolRunner(
+                temp_path=self.temp_path,
+                paup_path=self.paup_path,
+                mrbayes_path=self.mrbayes_path,
+                debug=self.debug,
+                use_mpi=self.use_mpi,
+                mpi_processors=self.mpi_processors,
+                mpirun_path=self.mpirun_path
+            )
         else: # Auto-cleanup
             self._temp_dir_obj = tempfile.TemporaryDirectory(prefix="mldecay_")
             self.temp_path = Path(self._temp_dir_obj.name)
             self.work_dir_name = self.temp_path.name
             logger.info(f"Using temporary directory (auto-cleanup): {self.temp_path}")
+
+        # Initialize external tool runner now that temp_path is set
+        self._external_runner = ExternalToolRunner(
+            temp_path=self.temp_path,
+            paup_path=self.paup_path,
+            mrbayes_path=self.mrbayes_path,
+            debug=self.debug,
+            use_mpi=self.use_mpi,
+            mpi_processors=self.mpi_processors,
+            mpirun_path=self.mpirun_path
+        )
 
         # --- PAUP* Model Settings ---
         self.parsmodel = False # Default, will be set by _convert_model_to_paup if discrete
@@ -412,139 +542,6 @@ class panDecayIndices:
             # Assume it sets threads, model, criterion, etc.
             return self.paup_model_cmds # Return as is, for direct insertion
 
-    def _run_paup_command_file(self, paup_cmd_filename_str: str, log_filename_str: str, timeout_sec: int = None):
-        """Runs a PAUP* .nex command file located in self.temp_path."""
-        paup_cmd_file = self.temp_path / paup_cmd_filename_str
-        # The main log file will capture both stdout and stderr from PAUP*
-        combined_log_file_path = self.temp_path / log_filename_str
-
-        if not paup_cmd_file.exists():
-            logger.error(f"PAUP* command file not found: {paup_cmd_file}")
-            raise FileNotFoundError(f"PAUP* command file not found: {paup_cmd_file}")
-
-        logger.debug(f"Running PAUP* command file: {paup_cmd_filename_str} (Log: {log_filename_str})")
-
-        # stdout_content and stderr_content will be filled for logging/debugging if needed
-        stdout_capture = ""
-        stderr_capture = ""
-
-        try:
-            # Open the log file once for both stdout and stderr
-            with open(combined_log_file_path, 'w') as f_log:
-                process = subprocess.Popen(
-                    [self.paup_path, "-n", paup_cmd_filename_str],
-                    cwd=str(self.temp_path),
-                    stdout=subprocess.PIPE, # Capture stdout
-                    stderr=subprocess.PIPE, # Capture stderr
-                    text=True,
-                    universal_newlines=True # For text=True
-                )
-
-                # Read stdout and stderr in a non-blocking way or use communicate
-                # communicate() is simpler and safer for handling potential deadlocks
-                try:
-                    stdout_capture, stderr_capture = process.communicate(timeout=timeout_sec)
-                except subprocess.TimeoutExpired:
-                    process.kill() # Ensure process is killed on timeout
-                    stdout_capture, stderr_capture = process.communicate() # Try to get any remaining output
-                    logger.error(f"PAUP* command {paup_cmd_filename_str} timed out after {timeout_sec}s.")
-                    f_log.write(f"--- PAUP* Execution Timed Out ({timeout_sec}s) ---\n")
-                    if stdout_capture: f_log.write("--- STDOUT (partial) ---\n" + stdout_capture)
-                    if stderr_capture: f_log.write("\n--- STDERR (partial) ---\n" + stderr_capture)
-                    raise # Re-raise the TimeoutExpired exception
-
-                # Write captured output to the log file
-                f_log.write("--- STDOUT ---\n")
-                f_log.write(stdout_capture if stdout_capture else "No stdout captured.\n")
-                if stderr_capture:
-                    f_log.write("\n--- STDERR ---\n")
-                    f_log.write(stderr_capture)
-
-                retcode = process.returncode
-                if retcode != 0:
-                    logger.error(f"PAUP* execution failed for {paup_cmd_filename_str}. Exit code: {retcode}")
-                    # The log file already contains stdout/stderr
-                    logger.error(f"PAUP* stdout/stderr saved to {combined_log_file_path}. Stderr sample: {stderr_capture[:500]}...")
-                    # Raise an equivalent of CalledProcessError
-                    raise subprocess.CalledProcessError(retcode, process.args, output=stdout_capture, stderr=stderr_capture)
-
-            if self.debug:
-                logger.debug(f"PAUP* output saved to: {combined_log_file_path}")
-                logger.debug(f"PAUP* stdout sample (from capture):\n{stdout_capture[:500]}...")
-                if stderr_capture: logger.debug(f"PAUP* stderr sample (from capture):\n{stderr_capture[:500]}...")
-
-            # Return a simple object that mimics CompletedProcess for the parts we use
-            # Or adjust callers to expect (stdout_str, stderr_str, retcode) tuple
-            class MockCompletedProcess:
-                def __init__(self, args, returncode, stdout, stderr):
-                    self.args = args
-                    self.returncode = returncode
-                    self.stdout = stdout
-                    self.stderr = stderr
-
-            return MockCompletedProcess(process.args, retcode, stdout_capture, stderr_capture)
-
-        except subprocess.CalledProcessError: # Already logged, just re-raise
-            raise
-        except subprocess.TimeoutExpired: # Already logged, just re-raise
-            raise
-        except Exception as e:
-            # Fallback for other errors during Popen or communicate
-            logger.error(f"Unexpected error running PAUP* for {paup_cmd_filename_str}: {e}")
-            # Attempt to write to log if f_log was opened
-            if 'f_log' in locals() and not f_log.closed:
-                 f_log.write(f"\n--- Script Error during PAUP* execution ---\n{str(e)}\n")
-            raise
-
-    def _parse_likelihood_from_score_file(self, score_file_path: Path):
-        if not score_file_path.exists():
-            logger.warning(f"Score file not found: {score_file_path}")
-            return None
-        try:
-            content = score_file_path.read_text()
-            if self.debug: logger.debug(f"Score file ({score_file_path}) content:\n{content}")
-
-            lines = content.splitlines()
-            header_idx, lnl_col_idx = -1, -1
-
-            for i, line_text in enumerate(lines):
-                norm_line = ' '.join(line_text.strip().lower().split()) # Normalize
-                if "tree" in norm_line and ("-lnl" in norm_line or "loglk" in norm_line or "likelihood" in norm_line):
-                    header_idx = i
-                    headers = norm_line.split()
-                    for col_name in ["-lnl", "loglk", "likelihood", "-loglk"]:
-                        if col_name in headers:
-                            lnl_col_idx = headers.index(col_name)
-                            break
-                    if lnl_col_idx != -1: break
-
-            if header_idx == -1 or lnl_col_idx == -1:
-                logger.warning(f"Could not find valid header or likelihood column in {score_file_path}.")
-                return None
-            logger.debug(f"Found LNL column at index {lnl_col_idx} in header: {lines[header_idx].strip()}")
-
-            for i in range(header_idx + 1, len(lines)):
-                data_line_text = lines[i].strip()
-                if not data_line_text: continue # Skip empty
-
-                parts = data_line_text.split()
-                if len(parts) > lnl_col_idx:
-                    try:
-                        val_str = parts[lnl_col_idx]
-                        if '*' in val_str : # Handle cases like '**********' or if PAUP adds flags
-                            logger.warning(f"Likelihood value problematic (e.g., '******') in {score_file_path}, line: '{data_line_text}'")
-                            continue # Try next line if multiple scores
-                        likelihood = float(val_str)
-                        logger.info(f"Parsed log-likelihood from {score_file_path}: {likelihood}")
-                        return likelihood
-                    except ValueError:
-                        logger.warning(f"Could not convert LNL value to float: '{parts[lnl_col_idx]}' from line '{data_line_text}' in {score_file_path}")
-                else: logger.warning(f"Insufficient columns in data line: '{data_line_text}' in {score_file_path}")
-            logger.warning(f"No parsable data lines found after header in {score_file_path}")
-            return None
-        except Exception as e:
-            logger.warning(f"Error reading/parsing score file {score_file_path}: {e}")
-            return None
 
     def build_ml_tree(self):
         logger.info("Building maximum likelihood tree...")
@@ -585,9 +582,9 @@ class panDecayIndices:
             logger.debug(f"Executing PAUP* with model: {self.model_str}, threads: {self.threads}")
 
         try:
-            paup_result = self._run_paup_command_file(ML_SEARCH_NEX_FN, ML_LOG_FN, timeout_sec=DEFAULT_ML_TIMEOUT)
+            paup_result = self._external_runner.run_paup_command_file(ML_SEARCH_NEX_FN, ML_LOG_FN, timeout_sec=DEFAULT_ML_TIMEOUT)
 
-            self.ml_likelihood = self._parse_likelihood_from_score_file(self.temp_path / ML_SCORE_FN)
+            self.ml_likelihood = self._external_runner.parse_likelihood_from_score_file(self.temp_path / ML_SCORE_FN)
             logger.info(f"DIAGNOSTIC: ML likelihood from score file: {self.ml_likelihood}")
             
             if self.ml_likelihood is None and paup_result.stdout: # Fallback to log
@@ -698,7 +695,7 @@ class panDecayIndices:
 
         try:
             # Run the bootstrap analysis - timeout based on number of replicates
-            self._run_paup_command_file(BOOTSTRAP_NEX_FN, BOOTSTRAP_LOG_FN,
+            self._external_runner.run_paup_command_file(BOOTSTRAP_NEX_FN, BOOTSTRAP_LOG_FN,
                                       timeout_sec=max(3600, 60 * num_replicates))
 
             # Get the bootstrap tree
@@ -804,10 +801,10 @@ class panDecayIndices:
         if self.debug: logger.debug(f"Constraint search {tree_idx} script ({cmd_file_path}):\n{paup_script_content}")
 
         try:
-            self._run_paup_command_file(constr_cmd_fn, constr_log_fn, timeout_sec=DEFAULT_CONSTRAINT_TIMEOUT)
+            self._external_runner.run_paup_command_file(constr_cmd_fn, constr_log_fn, timeout_sec=DEFAULT_CONSTRAINT_TIMEOUT)
 
             score_file_path = self.temp_path / constr_score_fn
-            constrained_lnl = self._parse_likelihood_from_score_file(score_file_path)
+            constrained_lnl = self._external_runner.parse_likelihood_from_score_file(score_file_path)
 
             tree_file_path = self.temp_path / constr_tree_fn
             if tree_file_path.exists() and tree_file_path.stat().st_size > 0:
@@ -2258,7 +2255,7 @@ class panDecayIndices:
         
         try:
             logger.info("PARSIMONY DIAGNOSTIC: Starting parsimony tree building...")
-            self._run_paup_command_file(PARS_NEX_FN, PARS_LOG_FN)
+            self._external_runner.run_paup_command_file(PARS_NEX_FN, PARS_LOG_FN)
             
             # Parse parsimony score
             score_path = self.temp_path / PARS_SCORE_FN
@@ -2387,7 +2384,7 @@ class panDecayIndices:
                 constraint_path.write_text(constraint_script)
                 
                 try:
-                    self._run_paup_command_file(f"pars_constraint_{clade_log_idx}.nex", f"paup_pars_constraint_{clade_log_idx}.log")
+                    self._external_runner.run_paup_command_file(f"pars_constraint_{clade_log_idx}.nex", f"paup_pars_constraint_{clade_log_idx}.log")
                     
                     # Parse constrained score
                     constrained_score_path = self.temp_path / f"pars_constraint_score_{clade_log_idx}.txt"
@@ -3395,7 +3392,7 @@ class panDecayIndices:
 
         try:
             # Run PAUP* to calculate site likelihoods
-            self._run_paup_command_file(site_script_file, site_log_file, timeout_sec=DEFAULT_SITE_ANALYSIS_TIMEOUT)
+            self._external_runner.run_paup_command_file(site_script_file, site_log_file, timeout_sec=DEFAULT_SITE_ANALYSIS_TIMEOUT)
 
             # Parse the site likelihood file
             site_lnl_path = self.temp_path / site_lnl_file
@@ -3581,7 +3578,7 @@ class panDecayIndices:
         if self.debug: logger.debug(f"AU test PAUP* script ({au_cmd_path}):\n{paup_script_content}")
 
         try:
-            self._run_paup_command_file(AU_TEST_NEX_FN, AU_LOG_FN, timeout_sec=max(1800, 600 * num_trees / 10)) # Dynamic timeout
+            self._external_runner.run_paup_command_file(AU_TEST_NEX_FN, AU_LOG_FN, timeout_sec=max(1800, 600 * num_trees / 10)) # Dynamic timeout
 
             # Parse results from the AU test results file
             return self._parse_au_results(self.temp_path / AU_LOG_FN)
