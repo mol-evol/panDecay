@@ -769,6 +769,7 @@ class panDecayIndices:
         self.normalize_ld = normalize_ld
         
         # Set normalization methods based on flags
+        self.dataset_relative = dataset_relative
         self.ld_normalization_methods = ["per_site", "relative"]  # Always include these basic ones
         if dataset_relative:
             self.ld_normalization_methods.extend(["dataset_relative", "percentile_rank", "z_score"])
