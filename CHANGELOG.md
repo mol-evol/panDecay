@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **BD/site calculation accuracy**
+  - Resolved issue where BD/site (per-site normalization) was incorrectly showing as 0.000000 despite valid BD values
+  - Added comprehensive diagnostic logging to track BD/site calculation pipeline
+  - Fixed calculation pipeline to ensure proper BD/site value storage and reporting
+- **Effect Size Robust (MAD-based) scaling**
+  - Added missing 1.4826 scaling factor to Median Absolute Deviation calculations
+  - Fixed ES Robust values that were orders of magnitude higher than expected
+  - MAD-based effect sizes now provide statistically equivalent robust alternatives to standard effect sizes
+- **Parsimony analysis reporting**
+  - Fixed variable name bug in parsimony report generation that caused crashes
+  - Corrected reference from `bayes_decays` to `pars_decays` in parsimony-specific code sections
+
+### Improved
+- **Normalization method consistency**
+  - All normalization methods now produce values on consistent, interpretable scales
+  - Enhanced mathematical foundation alignment with established statistical frameworks
+  - Improved error handling and fallback mechanisms for edge cases in effect size calculations
+
 ### Removed
 - **HTML tree visualization functionality**
   - Removed all HTML-based interactive tree visualization code (~600 lines)

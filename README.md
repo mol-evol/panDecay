@@ -71,14 +71,13 @@ panDecay now supports Bayesian phylogenetic decay indices, extending the decay i
 
 The Bayesian decay index for a clade is calculated as:
 - **Bayesian Decay = ln(ML_unconstrained) - ln(ML_constrained)**
-- **Bayes Factor = exp(Bayesian Decay)**
 
 Where ML represents the marginal likelihood (not to be confused with maximum likelihood). A positive Bayesian decay value indicates support for the clade, with larger values indicating stronger support.
 
 **Important Note on Interpretation**: In phylogenetic applications, Bayesian decay values tend to closely approximate ML log-likelihood differences. This occurs because:
 - The compared models differ only in topological constraints, not in substitution models or parameters
 - When data strongly support a topology, the marginal likelihood is dominated by the likelihood component
-- Traditional Bayes Factor interpretation scales (e.g., BF >10 = strong, >100 = decisive) were developed for comparing fundamentally different models and do not apply well to phylogenetic topology testing
+- Traditional statistical interpretation scales don't apply well to phylogenetic topology testing due to the specific nature of topological constraints
 
 **Interpreting Bayesian decay values**:
 - BD values should be interpreted comparatively across branches rather than using absolute thresholds
@@ -86,10 +85,82 @@ Where ML represents the marginal likelihood (not to be confused with maximum lik
 - BD values may scale with alignment size and sequence diversity
 - Strong support is best identified when multiple metrics concordantly indicate robust clade support
 
-Note that BD values of 30-50 or higher are common when data strongly support a clade and should not be considered anomalous.
+Note that BD values scale with dataset characteristics (alignment length, sequence diversity, substitution rates), so absolute values should not be compared across studies.
 
 panDecay can perform Bayesian analyses using:
 - **MrBayes**: Currently supported with stepping-stone sampling (default) or harmonic mean marginal likelihood estimation
+
+### Dataset-Relative Normalization for Cross-Study Comparisons
+
+A key limitation of traditional likelihood decay values is their scaling with dataset characteristics (alignment length, sequence diversity, substitution rates). This makes cross-study comparisons difficult and reduces the biological interpretability of LD values. panDecay addresses this through a **Dataset-Relative Normalization Approach** that provides statistically sound relative rankings within each dataset.
+
+#### Scientific Rationale
+
+Dataset-relative normalizations transform raw likelihood decay values into interpretable relative measures using established statistical methods:
+
+```
+Dataset Relative = (LD - min_LD) / (max_LD - min_LD)
+Percentile Rank = (rank - 0.5) / n × 100%
+Z-Score = (LD - mean_LD) / std_LD
+```
+
+This creates **relative support rankings** that:
+- Enable meaningful interpretation within each dataset
+- Provide statistically grounded percentile and Z-score metrics
+- Account for dataset-specific scaling without false precision
+- Maintain honest interpretation about relative vs. absolute support
+
+#### Dataset-Relative Methods
+
+panDecay implements three dataset-relative normalization methods:
+
+1. **Dataset Relative** (`dataset_relative`): (LD - min_LD) / (max_LD - min_LD)
+   - Scales all values to 0-1 range within the dataset
+   - 0 = weakest support in dataset, 1 = strongest support in dataset
+   - Most intuitive for within-dataset comparisons
+
+2. **Percentile Rank** (`percentile_rank`): Rank-based percentile (1-100%)
+   - Shows what percentage of branches have weaker support
+   - Direct statistical interpretation (e.g., 90th percentile = top 10%)
+   - Robust to outliers and distribution shape
+
+3. **Z-Score** (`z_score`): (LD - mean_LD) / std_LD
+   - Standard deviations from dataset mean
+   - Statistical significance testing framework
+   - Familiar to researchers from other statistical contexts
+
+#### Interpretation Framework
+
+Dataset-relative values use careful language about relative vs. absolute support:
+
+- **90-100th percentile**: Top-ranked within this dataset
+- **75-89th percentile**: Above-average within this dataset
+- **25-74th percentile**: Intermediate within this dataset
+- **1-24th percentile**: Below-average within this dataset
+
+**Z-Score Guidelines:**
+- **Z > +1.5**: Well above dataset average
+- **+0.5 < Z ≤ +1.5**: Above dataset average
+- **-0.5 ≤ Z ≤ +0.5**: Near dataset average
+- **Z < -0.5**: Below dataset average
+
+#### Cross-Study Comparison Workflow
+
+1. **Calculate percentile ranks** for all studies using the same methods
+2. **Compare percentile ranks** across datasets (e.g., 90th percentile support)
+3. **Apply consistent relative thresholds** for support interpretation
+4. **Always validate** with other support measures (AU test, bootstrap, etc.)
+5. **Consider data quality** when comparing across studies
+
+#### Important Limitations
+
+- **Relative rankings only**: High percentile ≠ reliable phylogenetic support
+- **Dataset-specific**: Rankings meaningful only within each dataset
+- **No absolute thresholds**: Cannot determine "strong" vs "weak" support in isolation
+- **Requires validation**: Must compare with other support measures
+- **Quality dependent**: Rankings reflect relative strength within potentially noisy data
+
+This approach provides honest, statistically sound relative rankings without the false precision of inappropriate effect size calculations.
 
 ## Features
 
@@ -114,9 +185,9 @@ panDecay can perform Bayesian analyses using:
 *   Marginal likelihood estimation using:
     *   **Stepping-stone sampling** (recommended, more accurate)
     *   **Harmonic mean** (faster but less reliable)
-*   **Improved Bayes Factor reporting**:
-    *   Primary focus on Bayes Decay (log Bayes Factor) for interpretability
-    *   Bayes Factor values capped at 10^6 for display to avoid numerical issues
+*   **Improved Bayesian reporting**:
+    *   Primary focus on Bayes Decay for interpretability
+    *   Dataset-relative normalized metrics for within-dataset interpretation
     *   Clear warnings about model dimension effects for extreme values
 *   **MCMC Convergence Diagnostics**:
     *   Automatic checking of ESS (Effective Sample Size)
@@ -230,6 +301,7 @@ usage: panDecay.py [-h] [--format FORMAT] [--model MODEL] [--gamma] [--invariabl
                   [--beagle-precision {single,double}] [--beagle-scaling {none,dynamic,always}]
                   [--check-convergence | --no-check-convergence] [--min-ess MIN_ESS] [--max-psrf MAX_PSRF]
                   [--max-asdsf MAX_ASDSF] [--convergence-strict] [--mrbayes-parse-timeout TIMEOUT]
+                  [--normalize-ld | --no-normalize-ld] [--dataset-relative]
                   [--bootstrap] [--bootstrap-reps BOOTSTRAP_REPS] [--visualize] [--viz-format {png,pdf,svg}]
                   [--annotation {au,lnl}] [--output-style {unicode,ascii,minimal}]
                   [--config CONFIG] [--generate-config GENERATE_CONFIG]
@@ -345,6 +417,11 @@ Visualization Output (optional):
   --output-style {unicode,ascii,minimal}
                         Output formatting style: unicode (modern), ascii (compatible), minimal (basic). (default: unicode)
 
+Likelihood Decay Normalization Options:
+  --normalize-ld/--no-normalize-ld
+                        Calculate normalized likelihood decay metrics including per-site and relative measures (default: enabled)
+  --dataset-relative    Include dataset-relative normalization metrics: 0-1 scaling, percentile ranks, and z-scores for within-dataset comparison
+
 Configuration and Constraint Options:
   --config CONFIG       Read parameters from configuration file (INI format)
   --generate-config GENERATE_CONFIG
@@ -435,7 +512,16 @@ A tab-delimited text file containing:
         *   `Significant_AU (p<0.05)`: "Yes" if AU p-value < 0.05, "No" otherwise.
     *   **Bayesian Metrics** (when Bayesian analysis is performed):
         *   `Bayes_ML_Diff`: Marginal likelihood difference (unconstrained - constrained).
-        *   `Bayes_Factor`: Exponential of the Bayes_ML_Diff, indicating support strength.
+    *   **Normalized LD Metrics** (when normalization is enabled):
+        *   `BD_Per_Site`: Likelihood decay per alignment site (LD/alignment_length).
+        *   `BD_Relative`: Likelihood decay as percentage of ML likelihood (LD/abs(ML_lnL)*100).
+        *   `ML_Dataset_Relative`: ML decay scaled 0-1 within dataset (min-max normalization).
+        *   `ML_Percentile_Rank`: ML decay percentile rank (1-100%) within dataset.
+        *   `ML_Z_Score`: ML decay Z-score (standard deviations from dataset mean).
+        *   `Bayes_Dataset_Relative`: Bayesian decay scaled 0-1 within dataset.
+        *   `Bayes_Percentile_Rank`: Bayesian decay percentile rank within dataset.
+        *   `Bayes_Z_Score`: Bayesian decay Z-score within dataset.
+        *   `Signal_To_Noise`: LD divided by standard deviation of site likelihood differences.
     *   `Bootstrap` (if bootstrap analysis performed): Bootstrap support value for the clade.
     *   `Taxa_List`: A comma-separated list of taxa in the clade.
 
@@ -449,6 +535,11 @@ If bootstrap analysis is performed, additional tree files:
 * `<tree_base>_bootstrap.nwk`: Tree with bootstrap support values
 * `<tree_base>_comprehensive.nwk`: Tree with bootstrap values, AU test p-values, and log-likelihood differences combined in format "BS:80|AU:0.95|ΔlnL:2.34"
 
+When LD normalization is enabled, tree annotations include normalized metrics:
+* Dataset-relative values are shown as "DR:0.85" in tree annotations when `--dataset-relative` is used
+* Multiple normalization methods appear as "BD:34.5|DR:0.85|PS:0.004" 
+* Format adapts based on selected normalization methods
+
 These trees can be visualized in standard tree viewers like [FigTree](https://github.com/rambaut/figtree/), [Dendroscope](https://github.com/husonlab/dendroscope3), [iTOL](https://itol.embl.de/), etc. The combined tree is particularly suited for FigTree which handles string labels well.
 
 #### Example Annotated Tree Visualization
@@ -457,17 +548,26 @@ The following example shows a comprehensive annotated tree from a combined analy
 ![Annotated tree example](./_resources/annotated_tree.png)
 
 In this visualization:
-- Branch labels show multiple support metrics in the format: `Clade_X - BS:XX|AU:X.XXXX|ΔlnL:XX.XX|BD:XX.XX|BF:X.XXe+XX|PD:XX`
+- Branch labels show multiple support metrics in the format: `Clade_X - BS:XX|AU:X.XXXX|ΔlnL:XX.XX|BD:XX.XX|PS:X.XXXXXX|PD:XX|ES:X.XX`
 - **BS**: Bootstrap support percentage (when available)
 - **AU**: Approximately Unbiased test p-value (lower values = stronger support)
 - **ΔlnL**: Log-likelihood difference (higher values = stronger support)
 - **BD**: Bayesian Decay (higher values = stronger support)
-- **BF**: Bayes Factor (exponential of BD)
+- **PS**: Per-site LD (LD normalized by alignment length)
 - **PD**: Parsimony Decay (traditional Bremer support)
+- **DR**: Dataset Relative (0-1 scaled within dataset)
+- **PR**: Percentile Rank (1-100% within dataset)
+- **Z**: Z-Score (standard deviations from dataset mean)
 - Branch colors and exact label formatting may vary by tree viewer; this example uses FigTree's visualization
+- Dataset-relative annotations enable within-dataset ranking comparison
 
 ### Detailed Markdown Report (`<output_stem>.md`)
-A Markdown file providing a more human-readable summary of the analysis parameters, summary statistics, and detailed branch support results in a table format. It also includes a brief interpretation guide. A good markdown viewer is [Joplin](https://joplinapp.org/) or [MarkdownLivePreview](https://markdownlivepreview.com/).
+A Markdown file providing a more human-readable summary of the analysis parameters, summary statistics, and detailed branch support results in a table format. It also includes a brief interpretation guide. When LD normalization is enabled, the report includes:
+* Dataset-relative support rankings with careful relative vs. absolute language
+* Percentile and Z-score interpretation guidelines  
+* Important disclaimers about relative rankings and cross-study comparison limitations
+
+A good markdown viewer is [Joplin](https://joplinapp.org/) or [MarkdownLivePreview](https://markdownlivepreview.com/).
 
 ### Site-Specific Analysis (Optional)
 If `--site-analysis` is used, additional output files are generated in a directory named `<output_stem>_site_analysis/`:
@@ -555,6 +655,44 @@ If `--debug` or `--keep-files` is used, a temporary directory (usually in `debug
 *   `bootstrap_search.nex`, `paup_bootstrap.log`, `bootstrap_trees.tre` (if `--bootstrap` used): Bootstrap analysis files.
 *   `site_analysis_*.nex`, `site_lnl_*.txt` (if `--site-analysis` used): Site-specific likelihood files.
 *   `mldecay_debug.log` (in the main execution directory if `--debug` is on): Detailed script execution log.
+
+## Normalization Interface
+
+panDecay provides a simplified interface for likelihood decay normalization:
+
+### Basic Normalization (Always Enabled)
+```bash
+python3 panDecay.py alignment.fas --model GTR
+```
+- Automatically calculates **per-site** (LD/alignment_length) and **relative** (LD/ML_likelihood) metrics
+- Provides basic scaling for alignment length and likelihood magnitude differences
+
+### Dataset-Relative Normalization (Optional)
+```bash  
+python3 panDecay.py alignment.fas --model GTR --dataset-relative
+```
+- Adds **dataset-relative scaling** (0-1 within dataset)
+- Adds **percentile ranking** (1-100% among dataset branches)
+- Adds **z-score normalization** (standard deviations from dataset mean)
+- All three methods calculated instantly (no performance cost)
+
+### Normalization Control
+```bash
+# Disable all normalization
+python3 panDecay.py alignment.fas --model GTR --no-normalize-ld
+
+# Basic normalization only (default)
+python3 panDecay.py alignment.fas --model GTR --normalize-ld
+
+# Full normalization with relative rankings
+python3 panDecay.py alignment.fas --model GTR --dataset-relative
+```
+
+**Key Benefits:**
+- **No complexity**: Single `--dataset-relative` flag enables all relative ranking methods
+- **No performance cost**: All calculations complete in milliseconds  
+- **Clear interpretation**: Relative rankings within your specific dataset
+- **Honest language**: Avoids false claims about absolute phylogenetic support
 
 ## Examples & Recipes
 
@@ -796,6 +934,62 @@ Then run:
 python3 panDecay.py --config my_analysis.ini
 ```
 
+### Example 20: Dataset-Relative Analysis for Within-Dataset Interpretation
+Calculate dataset-relative rankings for within-dataset interpretation:
+
+```bash
+# Basic dataset-relative analysis
+python3 panDecay.py alignment.fas --analysis ml+bayesian --model GTR --gamma \
+    --dataset-relative --output dataset_relative_analysis.txt
+
+# Just normalized metrics without dataset-relative ranking
+python3 panDecay.py alignment.fas --analysis ml+bayesian --model GTR --gamma \
+    --output basic_normalization.txt
+```
+
+### Example 21: Dataset-Relative Normalization with Site Analysis
+Combine dataset-relative normalization with site-specific analysis:
+
+```bash
+python3 panDecay.py alignment.fas --analysis ml+bayesian --model GTR --gamma \
+    --dataset-relative --site-analysis --visualize \
+    --output relative_support_with_sites.txt
+```
+
+### Example 22: Multi-Study Comparison Workflow
+Compare support across multiple datasets using dataset-relative metrics:
+
+```bash
+# Study 1: Primate phylogeny
+python3 panDecay.py primates.fas --analysis ml+bayesian --model GTR --gamma \
+    --dataset-relative --output primates_relative.txt
+
+# Study 2: Mammalian phylogeny  
+python3 panDecay.py mammals.fas --analysis ml+bayesian --model GTR --gamma \
+    --dataset-relative --output mammals_relative.txt
+
+# Study 3: Vertebrate phylogeny
+python3 panDecay.py vertebrates.fas --analysis ml+bayesian --model GTR --gamma \
+    --dataset-relative --output vertebrates_relative.txt
+
+# Dataset-relative metrics provide meaningful within-dataset rankings
+# Percentile ranks enable cautious cross-study context
+```
+
+### Example 23: Dataset-Relative Metrics for Meta-Analysis
+Generate dataset-relative metrics suitable for phylogenetic meta-analysis:
+
+```bash
+# Calculate relative metrics with comprehensive normalization
+python3 panDecay.py alignment.fas --analysis all --model GTR --gamma \
+    --dataset-relative --bootstrap --bootstrap-reps 1000 --output meta_analysis_ready.txt
+
+# Dataset-relative metrics provide honest relative rankings within datasets:
+# - Dataset-relative: 0-1 scaling for relative support strength
+# - Percentile rank: 1-100% ranking among dataset branches
+# - Z-score: Standard deviations from dataset mean
+```
+
 ## Interpreting Results
 
 *   **ML Tree Log-Likelihood:** The baseline score for your optimal tree.
@@ -819,16 +1013,32 @@ python3 panDecay.py --config my_analysis.ini
         *   Evaluate BD values alongside other metrics (ΔlnL, AU test, bootstrap, parsimony decay)
         *   Consider that BD values may scale with alignment properties (size, diversity)
         *   The strongest evidence for clade support comes from concordance across multiple metrics
-    *   **Note**: BD values of 30-50 or higher are common when data strongly support a clade and should not be considered anomalous
-    *   **Why traditional BF scales don't apply**: Traditional Bayes factor thresholds were developed for comparing fundamentally different models, not for topology testing where models differ only by a single constraint
+    *   **Note**: BD values scale with dataset characteristics; compare values relatively within each analysis
+    *   **Why traditional statistical scales don't apply**: Standard statistical thresholds were developed for comparing fundamentally different models, not for topology testing where models differ only by a single constraint
     *   **Negative values** suggest potential issues:
         *   Poor MCMC convergence (check convergence diagnostics)
         *   Marginal likelihood estimation problems
         *   Genuine lack of support for the clade
-*   **Bayes Factor (BF):**
-    *   The exponential of the Bayesian decay value (BF = e^BD)
-    *   Displayed with cap at 10^6 to avoid astronomical numbers
-    *   **Not recommended for interpretation in phylogenetics**: Use BD values instead, as traditional BF interpretation scales are misleading for topology testing
+
+### Dataset-Relative Normalization (Normalized LD Metrics)
+
+When LD normalization is enabled, panDecay provides statistically sound relative metrics for within-dataset interpretation:
+
+*   **Dataset-Relative Normalization:**
+    *   **Dataset-Relative**: (LD - min_LD) / (max_LD - min_LD) - 0-1 scaling showing relative support strength within the dataset
+    *   **Percentile Rank**: 1-100% ranking among all branches in the dataset
+    *   **Z-Score**: (LD - mean_LD) / std_LD - standard deviations from dataset mean
+    *   **Interpretation approach**: Focus on relative rankings within the dataset rather than absolute thresholds
+
+*   **Other Normalized Metrics:**
+    *   **LD Per Site**: LD/alignment_length - accounts for alignment size differences
+    *   **LD Relative**: LD as percentage of dataset range - provides proportional measure
+
+*   **Interpretation Guidelines:**
+    *   **Use relative rankings** for identifying well-supported vs poorly-supported clades within your dataset
+    *   **Validate with raw LD** to ensure normalization calculations are reasonable
+    *   **Consider multiple metrics** - normalized metrics complement rather than replace other support measures
+    *   **Account for biological context** - highest-ranking clades represent the strongest relative support in your dataset
 
 **Site-Specific Analysis Interpretation:**
 * **Negative delta lnL values** indicate sites that support the branch (they become less likely when the branch is constrained to be absent).
@@ -857,26 +1067,9 @@ Generally, clades with large positive `ΔlnL` values, low `AU_p-value`s, high bo
     *   No Bayesian output: Check the debug log for specific errors. Ensure your alignment is compatible with MrBayes (e.g., taxon names without special characters).
 *   **Bayesian analysis takes too long**: Reduce the number of generations (`--bayes-ngen 50000`) or increase sampling frequency (`--bayes-sample-freq 500`) for testing. Production runs typically need at least 1 million generations.
 
-## Understanding Bayes Factors in Phylogenetic Topology Testing
+## Understanding Bayesian Decay in Phylogenetic Topology Testing
 
-Traditional Bayes factor interpretation guidelines were developed for comparing fundamentally different models (e.g., linear vs. polynomial regression) and do not apply well to phylogenetic topology testing. Here's why:
-
-### Why Phylogenetic Bayes Factors Behave Differently
-
-1. **Minimal Model Complexity Differences**
-   - In topology testing, we compare models that differ only by a single topological constraint
-   - All other model parameters (substitution model, rates, frequencies) remain identical
-   - Traditional BF penalties for model complexity are largely irrelevant here
-
-2. **Likelihood Dominates Marginal Likelihood**
-   - When data strongly support a topology, the posterior concentrates around the ML tree
-   - The marginal likelihood becomes dominated by the likelihood component
-   - This explains why Bayesian decay values closely approximate ML log-likelihood differences
-
-3. **Different Prior Effects**
-   - Traditional BF applications involve priors over fundamentally different parameter spaces
-   - In topology testing, the prior difference is only in tree space
-   - When data signal is strong, this prior difference has minimal impact
+Bayesian decay values provide a natural extension of support assessment to the Bayesian framework. Here are key insights for proper interpretation:
 
 ### Key Insights for Phylogenetics
 
@@ -886,23 +1079,126 @@ Traditional Bayes factor interpretation guidelines were developed for comparing 
 
 2. **Large BD Values Are Normal**: 
    - BD values of 30-50 or higher are common for well-supported clades
-   - These don't indicate "astronomical" support as traditional BF scales would suggest
    - They simply reflect strong data signal for the clade
 
 3. **Phylogenetic-Specific Interpretation**:
-   - Focus on BD values rather than Bayes factors
-   - Use phylogenetic-specific thresholds (BD: 0-2 weak, 2-5 moderate, 5-10 strong, >10 very strong)
+   - Focus on BD values for interpretation
+   - Compare BD values relatively within each analysis rather than using absolute thresholds
    - Compare BD values across clades in your tree for relative support assessment
 
 ### Practical Implications
 
 When interpreting panDecay results:
-- **Don't be alarmed** by large Bayes factors or BD values
 - **Compare BD and ML differences** - similar values confirm proper analysis
-- **Use BD values** for interpretation, not traditional BF thresholds
+- **Use BD values** for interpretation rather than exponential transformations
 - **Consider relative support** across branches rather than absolute thresholds
+- **Utilize normalized metrics** (LD/site, dataset-relative rankings) for within-dataset interpretation
 
-This understanding helps avoid misinterpretation and provides more accurate assessment of phylogenetic support.
+This understanding helps provide accurate assessment of phylogenetic support.
+
+## Technical Background: Dataset-Relative Normalization
+
+The dataset-relative approach addresses a fundamental limitation in phylogenetic support assessment: the scaling of support metrics with dataset characteristics and the inappropriate application of Cohen's d to phylogenetic data.
+
+### The Dataset Scaling Problem
+
+Raw likelihood decay values are influenced by:
+- **Alignment length**: Longer alignments typically produce larger LD values
+- **Sequence diversity**: More divergent sequences increase likelihood differences
+- **Substitution rates**: Faster-evolving sites contribute more to likelihood differences
+- **Model complexity**: More complex models can amplify likelihood differences
+
+This scaling makes absolute thresholds meaningless without dataset context.
+
+### Statistical Foundation
+
+panDecay's dataset-relative approach provides honest relative rankings:
+
+```
+Dataset-Relative = (LD - min_dataset_LD) / (max_dataset_LD - min_dataset_LD)
+Percentile Rank = (rank_among_branches / total_branches) × 100
+Z-Score = (LD - mean_dataset_LD) / std_dataset_LD
+```
+
+Where:
+- **BD**: Bayesian decay (marginal likelihood difference)
+- **σ_site_signals**: Standard deviation of site-specific likelihood differences
+- **MAD_site_signals**: Median Absolute Deviation of site-specific likelihood differences
+- **1.4826**: Scaling factor for MAD to achieve normal distribution equivalence
+- **Site signals**: Per-site likelihood differences between constrained and unconstrained trees
+
+### Methodological Advantages
+
+1. **Relative ranking**: Provides honest relative rankings within each dataset
+2. **No false precision**: Avoids inappropriate absolute thresholds that don't apply to phylogenetic data
+3. **Multiple perspectives**: Dataset-relative, percentile, and z-score metrics offer complementary views
+4. **Statistical validity**: Based on well-established statistical principles rather than borrowed frameworks
+
+### Implementation Details
+
+panDecay calculates dataset-relative metrics through:
+1. **Site-specific analysis**: Computing likelihood differences for each alignment position (when applicable)
+2. **Dataset statistics**: Calculating min, max, mean, and standard deviation of LD values within the dataset
+3. **Relative scaling**: Applying 0-1 scaling, percentile ranking, and z-score normalization
+4. **Quality control**: Robust handling of edge cases and degenerate datasets
+
+### Biological Interpretation
+
+Dataset-relative metrics provide meaningful within-dataset context:
+- **Dataset-relative values (0.0-1.0)**: 0.0 = weakest support in dataset, 1.0 = strongest support in dataset
+- **Percentile ranks (1-100%)**: 100% = highest-ranking branch, 1% = lowest-ranking branch
+- **Z-scores**: Positive values above dataset mean, negative values below dataset mean
+- **Interpretation focus**: Relative rankings and context rather than absolute support strength
+
+### Validation and Limitations
+
+**Validation approaches:**
+- Compare relative rankings with other support metrics (AU test, bootstrap)
+- Verify that rankings correlate with known phylogenetic relationships
+- Test consistency across different normalization methods
+
+**Limitations:**
+- Provides relative rather than absolute support assessment
+- Cross-study comparisons require careful interpretation
+- May be affected by systematic biases in alignment or model
+
+### Applications
+
+Dataset-relative metrics enable:
+- **Within-dataset ranking**: Identifying the most and least supported clades
+- **Methodological consistency**: Avoiding inappropriate absolute thresholds
+- **Honest interpretation**: Relative support assessment without false confidence
+- **Quality assessment**: Identifying datasets with unusual support distributions
+
+This approach provides statistically sound relative assessment of phylogenetic support within each dataset.
+
+## Recent Improvements
+
+### Normalization Method Enhancements (v1.1.0+)
+
+Recent updates have improved the accuracy and reliability of normalized BD metrics:
+
+#### BD/Site Calculation
+- **Fixed calculation pipeline**: Resolved issues where BD/site (per-site normalization) was incorrectly showing as 0.000000 despite valid BD values
+- **Enhanced diagnostic logging**: Added comprehensive logging to track BD/site calculation steps and identify potential issues
+- **Improved accuracy**: BD/site now correctly reflects the BD value normalized by alignment length
+
+#### Dataset-Relative Framework Implementation
+- **Replaced Cohen's d framework**: Removed inappropriate effect size calculations that produced uninterpretable results
+- **Implemented relative rankings**: Added dataset-relative (0-1), percentile rank (1-100%), and z-score normalization
+- **Statistical validity**: Methods based on standard statistical principles rather than borrowed frameworks
+- **Honest interpretation**: Focus on relative support within datasets rather than false absolute thresholds
+
+#### Enhanced Validation
+- **Cross-method consistency**: All normalization methods now produce statistically sound relative measures
+- **Relative ranking framework**: Honest within-dataset interpretation without inappropriate absolute claims
+- **Quality assurance**: Improved error handling and fallback mechanisms for edge cases
+
+These improvements ensure that:
+- LD/site values accurately reflect per-position signal strength
+- Dataset-relative metrics provide honest relative rankings without false precision
+- All normalization methods produce interpretable values for within-dataset comparison
+- Mathematical foundations are statistically appropriate for phylogenetic data
 
 ## Citations
 

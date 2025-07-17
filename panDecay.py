@@ -60,7 +60,7 @@ class panDecayIndices:
                  config_constraints=None, check_convergence=True, min_ess=200,
                  max_psrf=1.01, max_asdsf=0.01, convergence_strict=False,
                  mrbayes_parse_timeout=30.0, output_style="unicode",
-                 normalize_bd=True, bd_normalization_methods=None):
+                 normalize_ld=True, dataset_relative=False):
 
         self.alignment_file = Path(alignment_file)
         self.alignment_format = alignment_format
@@ -124,8 +124,12 @@ class panDecayIndices:
         self.output_style = output_style
         
         # Normalization parameters
-        self.normalize_bd = normalize_bd
-        self.bd_normalization_methods = bd_normalization_methods or ["per_site", "relative"]
+        self.normalize_ld = normalize_ld
+        
+        # Set normalization methods based on flags
+        self.ld_normalization_methods = ["per_site", "relative"]  # Always include these basic ones
+        if dataset_relative:
+            self.ld_normalization_methods.extend(["dataset_relative", "percentile_rank", "z_score"])
 
         self.data_type = data_type.lower()
         if self.data_type not in ["dna", "protein", "discrete"]:
@@ -328,6 +332,20 @@ class panDecayIndices:
             return f"'{taxon_name.replace(chr(39), '_')}'" # chr(39) is single quote
 
         return taxon_name
+
+    def _get_representative_taxa_sample(self, taxa_list, max_show=3):
+        """Generate a representative sample of taxa that better distinguishes different clades."""
+        if len(taxa_list) <= max_show:
+            return ", ".join(taxa_list)
+        else:
+            # Show first, middle, and last to give better representation of the clade
+            first = taxa_list[0]
+            last = taxa_list[-1] 
+            if len(taxa_list) == 4:
+                middle = taxa_list[1]
+            else:
+                middle = taxa_list[len(taxa_list)//2]
+            return f"{first}...{middle}...{last} ({len(taxa_list)} taxa)"
 
     def _convert_to_nexus(self):
         """Converts alignment to NEXUS, writes to self.nexus_file_path."""
@@ -554,6 +572,8 @@ class panDecayIndices:
             paup_result = self._run_paup_command_file(ML_SEARCH_NEX_FN, ML_LOG_FN, timeout_sec=3600) # 1hr timeout
 
             self.ml_likelihood = self._parse_likelihood_from_score_file(self.temp_path / ML_SCORE_FN)
+            logger.info(f"DIAGNOSTIC: ML likelihood from score file: {self.ml_likelihood}")
+            
             if self.ml_likelihood is None and paup_result.stdout: # Fallback to log
                 logger.info(f"Fallback: Parsing ML likelihood from PAUP* log {ML_LOG_FN}")
                 patterns = [r'-ln\s*L\s*=\s*([0-9.]+)', r'likelihood\s*=\s*([0-9.]+)', r'score\s*=\s*([0-9.]+)']
@@ -562,6 +582,8 @@ class panDecayIndices:
                     if m: self.ml_likelihood = float(m[-1]); break
                 if self.ml_likelihood: logger.info(f"Extracted ML likelihood from log: {self.ml_likelihood}")
                 else: logger.warning("Could not extract ML likelihood from PAUP* log.")
+            
+            logger.info(f"DIAGNOSTIC: Final ML likelihood after all parsing attempts: {self.ml_likelihood}")
 
             ml_tree_path = self.temp_path / ML_TREE_FN
             if ml_tree_path.exists() and ml_tree_path.stat().st_size > 0:
@@ -792,6 +814,43 @@ class panDecayIndices:
             logger.error(f"Constraint tree generation/scoring failed for index {tree_idx}: {e}")
             return None, None
     
+    def _generate_constraint_trees_for_bayesian(self):
+        """Generate constraint trees for Bayesian-only analysis when dataset-relative normalization is needed."""
+        ml_tree_path = self.temp_path / ML_TREE_FN
+        if not ml_tree_path.exists():
+            logger.error("No ML tree file available for generating constraint trees for Bayesian analysis")
+            return
+            
+        # Parse the ML tree to get clades using BioPython (same as used elsewhere in the code)
+        try:
+            from Bio import Phylo
+            ml_tree = Phylo.read(str(ml_tree_path), "newick")
+            
+            # Get internal branches and their taxa (same logic as in _calculate_ml_decay_indices)
+            internal_branches = []
+            internal_clades = [cl for cl in ml_tree.get_nonterminals() if cl and cl.clades]
+            
+            for clade in internal_clades:
+                clade_taxa = [term.name for term in clade.get_terminals()]
+                if len(clade_taxa) > 1 and len(clade_taxa) < len(self.alignment):
+                    internal_branches.append(clade_taxa)
+            
+            # Generate constraint trees for each clade
+            for idx, clade_taxa in enumerate(internal_branches):
+                tree_idx = idx + 3  # Match the numbering used in ML analysis
+                logger.info(f"Generating constraint tree for clade {tree_idx} ({len(clade_taxa)} taxa)")
+                
+                # Generate constraint tree using the existing method
+                constraint_filename, _ = self._generate_and_score_constraint_tree(clade_taxa, tree_idx)
+                
+                if constraint_filename:
+                    logger.debug(f"Generated constraint tree: {constraint_filename}")
+                else:
+                    logger.warning(f"Failed to generate constraint tree for clade {tree_idx}")
+                    
+        except Exception as e:
+            logger.error(f"Failed to generate constraint trees for Bayesian analysis: {e}")
+    
     # ===== Bayesian Analysis Methods =====
     
     def _generate_mrbayes_nexus(self, constraint_tree_file=None, clade_taxa=None, constraint_id=None):
@@ -873,22 +932,23 @@ class panDecayIndices:
             beagle_cmd += f"beaglescaling={self.beagle_scaling};"
             blocks.append(beagle_cmd)
         
-        # MCMC settings
-        blocks.append(f"    mcmc ngen={self.bayes_ngen} samplefreq={self.bayes_sample_freq} "
-                     f"nchains={self.bayes_chains} savebrlens=yes printfreq=1000 diagnfreq=5000;")
+        # MCMC or stepping-stone sampling
+        if self.marginal_likelihood == "ss":
+            # Use stepping-stone sampling instead of regular MCMC
+            # The ss command includes its own MCMC run
+            blocks.append(f"    ss ngen={self.bayes_ngen} samplefreq={self.bayes_sample_freq} "
+                         f"nchains={self.bayes_chains} alpha={self.ss_alpha} nsteps={self.ss_nsteps} "
+                         f"savebrlens=yes printfreq=1000 diagnfreq=5000;")
+            logger.debug(f"Added stepping stone sampling: alpha={self.ss_alpha}, nsteps={self.ss_nsteps}")
+        else:
+            # Regular MCMC for harmonic mean estimation
+            blocks.append(f"    mcmc ngen={self.bayes_ngen} samplefreq={self.bayes_sample_freq} "
+                         f"nchains={self.bayes_chains} savebrlens=yes printfreq=1000 diagnfreq=5000;")
         
-        # Summary commands first
+        # Summary commands
         burnin_samples = int(self.bayes_ngen / self.bayes_sample_freq * self.bayes_burnin)
         blocks.append(f"    sump burnin={burnin_samples};")
         blocks.append(f"    sumt burnin={burnin_samples};")
-        
-        # Add stepping-stone sampling if requested
-        if self.marginal_likelihood == "ss":
-            # Stepping-stone sampling parameters
-            # alpha: shape parameter for Beta distribution (default 0.4)
-            # nsteps: number of steps between prior and posterior (default 50)
-            blocks.append(f"    ss alpha={self.ss_alpha} nsteps={self.ss_nsteps} "
-                         f"burnin={burnin_samples};")
         
         blocks.append("end;")
         blocks.append("")  # Empty line
@@ -941,7 +1001,21 @@ class panDecayIndices:
                 logger.error(f"MrBayes failed with return code {result.returncode}")
                 logger.error(f"MrBayes stdout: {result.stdout[:500]}")  # First 500 chars
                 logger.error(f"MrBayes stderr: {result.stderr[:500]}")  # First 500 chars
-                # Check for specific error patterns
+                
+                # Check for stepping stone specific errors
+                is_ss_error = (self.marginal_likelihood == "ss" and 
+                              ('Error in command "Ss"' in result.stdout or 
+                               'Error in command "ss"' in result.stdout))
+                
+                if is_ss_error:
+                    logger.warning("Stepping stone sampling failed. Retrying with harmonic mean estimation...")
+                    logger.warning("This MrBayes build may not support stepping stone sampling or")
+                    logger.warning("the dataset may be too small for stepping stone analysis.")
+                    
+                    # Retry with harmonic mean
+                    return self._run_mrbayes_with_harmonic_mean(nexus_file, output_prefix)
+                
+                # Check for other error patterns
                 if "Error" in result.stdout or "Could not" in result.stdout:
                     error_lines = [line for line in result.stdout.split('\n') if 'Error' in line or 'Could not' in line]
                     for line in error_lines[:5]:
@@ -956,12 +1030,10 @@ class panDecayIndices:
             
             # Use stepping-stone if requested
             if self.marginal_likelihood == "ss":
-                logger.debug(f"Looking for stepping-stone output for {output_prefix}")
+                # Try stepping stone first, fall back to harmonic mean if not available
                 ml_value = self._parse_mrbayes_stepping_stone(nexus_file, output_prefix)
-                
-                # Fall back to harmonic mean if stepping-stone failed
                 if ml_value is None:
-                    logger.warning("Stepping-stone parsing failed, falling back to harmonic mean")
+                    logger.warning(f"Stepping stone parsing failed for {output_prefix}, falling back to harmonic mean")
                     lstat_file_path = self.temp_path / f"{nexus_file.name}.lstat"
                     ml_value = self._parse_mrbayes_marginal_likelihood(lstat_file_path, output_prefix)
             else:
@@ -997,11 +1069,72 @@ class panDecayIndices:
             logger.error(f"MrBayes timed out for {nexus_file}")
             return None
         except Exception as e:
-            logger.error(f"Error running MrBayes: {e}")
+            logger.error(f"Unexpected error running MrBayes for {nexus_file}: {e}")
             if self.debug:
                 import traceback
                 logger.debug(traceback.format_exc())
             return None
+
+    def _run_mrbayes_with_harmonic_mean(self, nexus_file, output_prefix):
+        """
+        Retry MrBayes analysis using harmonic mean estimation instead of stepping stone.
+        
+        Args:
+            nexus_file: Path to NEXUS file
+            output_prefix: Prefix for output files
+            
+        Returns:
+            Marginal likelihood value or None if failed
+        """
+        logger.debug(f"Retrying MrBayes analysis with harmonic mean for {output_prefix}")
+        
+        # Temporarily switch to harmonic mean for this run
+        original_ml_method = self.marginal_likelihood
+        self.marginal_likelihood = "hm"
+        
+        try:
+            # Generate new NEXUS file with harmonic mean MCMC
+            nexus_content = self._generate_mrbayes_nexus()
+            
+            # Write the new NEXUS file
+            hm_nexus_file = self.temp_path / f"{output_prefix}_hm.nex"
+            hm_nexus_file.write_text(nexus_content)
+            
+            # Run MrBayes with the new file
+            if self.use_mpi:
+                if self.mpi_processors and self.mpi_processors > 0:
+                    n_procs = self.mpi_processors
+                else:
+                    n_procs = self.bayes_chains
+                cmd = [self.mpirun_path, "-np", str(n_procs), self.mrbayes_path, hm_nexus_file.name]
+            else:
+                cmd = [self.mrbayes_path, hm_nexus_file.name]
+            
+            logger.debug(f"Running MrBayes (harmonic mean fallback): {' '.join(cmd)}")
+            
+            timeout_seconds = max(7200, (self.bayes_ngen / 500) * self.bayes_chains)
+            result = subprocess.run(cmd, cwd=str(self.temp_path), 
+                                  capture_output=True, text=True, 
+                                  timeout=timeout_seconds)
+            
+            if result.returncode != 0:
+                logger.error(f"MrBayes harmonic mean fallback also failed for {output_prefix}")
+                return None
+            
+            logger.info(f"MrBayes harmonic mean fallback successful for {output_prefix}")
+            
+            # Parse marginal likelihood using harmonic mean
+            lstat_file_path = self.temp_path / f"{hm_nexus_file.name}.lstat"
+            ml_value = self._parse_mrbayes_marginal_likelihood(lstat_file_path, f"{output_prefix}_hm")
+            
+            return ml_value
+            
+        except Exception as e:
+            logger.error(f"Harmonic mean fallback failed for {output_prefix}: {e}")
+            return None
+        finally:
+            # Restore original marginal likelihood method
+            self.marginal_likelihood = original_ml_method
     
     def run_bayesian_decay_analysis(self):
         """
@@ -1105,9 +1238,7 @@ class panDecayIndices:
             
             # Display progress box
             # Show first few taxa names for context
-            taxa_sample = ", ".join(clade_taxa[:2])
-            if len(clade_taxa) > 2:
-                taxa_sample += "..."
+            taxa_sample = self._get_representative_taxa_sample(clade_taxa)
             
             box_content = [
                 f"Testing clade {clade_log_idx} ({branch_num} of {len(testable_branches)}) • {len(clade_taxa)} taxa",
@@ -1142,8 +1273,8 @@ class panDecayIndices:
                 
                 # Calculate site data for effect size calculations if normalization is enabled
                 site_data = None
-                if self.normalize_bd and any(method.startswith('effect_size') or method == 'signal_to_noise' 
-                                           for method in self.bd_normalization_methods):
+                if self.normalize_ld and any(method.startswith('effect_size') or method == 'signal_to_noise' 
+                                           for method in self.ld_normalization_methods):
                     logger.debug(f"Effect size methods detected, attempting site analysis for {clade_id}")
                     # We need to perform site analysis for effect size calculations
                     # Use the ML tree files if available
@@ -1156,7 +1287,7 @@ class panDecayIndices:
                         if constraint_tree_file.exists():
                             logger.debug(f"Constraint tree found, running site analysis")
                             tree_files = [str(ml_tree_path), str(constraint_tree_file)]
-                            site_data = self._calculate_site_likelihoods(tree_files, clade_id)
+                            site_data = self._calculate_site_likelihoods(tree_files, clade_id, verbose=False)
                             if site_data:
                                 logger.debug(f"Site analysis completed for {clade_id} (Bayesian normalization)")
                             else:
@@ -1166,20 +1297,27 @@ class panDecayIndices:
                     else:
                         logger.warning(f"ML tree file not available for site analysis: {ml_tree_path}")
                 
-                # Calculate normalized BD metrics if enabled
-                normalized_bd_metrics = {}
-                if self.normalize_bd:
-                    normalized_bd_metrics = self._calculate_normalized_bd_metrics(
-                        bayes_decay, unconstrained_ml, site_data=site_data
+                # Calculate normalized LD metrics if enabled
+                normalized_ld_metrics = {}
+                if self.normalize_ld:
+                    # Check if ML decay values are available for methodologically consistent effect size calculations
+                    ml_decay = None
+                    if hasattr(self, 'decay_indices') and self.decay_indices and clade_id in self.decay_indices:
+                        ml_decay = self.decay_indices[clade_id].get('lnl_diff')
+                        if ml_decay is not None:
+                            logger.debug(f"Using ML decay for effect size calculations: {ml_decay}")
+                    
+                    normalized_ld_metrics = self._calculate_normalized_ld_metrics(
+                        bayes_decay, unconstrained_ml, site_data=site_data, ml_decay=ml_decay
                     )
-                    logger.debug(f"Normalized BD metrics for {clade_id}: {list(normalized_bd_metrics.keys())}")
+                    logger.debug(f"Normalized LD metrics for {clade_id}: {list(normalized_ld_metrics.keys())}")
                 
                 bayesian_results[clade_id] = {
                     'unconstrained_ml': unconstrained_ml,
                     'constrained_ml': constrained_ml,
                     'bayes_decay': bayes_decay,
                     'taxa': clade_taxa,
-                    **normalized_bd_metrics  # Add normalized metrics
+                    **normalized_ld_metrics  # Add normalized metrics
                 }
                 logger.debug(f"Bayesian results for {clade_id}: {list(bayesian_results[clade_id].keys())}")
                 
@@ -1191,12 +1329,12 @@ class panDecayIndices:
                 ]
                 
                 # Add normalized metrics to progress display if available
-                if self.normalize_bd and normalized_bd_metrics:
-                    if 'bd_per_site' in normalized_bd_metrics:
-                        bd_ps = normalized_bd_metrics['bd_per_site']
+                if self.normalize_ld and normalized_ld_metrics:
+                    if 'bd_per_site' in normalized_ld_metrics:
+                        bd_ps = normalized_ld_metrics['bd_per_site']
                         result_lines.append(f"BD/site: {bd_ps:.6f}")
-                    if 'bd_relative' in normalized_bd_metrics:
-                        bd_rel = normalized_bd_metrics['bd_relative']
+                    if 'bd_relative' in normalized_ld_metrics:
+                        bd_rel = normalized_ld_metrics['bd_relative']
                         result_lines.append(f"BD%: {bd_rel*100:.3f}%")
                 logger.info(self._format_progress_box("Bayesian Analysis Results", result_lines))
                 if bayes_decay < 0:
@@ -2113,14 +2251,17 @@ class panDecayIndices:
         original_tree = self.ml_tree
         
         try:
+            logger.info("PARSIMONY DIAGNOSTIC: Starting parsimony tree building...")
             self._run_paup_command_file(PARS_NEX_FN, PARS_LOG_FN)
             
             # Parse parsimony score
             score_path = self.temp_path / PARS_SCORE_FN
             pars_score = None
+            logger.info(f"PARSIMONY DIAGNOSTIC: Looking for parsimony score at {score_path}")
             if score_path.exists():
                 score_content = score_path.read_text()
                 logger.debug(f"Parsimony score file content:\n{score_content}")
+                logger.info("PARSIMONY DIAGNOSTIC: Parsing parsimony score...")
                 # Parse parsimony score from PAUP output
                 # Try different patterns that PAUP might use
                 for line in score_content.splitlines():
@@ -2156,18 +2297,19 @@ class panDecayIndices:
                             break
             
             if pars_score is None:
-                logger.error("Could not parse parsimony score")
+                logger.error("PARSIMONY DIAGNOSTIC: Could not parse parsimony score - ANALYSIS FAILED")
                 return {}
                 
-            logger.info(f"Initial parsimony score: {pars_score}")
+            logger.info(f"PARSIMONY DIAGNOSTIC: Successfully parsed initial parsimony score: {pars_score}")
             
             # Now calculate decay for each clade
             parsimony_decay = {}
             
             # Load the parsimony tree for clade identification
             pars_tree_path = self.temp_path / PARS_TREE_FN
+            logger.info(f"PARSIMONY DIAGNOSTIC: Looking for parsimony tree at {pars_tree_path}")
             if not pars_tree_path.exists():
-                logger.error("Parsimony tree file not found")
+                logger.error("PARSIMONY DIAGNOSTIC: Parsimony tree file not found - ANALYSIS FAILED")
                 return {}
             
             # Temporarily use parsimony tree for clade identification if no ML tree
@@ -2211,9 +2353,7 @@ class panDecayIndices:
                 clade_id = f"Clade_{clade_log_idx}"
                 
                 # Display progress box
-                taxa_sample = ", ".join(clade_taxa[:2])
-                if len(clade_taxa) > 2:
-                    taxa_sample += "..."
+                taxa_sample = self._get_representative_taxa_sample(clade_taxa)
                 
                 box_content = [
                     f"Testing clade {clade_log_idx} ({branch_num} of {len(testable_branches)}) • {len(clade_taxa)} taxa",
@@ -2291,14 +2431,16 @@ class panDecayIndices:
                             'constrained_score': constrained_score,
                             'taxa': clade_taxa
                         }
-                        logger.info(f"{clade_id}: Parsimony decay = {decay_value} (constrained: {constrained_score}, optimal: {pars_score})")
+                        logger.info(f"PARSIMONY DIAGNOSTIC: {clade_id}: Parsimony decay = {decay_value} (constrained: {constrained_score}, optimal: {pars_score})")
+                    else:
+                        logger.warning(f"PARSIMONY DIAGNOSTIC: Failed to parse constrained score for {clade_id} - skipping branch")
                     
                 except Exception as e:
-                    logger.error(f"Failed to calculate parsimony decay for {clade_id}: {e}")
+                    logger.error(f"PARSIMONY DIAGNOSTIC: Failed to calculate parsimony decay for {clade_id}: {e}")
                     continue
                     
         except Exception as e:
-            logger.error(f"Parsimony decay analysis failed: {e}")
+            logger.error(f"PARSIMONY DIAGNOSTIC: Parsimony decay analysis failed: {e}")
             # Restore original tree if we temporarily used parsimony tree
             if original_tree is not None:
                 self.ml_tree = original_tree
@@ -2309,6 +2451,7 @@ class panDecayIndices:
             if original_tree is not None:
                 self.ml_tree = original_tree
             
+        logger.info(f"PARSIMONY DIAGNOSTIC: Parsimony analysis completed successfully with {len(parsimony_decay)} branches")
         return parsimony_decay
 
     def parse_constraints(self):
@@ -2421,40 +2564,74 @@ class panDecayIndices:
         # Initialize results dictionary
         self.decay_indices = {}
         
+        # === DIAGNOSTIC LOGGING ===
+        logger.info(f"ANALYSIS FLOW: Starting decay analysis - ML:{self.do_ml}, Bayesian:{self.do_bayesian}, Parsimony:{self.do_parsimony}")
+        logger.info(f"ANALYSIS FLOW: ml_likelihood available: {self.ml_likelihood is not None}")
+        if self.ml_likelihood is not None:
+            logger.info(f"ANALYSIS FLOW: ml_likelihood value: {self.ml_likelihood}")
+        
         # Calculate ML decay indices if requested
         if self.do_ml:
             if self.ml_likelihood is None:
-                logger.error("ML likelihood is missing. Cannot calculate ML decay indices.")
+                logger.warning("ML likelihood is missing. Will attempt relative decay analysis...")
+                logger.warning("ANALYSIS FLOW: ML likelihood is None - attempting relative analysis only")
+                
+            # Try ML analysis regardless of likelihood availability for relative comparisons
+            try:
+                logger.info("Calculating ML decay indices...")
+                self.decay_indices = self._calculate_ml_decay_indices(perform_site_analysis)
+                logger.info(f"ANALYSIS FLOW: ML analysis completed, found {len(self.decay_indices)} branches")
+                logger.info(f"ANALYSIS FLOW: ML decay_indices keys: {list(self.decay_indices.keys())}")
+            except Exception as e:
+                logger.error(f"ANALYSIS FLOW: ML analysis FAILED with exception: {e}")
+                logger.error("ANALYSIS FLOW: Continuing with other analyses if available...")
                 if not self.do_bayesian and not self.do_parsimony:
                     return {}
                 # Continue with other analyses
-            else:
-                logger.info("Calculating ML decay indices...")
-                self.decay_indices = self._calculate_ml_decay_indices(perform_site_analysis)
         
         # Calculate Bayesian decay indices if requested
         if self.do_bayesian:
+            # Generate constraint trees for Bayesian-only analysis if needed for effect size calculations
+            if not self.do_ml and perform_site_analysis:
+                logger.info("Generating constraint trees for Bayesian effect size calculations...")
+                self._generate_constraint_trees_for_bayesian()
+            
             logger.info("Calculating Bayesian decay indices...")
             bayesian_results = self._calculate_bayesian_decay_indices()
+            
+            # === DIAGNOSTIC LOGGING ===
+            logger.info(f"ANALYSIS FLOW: Bayesian analysis completed, found {len(bayesian_results) if bayesian_results else 0} branches")
+            if bayesian_results:
+                logger.info(f"ANALYSIS FLOW: Bayesian decay_indices keys: {list(bayesian_results.keys())}")
+                logger.info(f"ANALYSIS FLOW: Before Bayesian merge - existing keys: {list(self.decay_indices.keys())}")
             
             # Merge Bayesian results with existing results
             if bayesian_results:
                 for clade_id, bayes_data in bayesian_results.items():
                     if clade_id in self.decay_indices:
                         # Add Bayesian fields to existing results
-                        self.decay_indices[clade_id].update({
-                            'bayes_unconstrained_ml': bayes_data.get('unconstrained_ml'),
-                            'bayes_constrained_ml': bayes_data.get('constrained_ml'),
-                            'bayes_decay': bayes_data.get('bayes_decay'),
-                        })
+                        # Copy all Bayesian data except 'taxa' to avoid overwriting
+                        bayes_update = {k: v for k, v in bayes_data.items() if k != 'taxa'}
+                        self.decay_indices[clade_id].update(bayes_update)
+                        logger.debug(f"ANALYSIS FLOW: Merged Bayesian data for existing clade {clade_id}")
                     else:
                         # Create new entry for Bayesian-only results
                         self.decay_indices[clade_id] = bayes_data
+                        logger.debug(f"ANALYSIS FLOW: Created new Bayesian-only entry for clade {clade_id}")
+                logger.info(f"ANALYSIS FLOW: After Bayesian merge - total keys: {list(self.decay_indices.keys())}")
         
         # Calculate parsimony decay indices if requested
         if self.do_parsimony:
             logger.info("Calculating parsimony decay indices...")
             parsimony_results = self.run_parsimony_decay_analysis()
+            
+            # === DIAGNOSTIC LOGGING ===
+            logger.info(f"ANALYSIS FLOW: Parsimony analysis completed, found {len(parsimony_results) if parsimony_results else 0} branches")
+            if parsimony_results:
+                logger.info(f"ANALYSIS FLOW: Parsimony decay_indices keys: {list(parsimony_results.keys())}")
+                logger.info(f"ANALYSIS FLOW: Before Parsimony merge - existing keys: {list(self.decay_indices.keys())}")
+            else:
+                logger.warning("ANALYSIS FLOW: Parsimony analysis returned empty results")
             
             # Merge parsimony results with existing results
             if parsimony_results:
@@ -2466,14 +2643,30 @@ class panDecayIndices:
                             'pars_score': pars_data.get('pars_score'),
                             'pars_constrained_score': pars_data.get('constrained_score')
                         })
+                        logger.debug(f"ANALYSIS FLOW: Merged parsimony data for existing clade {clade_id}")
                     else:
                         # Create new entry for parsimony-only results
                         self.decay_indices[clade_id] = pars_data
+                        logger.debug(f"ANALYSIS FLOW: Created new parsimony-only entry for clade {clade_id}")
+                logger.info(f"ANALYSIS FLOW: After Parsimony merge - total keys: {list(self.decay_indices.keys())}")
+        
+        # === FINAL DIAGNOSTIC LOGGING ===
+        logger.info(f"ANALYSIS FLOW: Final decay_indices contains {len(self.decay_indices)} branches")
+        for clade_id, data in self.decay_indices.items():
+            analysis_types = []
+            if 'lnl_diff' in data or 'au_pvalue' in data: analysis_types.append('ML')
+            if 'bayes_decay' in data: analysis_types.append('Bayesian')
+            if 'pars_decay' in data: analysis_types.append('Parsimony')
+            logger.info(f"ANALYSIS FLOW: {clade_id} has data for: {', '.join(analysis_types) if analysis_types else 'NO ANALYSIS TYPES'}")
         
         if not self.decay_indices:
             logger.warning("No branch support values were calculated.")
         else:
             logger.info(f"Calculated support values for {len(self.decay_indices)} branches.")
+            
+        # Calculate dataset-relative normalizations if requested
+        if self.decay_indices and self.normalize_ld:
+            self._apply_dataset_relative_normalizations()
             
         return self.decay_indices
     
@@ -2526,9 +2719,7 @@ class panDecayIndices:
             
             # Show progress
             # Display progress box
-            taxa_sample = ", ".join(clade_taxa_names[:2])
-            if len(clade_taxa_names) > 2:
-                taxa_sample += "..."
+            taxa_sample = self._get_representative_taxa_sample(clade_taxa_names)
             
             box_content = [
                 f"Testing clade {clade_log_idx} ({branch_num} of {len(testable_branches)}) • {len(clade_taxa_names)} taxa",
@@ -2581,7 +2772,7 @@ class panDecayIndices:
                         ratio = site_analysis_result.get('support_ratio', 0.0)
                         weighted = site_analysis_result.get('weighted_support_ratio', 0.0)
 
-                        logger.info(f"Branch {clade_id}: {supporting} supporting sites, {conflicting} conflicting sites, ratio: {ratio:.2f}, weighted ratio: {weighted:.2f}")
+                        # Site analysis summary already logged in _calculate_site_likelihoods()
 
         logger.info(f"Running AU test on {len(all_tree_files_rel)} trees (1 ML + {len(constraint_info_map)} constrained).")
         au_test_results = self.run_au_test(all_tree_files_rel)
@@ -2605,6 +2796,19 @@ class panDecayIndices:
                            'weighted_support_ratio']:
                     if key in cdata:
                         self.decay_indices[cid][key] = cdata[key]
+                
+                # Calculate normalized BD metrics if enabled
+                if self.normalize_ld:
+                    ml_decay = self.decay_indices[cid]['lnl_diff']
+                    # Use the complete site analysis data that's already available
+                    site_analysis_data = cdata
+                    if 'signal_std' in site_analysis_data:
+                        normalized_ld_metrics = self._calculate_normalized_ld_metrics(
+                            ml_decay, self.ml_likelihood, site_data=site_analysis_data, ml_decay=ml_decay
+                        )
+                        # Add normalized metrics to ML results
+                        self.decay_indices[cid].update(normalized_ld_metrics)
+                        logger.debug(f"Added normalized LD metrics to ML results for {cid}: {list(normalized_ld_metrics.keys())}")
 
         if au_test_results:
             # Update ML likelihood if AU test scored it differently (should be rare)
@@ -2642,6 +2846,22 @@ class panDecayIndices:
             logger.warning("AU test failed or returned no results. Decay indices will lack AU p-values.")
 
 
+        # Apply normalization to all ML results if enabled (even without site analysis)
+        if self.normalize_ld and self.decay_indices:
+            logger.info("Applying normalization to ML decay indices...")
+            for cid, data in self.decay_indices.items():
+                ml_decay = data.get('lnl_diff')
+                if ml_decay is not None:
+                    # Check if normalization was already applied during site analysis
+                    if 'bd_per_site' not in data:
+                        # Use ML decay as raw_bd for ML-specific normalizations
+                        normalized_ld_metrics = self._calculate_normalized_ld_metrics(
+                            ml_decay, self.ml_likelihood, site_data=None, ml_decay=ml_decay
+                        )
+                        # Add normalized metrics to ML results
+                        data.update(normalized_ld_metrics)
+                        logger.debug(f"Added normalization to ML results for {cid}: {list(normalized_ld_metrics.keys())}")
+
         if not self.decay_indices:
             logger.warning("No branch support values were calculated.")
         else:
@@ -2649,37 +2869,75 @@ class panDecayIndices:
 
         return self.decay_indices
     
-    def _calculate_normalized_bd_metrics(self, raw_bd, unconstrained_ml, site_data=None):
+    def _calculate_normalized_ld_metrics(self, raw_bd, unconstrained_ml, site_data=None, ml_decay=None):
         """
-        Calculate normalized Bayesian Decay metrics for better cross-study comparisons.
+        Calculate normalized Likelihood Decay metrics for better cross-study comparisons.
         
         Args:
-            raw_bd: Raw Bayesian Decay value (unconstrained_ml - constrained_ml)
+            raw_bd: Raw Bayesian Decay value (unconstrained_ml - constrained_ml) 
             unconstrained_ml: Unconstrained marginal likelihood
             site_data: Optional site-specific data for signal-to-noise calculation
+            ml_decay: Optional ML decay value for methodologically consistent effect size calculations
             
         Returns:
             Dictionary with normalized metrics
+            
+        Note:
+            For methodological consistency, effect size calculations use ml_decay when available,
+            since both numerator (ML decay) and denominator (ML signal variance) come from the
+            same likelihood framework. Other normalizations (per-site, relative) use raw_bd to
+            preserve analysis-specific values.
         """
-        logger.debug(f"BD normalization called: raw_bd={raw_bd}, methods={self.bd_normalization_methods}")
+        logger.debug(f"LD normalization called: raw_bd={raw_bd}, methods={self.ld_normalization_methods}")
         logger.debug(f"Site data available: {site_data is not None}")
+        logger.debug(f"ML decay available: {ml_decay is not None}")
         if site_data:
             logger.debug(f"Site data keys: {list(site_data.keys()) if isinstance(site_data, dict) else 'Not a dict'}")
+        
+        # === NORMALIZATION DIAGNOSTIC LOGGING ===
+        logger.info(f"NORM DIAGNOSTIC: alignment_length = {getattr(self, 'alignment_length', 'NOT_SET')}")
+        logger.info(f"NORM DIAGNOSTIC: unconstrained_ml = {unconstrained_ml}")
+        logger.info(f"NORM DIAGNOSTIC: raw_bd = {raw_bd}")
+        logger.info(f"NORM DIAGNOSTIC: ml_decay = {ml_decay}")
+        
+        if site_data and isinstance(site_data, dict):
+            logger.info(f"NORM DIAGNOSTIC: site_data signal_std = {site_data.get('signal_std', 'NOT_FOUND')}")
+            logger.info(f"NORM DIAGNOSTIC: site_data signal_mad = {site_data.get('signal_mad', 'NOT_FOUND')}")
+            logger.info(f"NORM DIAGNOSTIC: site_data weighted_support_ratio = {site_data.get('weighted_support_ratio', 'NOT_FOUND')}")
+        
+        # Determine which decay value to use for effect size calculations
+        effect_size_decay = ml_decay if ml_decay is not None else raw_bd
+        if ml_decay is not None:
+            logger.debug(f"Using ML decay for effect size calculations: {ml_decay}")
+        else:
+            logger.debug(f"ML decay not available, using raw BD for effect size calculations: {raw_bd}")
         
         normalized_metrics = {}
         
         # Early return if no normalization methods requested
-        if not self.bd_normalization_methods:
+        if not self.ld_normalization_methods:
             logger.debug("No normalization methods requested")
             return normalized_metrics
         
         # Per-site BD (BD / alignment_length)
-        if "per_site" in self.bd_normalization_methods:
-            bd_per_site = raw_bd / self.alignment_length if self.alignment_length > 0 else 0
+        if "per_site" in self.ld_normalization_methods:
+            # Add extra diagnostic logging for zero bd_per_site issue
+            logger.info(f"NORM DIAGNOSTIC: alignment_length check = {self.alignment_length}")
+            logger.info(f"NORM DIAGNOSTIC: alignment_length > 0 = {self.alignment_length > 0}")
+            logger.info(f"NORM DIAGNOSTIC: raw_bd = {raw_bd}")
+            
+            if self.alignment_length > 0:
+                bd_per_site = raw_bd / self.alignment_length
+                logger.info(f"NORM DIAGNOSTIC: per_site calculation successful: {raw_bd} / {self.alignment_length} = {bd_per_site}")
+            else:
+                bd_per_site = 0
+                logger.error(f"NORM DIAGNOSTIC: alignment_length is {self.alignment_length}, setting bd_per_site to 0")
+                
             normalized_metrics["bd_per_site"] = bd_per_site
+            logger.info(f"NORM DIAGNOSTIC: per_site final value stored: {bd_per_site}")
             
         # Relative BD (BD / |unconstrained_ML|)
-        if "relative" in self.bd_normalization_methods:
+        if "relative" in self.ld_normalization_methods:
             if unconstrained_ml != 0:
                 bd_relative = raw_bd / abs(unconstrained_ml)
                 normalized_metrics["bd_relative"] = bd_relative
@@ -2687,7 +2945,7 @@ class panDecayIndices:
                 normalized_metrics["bd_relative"] = 0
                 
         # Signal-to-noise ratio (if site data available)
-        if "signal_to_noise" in self.bd_normalization_methods and site_data:
+        if "signal_to_noise" in self.ld_normalization_methods and site_data:
             # Calculate signal-to-noise as ratio of supporting to conflicting sites
             supporting_sites = site_data.get('supporting_sites', 0)
             conflicting_sites = site_data.get('conflicting_sites', 0)
@@ -2701,72 +2959,243 @@ class panDecayIndices:
                 
             normalized_metrics["signal_to_noise"] = signal_to_noise
         
-        # Effect Size calculations (like Cohen's d) - requires site data
-        effect_size_methods = [m for m in self.bd_normalization_methods if m.startswith('effect_size')]
-        if effect_size_methods:
-            if site_data:
-                signal_std = site_data.get('signal_std', 0)
-                signal_mad = site_data.get('signal_mad', 0)
-                logger.debug(f"Effect size calculation: signal_std={signal_std}, signal_mad={signal_mad}")
-                
-                # Check if we have valid statistics
-                if signal_std == 0 and signal_mad == 0:
-                    logger.warning("Both signal_std and signal_mad are zero - no site variation for effect size calculation")
-                
-                # Standard Effect Size: BD / SD(site_signals) - like Cohen's d
-                if "effect_size" in self.bd_normalization_methods:
-                    logger.debug(f"Calculating standard effect size: BD={raw_bd}, SD={signal_std}")
-                    if signal_std > 0:
-                        try:
-                            effect_size = raw_bd / signal_std
-                            normalized_metrics["effect_size"] = effect_size
-                            logger.debug(f"Standard effect size calculated: {effect_size}")
-                        except (ZeroDivisionError, TypeError, ValueError) as e:
-                            logger.warning(f"Error calculating standard effect size: {e}")
-                            normalized_metrics["effect_size"] = None
-                    else:
-                        normalized_metrics["effect_size"] = None
-                        logger.warning(f"Zero standard deviation for effect size calculation")
-                
-                # Robust Effect Size: BD / MAD(site_signals) - resistant to outliers
-                if "effect_size_robust" in self.bd_normalization_methods:
-                    logger.debug(f"Calculating robust effect size: BD={raw_bd}, MAD={signal_mad}")
-                    if signal_mad > 0:
-                        try:
-                            effect_size_robust = raw_bd / signal_mad
-                            normalized_metrics["effect_size_robust"] = effect_size_robust
-                            logger.debug(f"Robust effect size calculated: {effect_size_robust}")
-                        except (ZeroDivisionError, TypeError, ValueError) as e:
-                            logger.warning(f"Error calculating robust effect size: {e}")
-                            normalized_metrics["effect_size_robust"] = None
-                    else:
-                        normalized_metrics["effect_size_robust"] = None
-                        logger.warning(f"Zero MAD for robust effect size calculation")
-                
-                # Weighted Effect Size: weighted by site information content
-                if "effect_size_weighted" in self.bd_normalization_methods:
-                    logger.debug(f"Calculating weighted effect size: BD={raw_bd}, MAD={signal_mad}")
-                    # For now, use MAD-based but could be enhanced with site weights
-                    if signal_mad > 0:
-                        try:
-                            # Placeholder: Could weight by site conservation, information content, etc.
-                            effect_size_weighted = raw_bd / signal_mad
-                            normalized_metrics["effect_size_weighted"] = effect_size_weighted
-                            logger.debug(f"Weighted effect size calculated: {effect_size_weighted}")
-                        except (ZeroDivisionError, TypeError, ValueError) as e:
-                            logger.warning(f"Error calculating weighted effect size: {e}")
-                            normalized_metrics["effect_size_weighted"] = None
-                    else:
-                        normalized_metrics["effect_size_weighted"] = None
-                        logger.warning(f"Zero MAD for weighted effect size calculation")
-            else:
-                logger.warning("Effect size calculation requested but no site data available")
-                # Set all requested effect size methods to None
-                for method in effect_size_methods:
-                    normalized_metrics[method] = None
+        # Dataset-relative normalizations will be calculated after all branches are processed
+        # This is a placeholder - actual calculations happen in _calculate_dataset_relative_metrics()
             
         logger.debug(f"Final normalized metrics: {normalized_metrics}")
         return normalized_metrics
+
+    def _calculate_dataset_relative_metrics(self, ld_values, method_prefix=""):
+        """
+        Calculate dataset-relative normalization metrics after all LD values are computed.
+        
+        Args:
+            ld_values: List or array of likelihood decay values across all branches
+            method_prefix: Optional prefix for method names (e.g., "ml_" or "bayes_")
+            
+        Returns:
+            Dictionary with dataset statistics and per-branch relative metrics
+        """
+        if not ld_values or len(ld_values) == 0:
+            logger.warning("No LD values provided for dataset-relative calculations")
+            return {}
+            
+        ld_array = np.array(ld_values)
+        
+        # Calculate dataset statistics
+        min_ld = np.min(ld_array)
+        max_ld = np.max(ld_array)
+        mean_ld = np.mean(ld_array)
+        std_ld = np.std(ld_array, ddof=1) if len(ld_array) > 1 else 0
+        
+        logger.info(f"Dataset LD statistics ({method_prefix}): min={min_ld:.3f}, max={max_ld:.3f}, mean={mean_ld:.3f}, std={std_ld:.3f}")
+        
+        # Calculate relative metrics for each branch
+        relative_metrics = {}
+        
+        for i, ld_value in enumerate(ld_values):
+            branch_metrics = {}
+            
+            # Dataset-relative (0-1 scaling)
+            if max_ld > min_ld:
+                dataset_relative = (ld_value - min_ld) / (max_ld - min_ld)
+            else:
+                dataset_relative = 0.5  # All values identical
+            branch_metrics['dataset_relative'] = dataset_relative
+            
+            # Percentile rank (1-100%)
+            rank = np.sum(ld_array < ld_value) + 0.5 * np.sum(ld_array == ld_value)
+            percentile_rank = (rank / len(ld_array)) * 100
+            branch_metrics['percentile_rank'] = percentile_rank
+            
+            # Z-score (standard deviations from mean)
+            if std_ld > 0:
+                z_score = (ld_value - mean_ld) / std_ld
+            else:
+                z_score = 0.0  # All values identical
+            branch_metrics['z_score'] = z_score
+            
+            relative_metrics[i] = branch_metrics
+            
+        # Add dataset statistics
+        relative_metrics['_dataset_stats'] = {
+            'min_ld': min_ld,
+            'max_ld': max_ld,
+            'mean_ld': mean_ld,
+            'std_ld': std_ld,
+            'n_branches': len(ld_values)
+        }
+        
+        return relative_metrics
+
+    def _apply_dataset_relative_normalizations(self):
+        """
+        Apply dataset-relative normalizations to all calculated LD values.
+        This function is called after all branch analyses are complete.
+        """
+        dataset_relative_methods = [m for m in self.ld_normalization_methods 
+                                   if m in ['dataset_relative', 'percentile_rank', 'z_score']]
+        
+        if not dataset_relative_methods:
+            return
+            
+        logger.info(f"Calculating dataset-relative normalizations: {dataset_relative_methods}")
+        
+        # Collect LD values for each analysis type
+        ml_values = []
+        bayes_values = []
+        pars_values = []
+        clade_ids = list(self.decay_indices.keys())
+        
+        for clade_id in clade_ids:
+            data = self.decay_indices[clade_id]
+            
+            # ML decay values (lnl_diff)
+            ml_decay = data.get('lnl_diff')
+            if ml_decay is not None:
+                ml_values.append(ml_decay)
+            else:
+                ml_values.append(None)
+                
+            # Bayesian decay values  
+            bayes_decay = data.get('bayes_decay')
+            if bayes_decay is not None:
+                bayes_values.append(bayes_decay)
+            else:
+                bayes_values.append(None)
+                
+            # Parsimony decay values
+            pars_decay = data.get('pars_decay')
+            if pars_decay is not None:
+                pars_values.append(pars_decay)
+            else:
+                pars_values.append(None)
+        
+        # Calculate relative metrics for each analysis type
+        if any(v is not None for v in ml_values):
+            valid_ml = [v for v in ml_values if v is not None]
+            if valid_ml:
+                ml_relatives = self._calculate_dataset_relative_metrics(valid_ml, "ML")
+                # Apply to branches
+                valid_idx = 0
+                for i, clade_id in enumerate(clade_ids):
+                    if ml_values[i] is not None:
+                        for method in dataset_relative_methods:
+                            key = f"ml_{method}"
+                            self.decay_indices[clade_id][key] = ml_relatives[valid_idx][method]
+                        valid_idx += 1
+        
+        if any(v is not None for v in bayes_values):
+            valid_bayes = [v for v in bayes_values if v is not None]
+            if valid_bayes:
+                bayes_relatives = self._calculate_dataset_relative_metrics(valid_bayes, "Bayesian")
+                # Apply to branches  
+                valid_idx = 0
+                for i, clade_id in enumerate(clade_ids):
+                    if bayes_values[i] is not None:
+                        for method in dataset_relative_methods:
+                            key = f"bayes_{method}"
+                            self.decay_indices[clade_id][key] = bayes_relatives[valid_idx][method]
+                        valid_idx += 1
+        
+        if any(v is not None for v in pars_values):
+            valid_pars = [v for v in pars_values if v is not None]
+            if valid_pars:
+                pars_relatives = self._calculate_dataset_relative_metrics(valid_pars, "Parsimony")
+                # Apply to branches
+                valid_idx = 0
+                for i, clade_id in enumerate(clade_ids):
+                    if pars_values[i] is not None:
+                        for method in dataset_relative_methods:
+                            key = f"pars_{method}"
+                            self.decay_indices[clade_id][key] = pars_relatives[valid_idx][method]
+                        valid_idx += 1
+        
+        logger.info("Dataset-relative normalizations applied successfully")
+
+    def _write_dataset_relative_rankings(self, f, has_bayesian, has_ml, has_parsimony):
+        """
+        Write dataset-relative support rankings to the markdown report.
+        Uses careful language about relative vs. absolute support.
+        """
+        # Determine primary analysis type for rankings
+        primary_analysis = None
+        primary_key_prefix = None
+        
+        if has_ml:
+            primary_analysis = "ML"
+            primary_key_prefix = "ml_"
+        elif has_bayesian:
+            primary_analysis = "Bayesian" 
+            primary_key_prefix = "bayes_"
+        elif has_parsimony:
+            primary_analysis = "Parsimony"
+            primary_key_prefix = "pars_"
+        
+        if not primary_analysis:
+            return
+            
+        # Collect ranking data
+        ranking_data = []
+        for clade_id, data in self.decay_indices.items():
+            # Get percentile rank as primary ranking metric
+            percentile_key = f"{primary_key_prefix}percentile_rank"
+            percentile = data.get(percentile_key)
+            
+            if percentile is not None:
+                # Get other metrics
+                raw_value = data.get('lnl_diff' if primary_analysis == 'ML' else 
+                                   'bayes_decay' if primary_analysis == 'Bayesian' else 'pars_decay', 0)
+                
+                dataset_rel_key = f"{primary_key_prefix}dataset_relative"
+                z_score_key = f"{primary_key_prefix}z_score"
+                
+                dataset_rel = data.get(dataset_rel_key, 0)
+                z_score = data.get(z_score_key, 0)
+                
+                ranking_data.append((clade_id, percentile, raw_value, dataset_rel, z_score))
+        
+        if not ranking_data:
+            return
+            
+        # Sort by percentile rank (descending)
+        ranking_data.sort(key=lambda x: x[1], reverse=True)
+        
+        f.write("### Dataset-Relative Support Rankings\n\n")
+        f.write(f"Rankings based on {primary_analysis} likelihood decay values within this dataset. ")
+        f.write("**Important**: These rankings show relative support within this dataset only and ")
+        f.write("do not indicate absolute phylogenetic reliability.\n\n")
+        
+        # Show top-ranked branches
+        f.write("**Highest relative support within dataset:**\n")
+        for i, (clade_id, percentile, raw_val, dataset_rel, z_score) in enumerate(ranking_data[:5], 1):
+            f.write(f"{i}. {clade_id}: {percentile:.1f}th percentile, ")
+            f.write(f"Z-score={z_score:+.2f}, ")
+            analysis_label = "Delta ML" if primary_analysis == "ML" else f"Raw {primary_analysis}"
+            f.write(f"{analysis_label}={raw_val:.2f}\n")
+        
+        # Show bottom-ranked branches if we have more than 5
+        if len(ranking_data) > 5:
+            f.write(f"\n**Lowest relative support within dataset:**\n")
+            for i, (clade_id, percentile, raw_val, dataset_rel, z_score) in enumerate(ranking_data[-3:], len(ranking_data)-2):
+                f.write(f"{i}. {clade_id}: {percentile:.1f}th percentile, ")
+                f.write(f"Z-score={z_score:+.2f}, ") 
+                analysis_label = "Delta ML" if primary_analysis == "ML" else f"Raw {primary_analysis}"
+                f.write(f"{analysis_label}={raw_val:.2f}\n")
+        
+        f.write(f"\n**Interpretation Guidelines:**\n")
+        f.write(f"- **90-100th percentile**: Top-ranked within this dataset\n")
+        f.write(f"- **75-89th percentile**: Above-average within this dataset\n") 
+        f.write(f"- **25-74th percentile**: Intermediate within this dataset\n")
+        f.write(f"- **1-24th percentile**: Below-average within this dataset\n")
+        f.write(f"- **Z-scores > +1.0**: Well above dataset average\n")
+        f.write(f"- **Z-scores < -1.0**: Well below dataset average\n\n")
+        
+        f.write("⚠️  **Important Disclaimers:**\n")
+        f.write("- High relative ranking does not guarantee reliable phylogenetic support\n")
+        f.write("- Rankings are meaningful only within this specific dataset\n") 
+        f.write("- Cross-dataset comparisons require careful consideration of data quality\n")
+        f.write("- Always compare with other support measures (AU test, bootstrap, etc.)\n\n")
     
     def _get_bd_interpretation_scale(self, bd_per_site):
         """
@@ -2839,18 +3268,23 @@ class panDecayIndices:
                 'taxa': bayes_data['taxa'],
                 'bayes_unconstrained_ml': bayes_data['unconstrained_ml'],
                 'bayes_constrained_ml': bayes_data['constrained_ml'],
-                'bayes_decay': bayes_data['bayes_decay'],
-                # ML fields are None for Bayesian-only analysis
-                'lnl_diff': None,
-                'constrained_lnl': None,
-                'AU_pvalue': None,
-                'significant_AU': None
+                'bayes_decay': bayes_data['bayes_decay']
             }
+            
+            # Only add ML fields as None for Bayesian-only analysis
+            # In combined analyses, let the merge logic preserve existing ML data
+            if not self.do_ml:
+                converted_results[clade_id].update({
+                    'lnl_diff': None,
+                    'constrained_lnl': None,
+                    'AU_pvalue': None,
+                    'significant_AU': None
+                })
             
             # Add normalized BD metrics if present
             for key, value in bayes_data.items():
-                if key in ['bd_per_site', 'bd_relative', 'signal_to_noise', 
-                          'effect_size', 'effect_size_robust', 'effect_size_weighted']:
+                if key in ['bd_per_site', 'bd_relative', 'signal_to_noise',
+                          'dataset_relative', 'percentile_rank', 'z_score']:
                     converted_results[clade_id][key] = value
             
         logger.info(f"Calculated Bayesian decay indices for {len(converted_results)} branches.")
@@ -2890,8 +3324,8 @@ class panDecayIndices:
                     
                     # Add normalized BD metrics if present
                     for key, value in bayes_data.items():
-                        if key in ['bd_per_site', 'bd_relative', 'signal_to_noise', 
-                                  'effect_size', 'effect_size_robust', 'effect_size_weighted']:
+                        if key in ['bd_per_site', 'bd_relative', 'signal_to_noise',
+                                  'dataset_relative', 'percentile_rank', 'z_score']:
                             ml_results[clade_id][key] = value
                 else:
                     # No Bayesian results for this clade
@@ -2917,7 +3351,7 @@ class panDecayIndices:
         self.decay_indices = ml_results
         return self.decay_indices
 
-    def _calculate_site_likelihoods(self, tree_files_list, branch_id):
+    def _calculate_site_likelihoods(self, tree_files_list, branch_id, verbose=True):
         """
         Calculate site-specific likelihoods for ML tree vs constrained tree.
 
@@ -3043,8 +3477,6 @@ class panDecayIndices:
                 signal_mean = np.mean(deltas)
                 signal_std = np.std(deltas, ddof=1) if len(deltas) > 1 else 0  # Sample standard deviation
                 signal_median = np.median(deltas)
-                # Median Absolute Deviation (MAD) - more robust to outliers
-                signal_mad = np.median(np.abs(np.array(deltas) - signal_median)) if len(deltas) > 0 else 0
 
                 supporting_sites = sum(1 for d in deltas if d < 0)
                 conflicting_sites = sum(1 for d in deltas if d > 0)
@@ -3060,10 +3492,8 @@ class panDecayIndices:
                 # Calculate standard support ratio
                 support_ratio = supporting_sites / conflicting_sites if conflicting_sites > 0 else float('inf')
 
-                logger.info(f"Extracted site likelihoods for {len(site_data)} sites for branch {branch_id}")
-                logger.info(f"Branch {branch_id}: {supporting_sites} supporting sites, {conflicting_sites} conflicting sites")
-                logger.info(f"Branch {branch_id}: {supporting_sites} supporting sites, {conflicting_sites} conflicting sites, ratio: {support_ratio:.2f}")
-                logger.info(f"Branch {branch_id}: Sum supporting delta: {sum_supporting_delta:.4f}, sum conflicting: {sum_conflicting_delta:.4f}, weighted ratio: {weighted_support_ratio:.2f}")
+                if verbose:
+                    logger.info(f"Branch {branch_id}: {len(site_data)} sites → {supporting_sites} support/{conflicting_sites} conflict (raw ratio: {support_ratio:.2f}) | δ: {sum_supporting_delta:.2f}/{sum_conflicting_delta:.2f} (δ-ratio: {weighted_support_ratio:.2f})")
 
                 # Return a comprehensive dictionary with all info
                 return {
@@ -3075,11 +3505,10 @@ class panDecayIndices:
                     'sum_supporting_delta': sum_supporting_delta,
                     'sum_conflicting_delta': sum_conflicting_delta,
                     'weighted_support_ratio': weighted_support_ratio,
-                    # Signal statistics for effect size calculations
+                    # Signal statistics for site analysis
                     'signal_mean': signal_mean,
                     'signal_std': signal_std,
-                    'signal_median': signal_median,
-                    'signal_mad': signal_mad
+                    'signal_median': signal_median
                 }
             else:
                 logger.warning(f"No comparable site likelihoods found for branch {branch_id}")
@@ -3563,10 +3992,7 @@ class panDecayIndices:
                             if post_prob is not None:
                                 annotation_parts.append(f"PP:{post_prob:.2f}")
                                 
-                            # Add effect size if available
-                            effect_size = decay_info.get('effect_size') or decay_info.get('effect_size_robust') or decay_info.get('effect_size_weighted')
-                            if effect_size is not None:
-                                annotation_parts.append(f"ES:{effect_size:.2f}")
+                            # Dataset-relative annotations will be added when implemented
                             break
 
                     # Format annotations using the new method
@@ -3715,10 +4141,7 @@ class panDecayIndices:
                             if post_prob is not None:
                                 annotation_parts.append(f"PP:{post_prob:.2f}")
                                 
-                            # Add effect size if available
-                            effect_size = matched_data.get('effect_size') or matched_data.get('effect_size_robust') or matched_data.get('effect_size_weighted')
-                            if effect_size is not None:
-                                annotation_parts.append(f"ES:{effect_size:.2f}")
+                            # Dataset-relative annotations will be added when implemented
 
                         if annotation_parts:
                             # For comprehensive trees, add clear separation between clade and metrics if we have a clade ID
@@ -3777,14 +4200,11 @@ class panDecayIndices:
                             bayes_decay_val = matched_data['bayes_decay']
                             
                             # Create annotation with normalized values if available
-                            if self.normalize_bd and 'bd_per_site' in matched_data:
+                            if self.normalize_ld and 'bd_per_site' in matched_data:
                                 bd_per_site = matched_data['bd_per_site']
                                 annotation_parts = [f"PS:{bd_per_site:.6f}"]
                                 
-                                # Add effect size if available
-                                effect_size = matched_data.get('effect_size') or matched_data.get('effect_size_robust') or matched_data.get('effect_size_weighted')
-                                if effect_size is not None:
-                                    annotation_parts.append(f"ES:{effect_size:.2f}")
+                                # Dataset-relative annotations will be added when implemented
                                 
                                 annotation_str = ", ".join(annotation_parts)
                                 node.name = f"{matched_clade_id} - BD:{bayes_decay_val:.2f} ({annotation_str})"
@@ -3825,10 +4245,10 @@ class panDecayIndices:
             if has_ml:
                 f.write("────────────────────────────────┬")
             if has_bayesian:
-                if self.normalize_bd and has_effect_size:
+                if self.normalize_ld and has_effect_size:
                     # Extended width for BD + BD/site + BD% + Effect Size
                     f.write("──────────────────────────────────────────────┬")
-                elif self.normalize_bd:
+                elif self.normalize_ld:
                     f.write("───────────────────────────────┬")
                 else:
                     f.write("────────┬")
@@ -3841,9 +4261,9 @@ class panDecayIndices:
             if has_ml:
                 f.write("    Maximum Likelihood          │")
             if has_bayesian:
-                if self.normalize_bd and has_effect_size:
+                if self.normalize_ld and has_effect_size:
                     f.write("                 Bayesian (w/ Effect Size)                │")
-                elif self.normalize_bd:
+                elif self.normalize_ld:
                     f.write("         Bayesian (Normalized)        │")
                 else:
                     f.write("Bayesian │")
@@ -3856,9 +4276,9 @@ class panDecayIndices:
             if has_ml:
                 f.write("──────────┬──────────┬──────────┼")
             if has_bayesian:
-                if self.normalize_bd and has_effect_size:
+                if self.normalize_ld and has_effect_size:
                     f.write("────────┬────────┬────────┬────────┼")
-                elif self.normalize_bd:
+                elif self.normalize_ld:
                     f.write("────────┬────────┬────────┼")
                 else:
                     f.write("────────┼")
@@ -3871,10 +4291,10 @@ class panDecayIndices:
             if has_ml:
                 f.write(" ΔlnL     │ AU p-val │ Support  │")
             if has_bayesian:
-                if self.normalize_bd and has_effect_size:
-                    f.write(" BD     │ BD/site │ BD%    │ ES     │")
-                elif self.normalize_bd:
-                    f.write(" BD     │ BD/site │ BD%    │")
+                if self.normalize_ld and has_effect_size:
+                    f.write(" BD     │ LD/site │ LD%    │ ES     │")
+                elif self.normalize_ld:
+                    f.write(" BD     │ LD/site │ LD%    │")
                 else:
                     f.write(" BD     │")
             if has_parsimony:
@@ -3886,9 +4306,9 @@ class panDecayIndices:
             if has_ml:
                 f.write("──────────┼──────────┼──────────┼")
             if has_bayesian:
-                if self.normalize_bd and has_effect_size:
+                if self.normalize_ld and has_effect_size:
                     f.write("────────┼────────┼────────┼────────┼")
-                elif self.normalize_bd:
+                elif self.normalize_ld:
                     f.write("────────┼────────┼────────┼")
                 else:
                     f.write("────────┼")
@@ -3912,6 +4332,13 @@ class panDecayIndices:
         
         # Data rows
         for clade_id, data in sorted(self.decay_indices.items()):
+            # === TABLE GENERATION DIAGNOSTIC ===
+            logger.info(f"TABLE DIAGNOSTIC: {clade_id} data keys: {list(data.keys()) if isinstance(data, dict) else 'NOT_DICT'}")
+            ml_fields = {k: v for k, v in data.items() if k in ['lnl_diff', 'AU_pvalue', 'constrained_lnl', 'significant_AU']} if isinstance(data, dict) else {}
+            bayes_fields = {k: v for k, v in data.items() if k in ['bayes_decay', 'marginal_likelihood']} if isinstance(data, dict) else {}
+            logger.info(f"TABLE DIAGNOSTIC: {clade_id} ML fields: {ml_fields}")
+            logger.info(f"TABLE DIAGNOSTIC: {clade_id} Bayesian fields: {bayes_fields}")
+            
             taxa_list = sorted(data.get('taxa', []))
             num_taxa = len(taxa_list)
             
@@ -3941,7 +4368,7 @@ class panDecayIndices:
                     row_values.append("N/A")
                 
                 # Add normalized metrics if enabled
-                if self.normalize_bd:
+                if self.normalize_ld:
                     bd_per_site = data.get('bd_per_site')
                     bd_relative = data.get('bd_relative')
                     
@@ -3984,9 +4411,9 @@ class panDecayIndices:
             if has_ml:
                 f.write("──────────┴──────────┴──────────┴")
             if has_bayesian:
-                if self.normalize_bd and has_effect_size:
+                if self.normalize_ld and has_effect_size:
                     f.write("────────┴────────┴────────┴────────┴")
-                elif self.normalize_bd:
+                elif self.normalize_ld:
                     f.write("────────┴────────┴────────┴")
                 else:
                     f.write("────────┴")
@@ -4153,18 +4580,18 @@ class panDecayIndices:
             if has_bayesian:
                 header_parts.append("Bayes_ML_Diff")
                 # Add normalized BD metrics if enabled
-                if self.normalize_bd:
-                    if "per_site" in self.bd_normalization_methods:
+                if self.normalize_ld:
+                    if "per_site" in self.ld_normalization_methods:
                         header_parts.append("BD_Per_Site")
-                    if "relative" in self.bd_normalization_methods:
+                    if "relative" in self.ld_normalization_methods:
                         header_parts.append("BD_Relative")
-                    if "signal_to_noise" in self.bd_normalization_methods:
+                    if "signal_to_noise" in self.ld_normalization_methods:
                         header_parts.append("Signal_To_Noise")
-                    if "effect_size" in self.bd_normalization_methods:
+                    if "effect_size" in self.ld_normalization_methods:
                         header_parts.append("Effect_Size")
-                    if "effect_size_robust" in self.bd_normalization_methods:
+                    if "effect_size_robust" in self.ld_normalization_methods:
                         header_parts.append("Effect_Size_Robust")
-                    if "effect_size_weighted" in self.bd_normalization_methods:
+                    if "effect_size_weighted" in self.ld_normalization_methods:
                         header_parts.append("Effect_Size_Weighted")
                 if has_posterior:
                     header_parts.append("Posterior_Prob")
@@ -4225,38 +4652,38 @@ class panDecayIndices:
                     row_parts.append(bayes_decay)
                     
                     # Add normalized BD metrics if enabled
-                    if self.normalize_bd:
-                        if "per_site" in self.bd_normalization_methods:
+                    if self.normalize_ld:
+                        if "per_site" in self.ld_normalization_methods:
                             bd_per_site = data.get('bd_per_site', 'N/A')
                             if isinstance(bd_per_site, float): bd_per_site = f"{bd_per_site:.6f}"
                             elif bd_per_site is None: bd_per_site = 'N/A'
                             row_parts.append(bd_per_site)
                         
-                        if "relative" in self.bd_normalization_methods:
+                        if "relative" in self.ld_normalization_methods:
                             bd_relative = data.get('bd_relative', 'N/A')
                             if isinstance(bd_relative, float): bd_relative = f"{bd_relative:.6f}"
                             elif bd_relative is None: bd_relative = 'N/A'
                             row_parts.append(bd_relative)
                         
-                        if "signal_to_noise" in self.bd_normalization_methods:
+                        if "signal_to_noise" in self.ld_normalization_methods:
                             signal_to_noise = data.get('signal_to_noise', 'N/A')
                             if isinstance(signal_to_noise, float): signal_to_noise = f"{signal_to_noise:.4f}"
                             elif signal_to_noise is None: signal_to_noise = 'N/A'
                             row_parts.append(signal_to_noise)
                         
-                        if "effect_size" in self.bd_normalization_methods:
+                        if "effect_size" in self.ld_normalization_methods:
                             effect_size = data.get('effect_size', 'N/A')
                             if isinstance(effect_size, float): effect_size = f"{effect_size:.4f}"
                             elif effect_size is None: effect_size = 'N/A'
                             row_parts.append(effect_size)
                         
-                        if "effect_size_robust" in self.bd_normalization_methods:
+                        if "effect_size_robust" in self.ld_normalization_methods:
                             effect_size_robust = data.get('effect_size_robust', 'N/A')
                             if isinstance(effect_size_robust, float): effect_size_robust = f"{effect_size_robust:.4f}"
                             elif effect_size_robust is None: effect_size_robust = 'N/A'
                             row_parts.append(effect_size_robust)
                         
-                        if "effect_size_weighted" in self.bd_normalization_methods:
+                        if "effect_size_weighted" in self.ld_normalization_methods:
                             effect_size_weighted = data.get('effect_size_weighted', 'N/A')
                             if isinstance(effect_size_weighted, float): effect_size_weighted = f"{effect_size_weighted:.4f}"
                             elif effect_size_weighted is None: effect_size_weighted = 'N/A'
@@ -4305,15 +4732,38 @@ class panDecayIndices:
         # Check which types of results we have
         has_ml = any(d.get('lnl_diff') is not None for d in self.decay_indices.values()) if self.decay_indices else False
         has_bayesian = any(d.get('bayes_decay') is not None for d in self.decay_indices.values()) if self.decay_indices else False
+        has_parsimony = any(d.get('pars_decay') is not None for d in self.decay_indices.values()) if self.decay_indices else False
         has_bootstrap = hasattr(self, 'bootstrap_tree') and self.bootstrap_tree
+        
+        # === OUTPUT DIAGNOSTIC LOGGING ===
+        logger.info(f"OUTPUT DIAGNOSTIC: Analysis detection - ML:{has_ml}, Bayesian:{has_bayesian}, Parsimony:{has_parsimony}")
+        logger.info(f"OUTPUT DIAGNOSTIC: Total decay_indices entries: {len(self.decay_indices) if self.decay_indices else 0}")
+        
+        # Detailed breakdown of what's in decay_indices
+        if self.decay_indices:
+            for clade_id, data in list(self.decay_indices.items())[:3]:  # Show first 3 for debugging
+                keys = list(data.keys()) if isinstance(data, dict) else "NOT_DICT"
+                logger.info(f"OUTPUT DIAGNOSTIC: {clade_id} contains keys: {keys}")
+                # Check specifically for ML data
+                ml_data = {k: v for k, v in data.items() if k in ['lnl_diff', 'au_pvalue', 'constrained_lnl', 'significant_AU']} if isinstance(data, dict) else {}
+                logger.info(f"OUTPUT DIAGNOSTIC: {clade_id} ML data: {ml_data}")
+        else:
+            logger.warning("OUTPUT DIAGNOSTIC: decay_indices is empty or None!")
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with output_path.open('w') as f:
             # Title based on analysis type
-            if has_ml and has_bayesian:
-                f.write(f"# panDecay Branch Support Analysis Report (v{VERSION})\n\n")
+            analysis_types = []
+            if has_ml: analysis_types.append("ML")
+            if has_bayesian: analysis_types.append("Bayesian")
+            if has_parsimony: analysis_types.append("Parsimony")
+            
+            if len(analysis_types) > 1:
+                f.write(f"# panDecay {' + '.join(analysis_types)} Branch Support Analysis Report (v{VERSION})\n\n")
             elif has_bayesian:
                 f.write(f"# panDecay Bayesian Branch Support Analysis Report (v{VERSION})\n\n")
+            elif has_parsimony:
+                f.write(f"# panDecay Parsimony Branch Support Analysis Report (v{VERSION})\n\n")
             else:
                 f.write(f"# panDecay ML Branch Support Analysis Report (v{VERSION})\n\n")
                 
@@ -4341,6 +4791,12 @@ class panDecayIndices:
                 # Report the actual method being used
                 ml_method = "stepping-stone" if self.marginal_likelihood == "ss" else "harmonic mean"
                 f.write(f"- Marginal likelihood method: `{ml_method}`\n")
+                
+            # Parsimony parameters
+            if has_parsimony or self.do_parsimony:
+                f.write(f"- Parsimony software: `PAUP*`\n")
+                f.write(f"- Parsimony method: `Traditional Bremer support`\n")
+                f.write(f"- Tree search: `Heuristic search with TBR swapping`\n")
                 
             if has_bootstrap:
                 f.write("- Bootstrap analysis: Performed\n")
@@ -4382,60 +4838,65 @@ class panDecayIndices:
                         f.write(f"- Avg Bayesian decay (marginal lnL difference): {np.mean(bayes_decays):.4f}\n")
                         f.write(f"- Min Bayesian decay: {min(bayes_decays):.4f}\n")
                         f.write(f"- Max Bayesian decay: {max(bayes_decays):.4f}\n")
+                
+                # Parsimony-specific statistics
+                if has_parsimony:
+                    pars_decays = [d['pars_decay'] for d in self.decay_indices.values() if d.get('pars_decay') is not None]
+                    if pars_decays:
+                        f.write(f"- Avg Parsimony decay (Bremer support): {np.mean(pars_decays):.4f}\n")
+                        f.write(f"- Min Parsimony decay: {min(pars_decays):.4f}\n")
+                        f.write(f"- Max Parsimony decay: {max(pars_decays):.4f}\n")
                         
                         # Check for negative values and add warning
-                        negative_count = sum(1 for bd in bayes_decays if bd < 0)
+                        negative_count = sum(1 for pd in pars_decays if pd < 0)
                         if negative_count > 0:
-                            f.write(f"\n**⚠️ WARNING**: {negative_count}/{len(bayes_decays)} branches have negative Bayes Decay values.\n")
-                            f.write("This suggests potential issues with:\n")
-                            f.write("- MCMC convergence (consider increasing --bayes-ngen)\n")
-                            f.write("- Marginal likelihood estimation reliability\n")
-                            f.write("- Model specification\n\n")
+                            f.write(f"\n**⚠️ WARNING**: {negative_count}/{len(pars_decays)} branches have negative Parsimony Decay values.\n")
+                            f.write("This suggests potential issues with tree searching or constraint implementation.\n\n")
                         
-                        # Report on BD distribution (basic statistics only)
-                        f.write(f"\n**Bayesian Decay Distribution**:\n")
-                        f.write(f"- Mean BD: {np.mean(bayes_decays):.3f}\n")
-                        f.write(f"- Median BD: {np.median(bayes_decays):.3f}\n")
-                        f.write(f"- Standard deviation: {np.std(bayes_decays):.3f}\n")
-                        f.write(f"- Min BD: {min(bayes_decays):.3f}\n")
-                        f.write(f"- Max BD: {max(bayes_decays):.3f}\n")
-                        f.write(f"- Range: {max(bayes_decays) - min(bayes_decays):.3f}\n")
+                        # Report on parsimony decay distribution
+                        f.write(f"\n**Parsimony Decay Distribution**:\n")
+                        f.write(f"- Mean Parsimony Decay: {np.mean(pars_decays):.3f}\n")
+                        f.write(f"- Median Parsimony Decay: {np.median(pars_decays):.3f}\n")
+                        f.write(f"- Standard deviation: {np.std(pars_decays):.3f}\n")
+                        f.write(f"- Min Parsimony Decay: {min(pars_decays):.3f}\n")
+                        f.write(f"- Max Parsimony Decay: {max(pars_decays):.3f}\n")
+                        f.write(f"- Range: {max(pars_decays) - min(pars_decays):.3f}\n")
                         if negative_count > 0:
-                            f.write(f"- Negative BD values: {negative_count} branches (see warning above)\n")
+                            f.write(f"- Negative Parsimony Decay values: {negative_count} branches (see warning above)\n")
                         
                         # Add percentile information for relative comparison
-                        sorted_bds = sorted([bd for bd in bayes_decays if bd >= 0])  # Exclude negative values from percentiles
-                        if sorted_bds:
-                            p75 = np.percentile(sorted_bds, 75)
-                            p25 = np.percentile(sorted_bds, 25)
+                        sorted_pds = sorted([pd for pd in pars_decays if pd >= 0])  # Exclude negative values from percentiles
+                        if sorted_pds:
+                            p75 = np.percentile(sorted_pds, 75)
+                            p25 = np.percentile(sorted_pds, 25)
                             f.write(f"- 75th percentile: {p75:.3f} (branches above this have relatively high support)\n")
                             f.write(f"- 25th percentile: {p25:.3f} (branches below this have relatively low support)\n")
                         
-                        f.write(f"\n**Note**: BD values closely approximating ML log-likelihood differences is expected behavior in phylogenetic topology testing.\n")
-                        f.write(f"**Important**: BD values scale with dataset characteristics. Compare BD values only within this analysis, not across studies.\n\n")
+                        f.write(f"\n**Note**: Parsimony decay values represent Bremer support - the number of extra steps required to lose support for each clade.\n")
+                        f.write(f"**Important**: Higher Parsimony Decay values indicate stronger support based on parsimony criterion.\n\n")
                         
-                        # Add normalized BD statistics if enabled
-                        if self.normalize_bd:
-                            f.write(f"**Normalized BD Statistics** (for cross-study comparisons):\n")
+                        # Add normalized LD statistics if enabled
+                        if self.normalize_ld:
+                            f.write(f"**Normalized LD Statistics** (for cross-study comparisons):\n")
                             
-                            if "per_site" in self.bd_normalization_methods:
+                            if "per_site" in self.ld_normalization_methods:
                                 bd_per_site_values = [d['bd_per_site'] for d in self.decay_indices.values() if d.get('bd_per_site') is not None]
                                 if bd_per_site_values:
-                                    f.write(f"- BD/site statistics:\n")
+                                    f.write(f"- LD/site statistics:\n")
                                     f.write(f"  - Mean: {np.mean(bd_per_site_values):.6f}\n")
                                     f.write(f"  - Median: {np.median(bd_per_site_values):.6f}\n")
                                     f.write(f"  - Min: {min(bd_per_site_values):.6f}\n")
                                     f.write(f"  - Max: {max(bd_per_site_values):.6f}\n")
                                     
-                            if "relative" in self.bd_normalization_methods:
+                            if "relative" in self.ld_normalization_methods:
                                 bd_relative_values = [d['bd_relative'] for d in self.decay_indices.values() if d.get('bd_relative') is not None]
                                 if bd_relative_values:
-                                    f.write(f"- Avg BD%: {np.mean(bd_relative_values)*100:.3f}%\n")
-                                    f.write(f"- Min BD%: {min(bd_relative_values)*100:.3f}%\n")
-                                    f.write(f"- Max BD%: {max(bd_relative_values)*100:.3f}%\n")
+                                    f.write(f"- Avg LD%: {np.mean(bd_relative_values)*100:.3f}%\n")
+                                    f.write(f"- Min LD%: {min(bd_relative_values)*100:.3f}%\n")
+                                    f.write(f"- Max LD%: {max(bd_relative_values)*100:.3f}%\n")
                             
                             # Effect Size Statistics
-                            effect_size_methods = [method for method in self.bd_normalization_methods if method.startswith("effect_size")]
+                            effect_size_methods = [method for method in self.ld_normalization_methods if method.startswith("effect_size")]
                             if effect_size_methods:
                                 for method in effect_size_methods:
                                     effect_size_values = [d[method] for d in self.decay_indices.values() if d.get(method) is not None]
@@ -4512,36 +4973,9 @@ class panDecayIndices:
 
             f.write("\n## Detailed Branch Support Results\n\n")
 
-            # Add normalized support rankings if effect sizes are available
-            if has_bayesian and self.normalize_bd and any(method.startswith('effect_size') for method in self.bd_normalization_methods):
-                effect_size_data = []
-                for clade_id, data in self.decay_indices.items():
-                    # Get the primary effect size (prefer standard, then robust, then weighted)
-                    effect_size = data.get('effect_size') or data.get('effect_size_robust') or data.get('effect_size_weighted')
-                    if effect_size is not None:
-                        bd_value = data.get('bayes_decay', 0)
-                        bd_per_site = data.get('bd_per_site', 0)
-                        effect_size_data.append((clade_id, effect_size, bd_value, bd_per_site))
-                
-                if effect_size_data:
-                    # Sort by effect size (descending)
-                    effect_size_data.sort(key=lambda x: x[1], reverse=True)
-                    
-                    f.write("### Normalized Support Rankings (by Effect Size)\n\n")
-                    f.write("Effect sizes enable cross-study comparison by normalizing for dataset variability.\n\n")
-                    
-                    # Show top 5 highest effect sizes
-                    f.write("**Strongest standardized support:**\n")
-                    for i, (clade_id, es, bd, bd_ps) in enumerate(effect_size_data[:5], 1):
-                        f.write(f"{i}. {clade_id}: ES={es:.3f}, BD={bd:.2f}, BD/site={bd_ps:.6f}\n")
-                    
-                    # Show bottom 5 if we have more than 5 clades
-                    if len(effect_size_data) > 5:
-                        f.write(f"\n**Weakest standardized support:**\n")
-                        for i, (clade_id, es, bd, bd_ps) in enumerate(effect_size_data[-5:], len(effect_size_data)-4):
-                            f.write(f"{i}. {clade_id}: ES={es:.3f}, BD={bd:.2f}, BD/site={bd_ps:.6f}\n")
-                    
-                    f.write(f"\n")
+            # Add normalized support rankings if dataset-relative methods are available
+            if self.normalize_ld and any(m in ['dataset_relative', 'percentile_rank', 'z_score'] for m in self.ld_normalization_methods):
+                self._write_dataset_relative_rankings(f, has_bayesian, has_ml, has_parsimony)
 
             # Build dynamic table header based on available data
             header_parts = ["| Clade ID | Taxa Count "]
@@ -4556,25 +4990,29 @@ class panDecayIndices:
                 separator_parts.append("|------------- ")
                 
                 # Add normalized BD metrics if enabled
-                if self.normalize_bd:
-                    if "per_site" in self.bd_normalization_methods:
+                if self.normalize_ld:
+                    if "per_site" in self.ld_normalization_methods:
                         header_parts.append("| BD/site ")
                         separator_parts.append("|--------- ")
-                    if "relative" in self.bd_normalization_methods:
+                    if "relative" in self.ld_normalization_methods:
                         header_parts.append("| BD% ")
                         separator_parts.append("|----- ")
-                    if "effect_size" in self.bd_normalization_methods:
+                    if "effect_size" in self.ld_normalization_methods:
                         header_parts.append("| Effect Size ")
                         separator_parts.append("|------------- ")
-                    if "effect_size_robust" in self.bd_normalization_methods:
+                    if "effect_size_robust" in self.ld_normalization_methods:
                         header_parts.append("| ES Robust ")
                         separator_parts.append("|----------- ")
-                    if "effect_size_weighted" in self.bd_normalization_methods:
+                    if "effect_size_weighted" in self.ld_normalization_methods:
                         header_parts.append("| ES Weighted ")
                         separator_parts.append("|------------- ")
-                    if "signal_to_noise" in self.bd_normalization_methods:
+                    if "signal_to_noise" in self.ld_normalization_methods:
                         header_parts.append("| Signal/Noise ")
                         separator_parts.append("|-------------- ")
+                
+            if has_parsimony:
+                header_parts.append("| Parsimony Decay ")
+                separator_parts.append("|----------------- ")
                 
             if has_bootstrap:
                 header_parts.append("| Bootstrap ")
@@ -4626,18 +5064,18 @@ class panDecayIndices:
                     row_parts.append(f"| {bayes_d} ")
                     
                     # Add normalized BD metrics if enabled
-                    if self.normalize_bd:
-                        if "per_site" in self.bd_normalization_methods:
+                    if self.normalize_ld:
+                        if "per_site" in self.ld_normalization_methods:
                             bd_per_site = data.get('bd_per_site', 'N/A')
                             if isinstance(bd_per_site, float): bd_per_site = f"{bd_per_site:.6f}"
                             row_parts.append(f"| {bd_per_site} ")
                         
-                        if "relative" in self.bd_normalization_methods:
+                        if "relative" in self.ld_normalization_methods:
                             bd_relative = data.get('bd_relative', 'N/A')
                             if isinstance(bd_relative, float): bd_relative = f"{bd_relative*100:.3f}%"
                             row_parts.append(f"| {bd_relative} ")
                         
-                        if "effect_size" in self.bd_normalization_methods:
+                        if "effect_size" in self.ld_normalization_methods:
                             effect_size = data.get('effect_size', 'N/A')
                             if isinstance(effect_size, float): 
                                 effect_size = f"{effect_size:.3f}"
@@ -4645,7 +5083,7 @@ class panDecayIndices:
                                 effect_size = 'N/A'
                             row_parts.append(f"| {effect_size} ")
                         
-                        if "effect_size_robust" in self.bd_normalization_methods:
+                        if "effect_size_robust" in self.ld_normalization_methods:
                             effect_size_robust = data.get('effect_size_robust', 'N/A')
                             if isinstance(effect_size_robust, float): 
                                 effect_size_robust = f"{effect_size_robust:.3f}"
@@ -4653,7 +5091,7 @@ class panDecayIndices:
                                 effect_size_robust = 'N/A'
                             row_parts.append(f"| {effect_size_robust} ")
                         
-                        if "effect_size_weighted" in self.bd_normalization_methods:
+                        if "effect_size_weighted" in self.ld_normalization_methods:
                             effect_size_weighted = data.get('effect_size_weighted', 'N/A')
                             if isinstance(effect_size_weighted, float): 
                                 effect_size_weighted = f"{effect_size_weighted:.3f}"
@@ -4661,13 +5099,20 @@ class panDecayIndices:
                                 effect_size_weighted = 'N/A'
                             row_parts.append(f"| {effect_size_weighted} ")
                         
-                        if "signal_to_noise" in self.bd_normalization_methods:
+                        if "signal_to_noise" in self.ld_normalization_methods:
                             signal_to_noise = data.get('signal_to_noise', 'N/A')
                             if isinstance(signal_to_noise, float): 
                                 signal_to_noise = f"{signal_to_noise:.3f}"
                             elif signal_to_noise is None:
                                 signal_to_noise = 'N/A'
                             row_parts.append(f"| {signal_to_noise} ")
+
+                # Parsimony fields
+                if has_parsimony:
+                    pars_d = data.get('pars_decay', 'N/A')
+                    if isinstance(pars_d, float): pars_d = f"{pars_d:.4f}"
+                    elif isinstance(pars_d, int): pars_d = str(pars_d)
+                    row_parts.append(f"| {pars_d} ")
 
                 # Bootstrap column if available
                 if has_bootstrap:
@@ -4702,26 +5147,26 @@ class panDecayIndices:
                 f.write("  - **Cross-study comparisons**: Use normalized metrics (effect sizes) rather than raw BD values\n")
                 f.write("  - **Why BD ≈ ΔlnL**: When comparing models that differ only by a topological constraint, the marginal likelihood is dominated by the likelihood component\n")
                 
-                # Add normalized BD documentation if enabled
-                if self.normalize_bd:
-                    f.write("  - **Normalized BD Metrics** (for cross-study comparisons):\n")
-                    if "per_site" in self.bd_normalization_methods:
-                        f.write("    - **BD/site**: Per-site Bayesian Decay (BD ÷ alignment length) - enables comparison across different alignment lengths\n")
-                    if "relative" in self.bd_normalization_methods:
-                        f.write("    - **BD%**: Relative BD as percentage of unconstrained marginal likelihood\n")
+                # Add normalized LD documentation if enabled
+                if self.normalize_ld:
+                    f.write("  - **Normalized LD Metrics** (for cross-study comparisons):\n")
+                    if "per_site" in self.ld_normalization_methods:
+                        f.write("    - **LD/site**: Per-site Likelihood Decay (LD ÷ alignment length) - enables comparison across different alignment lengths\n")
+                    if "relative" in self.ld_normalization_methods:
+                        f.write("    - **LD%**: Relative LD as percentage of unconstrained marginal likelihood\n")
                         f.write("      - Provides context relative to total likelihood magnitude\n")
                         f.write("      - Useful for comparing datasets with different likelihood scales\n")
-                    if "effect_size" in self.bd_normalization_methods:
+                    if "effect_size" in self.ld_normalization_methods:
                         f.write("    - **Effect Size**: BD normalized by standard deviation of site-specific signals (Cohen's d framework)\n")
                         f.write("      - Creates signal-to-noise ratio suitable for cross-study comparison\n")
                         f.write("      - Interpretation: 0.2-0.5 (small), 0.5-0.8 (medium), 0.8-1.2 (large), ≥1.2 (very large)\n")
-                    if "effect_size_robust" in self.bd_normalization_methods:
+                    if "effect_size_robust" in self.ld_normalization_methods:
                         f.write("    - **ES Robust**: Effect size using Median Absolute Deviation (MAD) - less sensitive to outlier sites\n")
-                    if "effect_size_weighted" in self.bd_normalization_methods:
+                    if "effect_size_weighted" in self.ld_normalization_methods:
                         f.write("    - **ES Weighted**: Effect size weighted by site information content\n")
-                    if "signal_to_noise" in self.bd_normalization_methods:
+                    if "signal_to_noise" in self.ld_normalization_methods:
                         f.write("    - **Signal/Noise**: Raw signal-to-noise ratio of site-specific support\n")
-                    f.write("    - **Why normalize?**: Raw BD values scale with dataset size, making cross-study comparisons misleading\n")
+                    f.write("    - **Why normalize?**: Raw LD values scale with dataset size, making cross-study comparisons misleading\n")
                     f.write("    - **Recommendation**: Use effect sizes for cross-study comparisons and meta-analyses\n")
                 f.write("  - **Negative values** suggest the constrained analysis had higher marginal likelihood, which may indicate:\n")
                 if self.marginal_likelihood == "ss":
@@ -4733,6 +5178,16 @@ class panDecayIndices:
                     f.write("    - Poor MCMC convergence (try increasing generations)\n")
                     f.write("    - Genuine lack of support for the clade\n")
                     f.write("    - **Consider using stepping-stone sampling (--marginal-likelihood ss) for more reliable estimates**\n")
+                
+            if has_parsimony:
+                f.write("### Parsimony Analysis\n")
+                f.write("- **Parsimony Decay**: Traditional Bremer support value - the increase in parsimony tree length required to break the clade (make it non-monophyletic)\n")
+                f.write("  - **Calculation**: Constrained tree length - Optimal tree length\n")
+                f.write("  - **Interpretation**: Higher values indicate stronger support for the clade\n")
+                f.write("  - **Units**: Additional parsimony steps required to reject the clade\n")
+                f.write("  - **Comparison**: Values are comparable within the same dataset but not across different datasets\n")
+                f.write("  - **Zero values**: Indicate very weak support (clade can be broken with no additional steps)\n")
+                f.write("  - **Negative values**: Should not occur in proper Bremer support analysis (indicates analysis error)\n\n")
                 
             if has_bootstrap:
                 f.write("- **Bootstrap**: Bootstrap support value (percentage of bootstrap replicates in which the clade appears). Higher values (e.g., > 70) suggest stronger support for the clade.\n")
@@ -4750,9 +5205,9 @@ class panDecayIndices:
                 f.write("(same model parameters, only different tree topologies), the prior's influence is minimal.\n\n")
                 f.write("**Practical Implications**:\n")
                 f.write("- Similar BD and ΔlnL values confirm your analyses are working correctly\n")
-                f.write("- BD values scale with dataset characteristics - do not compare absolute values across studies\n")
-                f.write("- For cross-study comparisons, use normalized metrics (effect sizes) instead of raw BD values\n")
-                f.write("- Compare relative BD values across branches within this analysis to identify well-supported clades\n")
+                f.write("- LD values scale with dataset characteristics - do not compare absolute values across studies\n")
+                f.write("- For cross-study comparisons, use normalized metrics (effect sizes) instead of raw LD values\n")
+                f.write("- Compare relative LD values across branches within this analysis to identify well-supported clades\n")
                 
         logger.info(f"Detailed report written to {self._get_display_path(output_path)}")
 
@@ -5445,8 +5900,8 @@ def parse_config(config_file, args):
                 'max_psrf': 'max_psrf',
                 'max_asdsf': 'max_asdsf',
                 'convergence_strict': 'convergence_strict',
-                'normalize_bd': 'normalize_bd',
-                'bd_normalization_methods': 'bd_normalization_methods',
+                'normalize_ld': 'normalize_ld',
+                'dataset_relative': 'dataset_relative',
             }
             
             # Process each parameter
@@ -5465,7 +5920,7 @@ def parse_config(config_file, args):
                     if arg_param in ['gamma', 'invariable', 'keep_files', 'debug', 
                                      'site_analysis', 'bootstrap', 'use_mpi', 'use_beagle',
                                      'visualize', 'check_convergence', 'convergence_strict',
-                                     'normalize_bd']:
+                                     'normalize_ld']:
                         value = str_to_bool(value)
                     elif arg_param in ['gamma_shape', 'prop_invar', 'bayes_burnin', 'ss_alpha',
                                        'max_psrf', 'max_asdsf']:
@@ -5473,10 +5928,10 @@ def parse_config(config_file, args):
                     elif arg_param in ['nst', 'bootstrap_reps', 'bayes_ngen', 'bayes_chains',
                                        'bayes_sample_freq', 'ss_nsteps', 'mpi_processors', 'min_ess']:
                         value = int(value)
-                    elif arg_param == 'bd_normalization_methods':
-                        # Handle list parameter - split by comma/space
+                    elif arg_param == 'dataset_relative':
+                        # Handle boolean parameter
                         if isinstance(value, str):
-                            value = value.replace(',', ' ').split()
+                            value = value.lower() in ['true', '1', 'yes', 'on']
                     
                     setattr(args, arg_param, value)
         
@@ -5548,7 +6003,9 @@ def process_single_alignment(args_dict):
             if args_copy.bootstrap:
                 decay_calc.run_bootstrap_analysis(num_replicates=args_copy.bootstrap_reps)
             
-            decay_calc.calculate_decay_indices(perform_site_analysis=args_copy.site_analysis)
+            # Site analysis is needed if explicitly requested or if effect size calculations are requested
+            needs_site_analysis = args_copy.site_analysis or (args_copy.normalize_ld and any(method.startswith('effect_size') for method in args_copy.ld_normalization_methods))
+            decay_calc.calculate_decay_indices(perform_site_analysis=needs_site_analysis)
             
             # Write results
             decay_calc.write_formatted_results(Path(args_copy.output))
@@ -5665,8 +6122,8 @@ def create_decay_calc_from_args(args):
         convergence_strict=args.convergence_strict,
         mrbayes_parse_timeout=args.mrbayes_parse_timeout,
         output_style=args.output_style,
-        normalize_bd=args.normalize_bd,
-        bd_normalization_methods=args.bd_normalization_methods
+        normalize_ld=args.normalize_ld,
+        dataset_relative=args.dataset_relative
     )
 
 
@@ -5760,7 +6217,106 @@ def write_batch_summary(results, summary_file, total_time):
             f.write(f"{file_name}\t{status}\t{branches}\t{likelihood}\t{output_file}\t{error}\n")
 
 
+def run_smoke_tests():
+    """
+    Quick smoke tests to validate effect size calculations work correctly.
+    These tests verify basic functionality without requiring external software.
+    """
+    print("Running panDecay effect size smoke tests...")
+    
+    # Test 1: Basic effect size calculation
+    print("Test 1: Basic effect size calculation")
+    try:
+        # Create a minimal instance for testing
+        test_instance = panDecayIndices.__new__(panDecayIndices)
+        test_instance.ld_normalization_methods = ['effect_size', 'effect_size_robust', 'per_site']
+        test_instance.alignment_length = 100
+        
+        # Test with valid site data
+        site_data = {
+            'signal_std': 2.0,
+            'signal_mad': 1.5,
+            'supporting_sites': 80,
+            'conflicting_sites': 20
+        }
+        
+        result = test_instance._calculate_normalized_ld_metrics(10.0, -1000.0, site_data, ml_decay=10.0)
+        
+        # Validate results
+        assert 'effect_size' in result, "effect_size not calculated"
+        assert 'effect_size_robust' in result, "effect_size_robust not calculated"
+        assert 'bd_per_site' in result, "bd_per_site not calculated"
+        
+        assert result['effect_size'] == 5.0, f"Expected effect_size=5.0, got {result['effect_size']}"
+        assert abs(result['effect_size_robust'] - 6.666666666666667) < 0.001, f"Expected effect_size_robust≈6.67, got {result['effect_size_robust']}"
+        assert result['bd_per_site'] == 0.1, f"Expected bd_per_site=0.1, got {result['bd_per_site']}"
+        
+        print("✓ Basic calculations working correctly")
+        
+    except Exception as e:
+        print(f"✗ Test 1 failed: {e}")
+        return False
+    
+    # Test 2: Zero variance handling
+    print("Test 2: Zero variance handling")
+    try:
+        site_data_zero = {
+            'signal_std': 0.0,
+            'signal_mad': 0.0,
+        }
+        
+        result = test_instance._calculate_normalized_ld_metrics(10.0, -1000.0, site_data_zero, ml_decay=10.0)
+        
+        assert result['effect_size'] is None, f"Expected effect_size=None for zero std, got {result['effect_size']}"
+        assert result['effect_size_robust'] is None, f"Expected effect_size_robust=None for zero MAD, got {result['effect_size_robust']}"
+        
+        print("✓ Zero variance handling working correctly")
+        
+    except Exception as e:
+        print(f"✗ Test 2 failed: {e}")
+        return False
+    
+    # Test 3: No site data handling
+    print("Test 3: No site data handling")
+    try:
+        result = test_instance._calculate_normalized_ld_metrics(10.0, -1000.0, None, ml_decay=10.0)
+        
+        assert result['effect_size'] is None, f"Expected effect_size=None for no site data, got {result['effect_size']}"
+        assert result['effect_size_robust'] is None, f"Expected effect_size_robust=None for no site data, got {result['effect_size_robust']}"
+        assert result['bd_per_site'] == 0.1, f"Expected bd_per_site=0.1 (doesn't need site data), got {result['bd_per_site']}"
+        
+        print("✓ No site data handling working correctly")
+        
+    except Exception as e:
+        print(f"✗ Test 3 failed: {e}")
+        return False
+    
+    # Test 4: Method selection
+    print("Test 4: Method selection")
+    try:
+        test_instance.ld_normalization_methods = ['effect_size']  # Only one method
+        
+        result = test_instance._calculate_normalized_ld_metrics(10.0, -1000.0, site_data, ml_decay=10.0)
+        
+        assert 'effect_size' in result, "effect_size should be calculated"
+        assert 'effect_size_robust' not in result, "effect_size_robust should not be calculated"
+        assert 'bd_per_site' not in result, "bd_per_site should not be calculated"
+        
+        print("✓ Method selection working correctly")
+        
+    except Exception as e:
+        print(f"✗ Test 4 failed: {e}")
+        return False
+    
+    print("\n🎉 All smoke tests passed! Effect size calculations are working correctly.")
+    return True
+
 def main():
+    # Check if we're running smoke tests
+    if len(sys.argv) == 2 and sys.argv[1] == '--smoke-test':
+        success = run_smoke_tests()
+        sys.exit(0 if success else 1)
+    
     parser = argparse.ArgumentParser(
         description=f"panDecay v{VERSION}: Calculate phylogenetic decay indices (ML, Bayesian, and parsimony).",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter # Shows defaults in help
@@ -5834,14 +6390,14 @@ def main():
     bayesian_opts.add_argument("--ss-nsteps", type=int, default=50, help="Number of steps for stepping-stone sampling")
     
     # Normalization options
-    normalization_opts = parser.add_argument_group('Bayesian Decay Normalization Options')
-    normalization_opts.add_argument("--normalize-bd", action=argparse.BooleanOptionalAction, default=True,
-                                   help="Calculate normalized BD metrics for cross-study comparisons (default: enabled)")
-    normalization_opts.add_argument("--bd-normalization-methods", nargs="+", 
-                                   choices=["per_site", "relative", "signal_to_noise", 
-                                           "effect_size", "effect_size_robust", "effect_size_weighted"], 
-                                   default=["per_site", "relative"],
-                                   help="Which normalization methods to calculate: per_site (BD/sites), relative (BD%%), signal_to_noise (supporting/conflicting ratio), effect_size (BD/SD like Cohen's d), effect_size_robust (BD/MAD), effect_size_weighted (weighted by site information) (default: per_site relative)")
+    normalization_opts = parser.add_argument_group('Likelihood Decay Normalization Options')
+    
+    # Normalization options
+    normalization_opts.add_argument("--normalize-ld", action=argparse.BooleanOptionalAction, default=True,
+                                   help="Calculate normalized likelihood decay metrics including per-site, relative, and dataset-relative rankings (default: enabled)")
+    normalization_opts.add_argument("--dataset-relative", action="store_true", default=False,
+                                   help="Include dataset-relative normalization metrics: 0-1 scaling, percentile ranks, and z-scores for within-dataset comparison")
+    
     
     # MPI and BEAGLE options
     parallel_opts = parser.add_argument_group('Parallel Processing Options (MrBayes)')
@@ -5890,6 +6446,7 @@ def main():
     
     parser.add_argument("-v", "--version", action="version", version=f"%(prog)s {VERSION}")
     args = parser.parse_args()
+    
     
     # Handle --generate-config first
     if args.generate_config:
@@ -5975,7 +6532,9 @@ def main():
                 logger.info(f"Running bootstrap analysis with {args.bootstrap_reps} replicates...")
                 decay_calc.run_bootstrap_analysis(num_replicates=args.bootstrap_reps)
 
-            decay_calc.calculate_decay_indices(perform_site_analysis=args.site_analysis)
+            # Site analysis is needed if explicitly requested (effect size calculations have been removed)
+            needs_site_analysis = args.site_analysis
+            decay_calc.calculate_decay_indices(perform_site_analysis=needs_site_analysis)
 
             # Add this new code snippet here
             if hasattr(decay_calc, 'decay_indices') and decay_calc.decay_indices:
