@@ -282,6 +282,105 @@ class DatasetNormalizer:
         logger.info("Dataset-relative normalizations applied successfully")
 
 
+class AlignmentManager:
+    """Handles alignment loading and format conversion operations."""
+    
+    def __init__(self, temp_path, debug=False):
+        self.temp_path = temp_path
+        self.debug = debug
+    
+    def load_alignment(self, alignment_file, alignment_format="fasta"):
+        """Load alignment from file and return alignment object and metadata."""
+        try:
+            alignment = AlignIO.read(str(alignment_file), alignment_format)
+            alignment_length = alignment.get_alignment_length()
+            logger.info(f"Loaded alignment: {len(alignment)} sequences, {alignment_length} sites.")
+            return alignment, alignment_length
+        except Exception as e:
+            logger.error(f"Failed to load alignment '{alignment_file}': {e}")
+            raise
+    
+    def validate_discrete_data(self, alignment):
+        """Validate discrete (morphological) data format."""
+        valid_chars = set("01-?")
+        for record in alignment:
+            for char in str(record.seq):
+                if char.upper() not in valid_chars:
+                    logger.error(f"Invalid character '{char}' for discrete data in sequence {record.id}")
+                    logger.error("For discrete data, only 0, 1, -, and ? are allowed")
+                    return False
+        logger.info("Discrete data validation passed")
+        return True
+    
+    def convert_to_nexus(self, alignment, data_type, nexus_file_path):
+        """Convert alignment to NEXUS format."""
+        try:
+            with open(nexus_file_path, 'w') as f:
+                f.write("#NEXUS\n\n")
+                f.write("BEGIN DATA;\n")
+                dt = "DNA"
+                if data_type == "protein": 
+                    dt = "PROTEIN"
+                elif data_type == "discrete": 
+                    dt = "STANDARD"
+
+                f.write(f"  DIMENSIONS NTAX={len(alignment)} NCHAR={alignment.get_alignment_length()};\n")
+                format_line = f"  FORMAT DATATYPE={dt} MISSING=? GAP=- INTERLEAVE=NO"
+                if data_type == "discrete":
+                    format_line += " SYMBOLS=\"01\""  # Assuming binary discrete data
+                f.write(format_line + ";\n")
+                f.write("  MATRIX\n")
+                for record in alignment:
+                    f.write(f"  {self._format_taxon_for_paup(record.id)} {record.seq}\n")
+                f.write("  ;\nEND;\n")
+
+                if data_type == "discrete":
+                    f.write("\nBEGIN ASSUMPTIONS;\n")
+                    f.write("  OPTIONS DEFTYPE=UNORD POLYTCOUNT=MINSTEPS;\n")  # Common for Mk
+                    f.write("END;\n")
+            logger.info(f"Converted alignment to NEXUS: {nexus_file_path}")
+        except Exception as e:
+            logger.error(f"Failed to convert alignment to NEXUS: {e}")
+            raise
+    
+    def setup_alignment_files(self, alignment_file, alignment_format, data_type):
+        """Setup alignment files and return alignment object and nexus path."""
+        # Load alignment
+        alignment, alignment_length = self.load_alignment(alignment_file, alignment_format)
+        
+        # Validate discrete data if needed
+        if data_type == "discrete":
+            if not self.validate_discrete_data(alignment):
+                raise ValueError("Discrete data validation failed")
+        
+        # Setup NEXUS file path
+        nexus_file_path = self.temp_path / NEXUS_ALIGNMENT_FN
+        
+        # Convert to NEXUS or copy if already NEXUS
+        if alignment_format.lower() == "nexus":
+            logger.info("Input is already NEXUS format, copying directly to temp directory")
+            shutil.copy(str(alignment_file), str(nexus_file_path))
+        else:
+            self.convert_to_nexus(alignment, data_type, nexus_file_path)
+        
+        # Validate NEXUS file
+        if not nexus_file_path.exists():
+            raise FileNotFoundError(f"NEXUS file was not created at {nexus_file_path}")
+        if nexus_file_path.stat().st_size == 0:
+            raise ValueError(f"NEXUS file at {nexus_file_path} is empty")
+        
+        return alignment, alignment_length, nexus_file_path
+    
+    def _format_taxon_for_paup(self, taxon_name):
+        """Format taxon name for PAUP* compatibility."""
+        # Simple formatting - replace spaces with underscores, remove problematic characters
+        formatted = taxon_name.replace(' ', '_').replace('(', '').replace(')', '').replace(',', '')
+        # Ensure it doesn't start with a number
+        if formatted and formatted[0].isdigit():
+            formatted = 'T_' + formatted
+        return formatted
+
+
 class panDecayIndices:
     """
     Implements phylogenetic decay indices (Bremer support) using multiple approaches.
@@ -442,6 +541,9 @@ class panDecayIndices:
 
             # Initialize dataset normalizer for debug/keep_files mode
             self._dataset_normalizer = DatasetNormalizer(debug=self.debug)
+
+            # Initialize alignment manager for debug/keep_files mode
+            self._alignment_manager = AlignmentManager(temp_path=self.temp_path, debug=self.debug)
         else: # Auto-cleanup
             self._temp_dir_obj = tempfile.TemporaryDirectory(prefix="mldecay_")
             self.temp_path = Path(self._temp_dir_obj.name)
@@ -462,6 +564,9 @@ class panDecayIndices:
         # Initialize dataset normalizer
         self._dataset_normalizer = DatasetNormalizer(debug=self.debug)
 
+        # Initialize alignment manager
+        self._alignment_manager = AlignmentManager(temp_path=self.temp_path, debug=self.debug)
+
         # --- PAUP* Model Settings ---
         self.parsmodel = False # Default, will be set by _convert_model_to_paup if discrete
         if self.user_paup_block is None:
@@ -477,35 +582,16 @@ class panDecayIndices:
 
         # --- Alignment Handling ---
         try:
-            self.alignment = AlignIO.read(str(self.alignment_file), self.alignment_format)
-            self.alignment_length = self.alignment.get_alignment_length()
-            logger.info(f"Loaded alignment: {len(self.alignment)} sequences, {self.alignment_length} sites.")
+            self.alignment, self.alignment_length, self.nexus_file_path = self._alignment_manager.setup_alignment_files(
+                self.alignment_file, self.alignment_format, self.data_type
+            )
         except Exception as e:
-            logger.error(f"Failed to load alignment '{self.alignment_file}': {e}")
+            logger.error(f"Failed to setup alignment files: {e}")
             if self._temp_dir_obj: self._temp_dir_obj.cleanup() # Manual cleanup if init fails early
             raise
 
-        if self.data_type == "discrete":
-            if not self._validate_discrete_data():
-                logger.warning("Discrete data validation failed based on content, proceeding but results may be unreliable.")
-
         if self.keep_files or self.debug: # Copy original alignment for debugging
              shutil.copy(str(self.alignment_file), self.temp_path / f"original_alignment.{self.alignment_format}")
-
-        self.nexus_file_path = self.temp_path / NEXUS_ALIGNMENT_FN
-        
-        # If input is already NEXUS, copy it directly instead of converting
-        if self.alignment_format.lower() == "nexus":
-            logger.info(f"Input is already NEXUS format, copying directly to temp directory")
-            shutil.copy(str(self.alignment_file), str(self.nexus_file_path))
-        else:
-            self._convert_to_nexus() # Writes to self.nexus_file_path
-            
-        # Validate that NEXUS file exists and has content
-        if not self.nexus_file_path.exists():
-            raise FileNotFoundError(f"NEXUS file was not created at {self.nexus_file_path}")
-        if self.nexus_file_path.stat().st_size == 0:
-            raise ValueError(f"NEXUS file at {self.nexus_file_path} is empty")
 
         self.ml_tree = None
         self.ml_likelihood = None
@@ -591,17 +677,6 @@ class panDecayIndices:
 
         return "lset " + " ".join(cmd_parts) + ";"
 
-    def _validate_discrete_data(self):
-        """Validate that discrete data contains only 0, 1, -, ? characters."""
-        if self.data_type == "discrete":
-            valid_chars = set("01-?")
-            for record in self.alignment:
-                seq_chars = set(str(record.seq).upper()) # Convert to upper for case-insensitivity if needed
-                invalid_chars = seq_chars - valid_chars
-                if invalid_chars:
-                    logger.warning(f"Sequence {record.id} contains invalid discrete characters: {invalid_chars}. Expected only 0, 1, -, ?.")
-                    return False
-        return True
 
     def _format_taxon_for_paup(self, taxon_name):
         """Format a taxon name for PAUP* (handles spaces, special chars by quoting)."""
@@ -626,34 +701,6 @@ class panDecayIndices:
                 middle = taxa_list[len(taxa_list)//2]
             return f"{first}...{middle}...{last} ({len(taxa_list)} taxa)"
 
-    def _convert_to_nexus(self):
-        """Converts alignment to NEXUS, writes to self.nexus_file_path."""
-        try:
-            with open(self.nexus_file_path, 'w') as f:
-                f.write("#NEXUS\n\n")
-                f.write("BEGIN DATA;\n")
-                dt = "DNA"
-                if self.data_type == "protein": dt = "PROTEIN"
-                elif self.data_type == "discrete": dt = "STANDARD"
-
-                f.write(f"  DIMENSIONS NTAX={len(self.alignment)} NCHAR={self.alignment.get_alignment_length()};\n")
-                format_line = f"  FORMAT DATATYPE={dt} MISSING=? GAP=- INTERLEAVE=NO"
-                if self.data_type == "discrete":
-                    format_line += " SYMBOLS=\"01\"" # Assuming binary discrete data
-                f.write(format_line + ";\n")
-                f.write("  MATRIX\n")
-                for record in self.alignment:
-                    f.write(f"  {self._format_taxon_for_paup(record.id)} {record.seq}\n")
-                f.write("  ;\nEND;\n")
-
-                if self.data_type == "discrete":
-                    f.write("\nBEGIN ASSUMPTIONS;\n")
-                    f.write("  OPTIONS DEFTYPE=UNORD POLYTCOUNT=MINSTEPS;\n") # Common for Mk
-                    f.write("END;\n")
-            logger.info(f"Converted alignment to NEXUS: {self.nexus_file_path}")
-        except Exception as e:
-            logger.error(f"Failed to convert alignment to NEXUS: {e}")
-            raise
 
     def _get_paup_model_setup_cmds(self):
         """Returns the model setup command string(s) for PAUP* script."""
