@@ -435,6 +435,145 @@ class TreeManager:
             return {}
 
 
+class OutputManager:
+    """Manages output generation including reports, tables, and visualizations."""
+    
+    def __init__(self, temp_path=None, debug=False, output_style="unicode"):
+        self.temp_path = temp_path or Path.cwd()
+        self.debug = debug
+        self.output_style = output_style
+    
+    def get_box_chars(self):
+        """Return appropriate box drawing characters based on output style."""
+        if self.output_style == "unicode":
+            return {
+                'horizontal': '─', 'vertical': '│', 'top_left': '┌', 'top_right': '┐',
+                'bottom_left': '└', 'bottom_right': '┘', 'cross': '┼', 'top_tee': '┬',
+                'bottom_tee': '┴', 'left_tee': '├', 'right_tee': '┤'
+            }
+        else:
+            return {
+                'horizontal': '-', 'vertical': '|', 'top_left': '+', 'top_right': '+',
+                'bottom_left': '+', 'bottom_right': '+', 'cross': '+', 'top_tee': '+',
+                'bottom_tee': '+', 'left_tee': '+', 'right_tee': '+'
+            }
+    
+    def write_support_table(self, f, decay_indices, has_ml, has_bayesian, has_parsimony, has_posterior, has_bootstrap):
+        """Write formatted support values table."""
+        box = self.get_box_chars()
+        
+        # Calculate column widths
+        clade_width = max(10, max(len(str(clade_id)) for clade_id in decay_indices.keys()) if decay_indices else 10)
+        taxa_width = 6
+        
+        # Header row
+        if has_ml and has_bayesian and has_parsimony:
+            # All three analysis types
+            f.write(f"{box['top_left']}{box['horizontal'] * (clade_width)}{box['top_tee']}{box['horizontal'] * taxa_width}{box['top_tee']}")
+            f.write(f"{box['horizontal'] * 32}{box['top_tee']}{box['horizontal'] * 31}{box['top_tee']}{box['horizontal'] * 23}{box['top_tee']}\n")
+            
+            f.write(f"{box['vertical']} {'Clade ID':<{clade_width-1}} {box['vertical']} {'Taxa':<{taxa_width-1}} {box['vertical']}")
+            f.write(f"    {'Maximum Likelihood':<28} {box['vertical']}         {'Bayesian (Normalized)':<23}        {box['vertical']} {'Parsimony':<21} {box['vertical']}\n")
+            
+            f.write(f"{box['vertical']} {'':<{clade_width-1}} {box['vertical']} {'':<{taxa_width-1}} {box['vertical']}")
+            f.write(f"{box['horizontal'] * 10}{box['top_tee']}{box['horizontal'] * 10}{box['top_tee']}{box['horizontal'] * 10}{box['vertical']}")
+            f.write(f"{box['horizontal'] * 8}{box['top_tee']}{box['horizontal'] * 8}{box['top_tee']}{box['horizontal'] * 8}{box['vertical']} {'':<21} {box['vertical']}\n")
+            
+            f.write(f"{box['vertical']} {'':<{clade_width-1}} {box['vertical']} {'':<{taxa_width-1}} {box['vertical']}")
+            f.write(f" {'ΔlnL':<9} {box['vertical']} {'AU p-val':<9} {box['vertical']} {'Support':<9} {box['vertical']}")
+            f.write(f" {'BD':<7} {box['vertical']} {'LD/site':<7} {box['vertical']} {'LD%':<7} {box['vertical']} {'Decay':<21} {box['vertical']}\n")
+            
+        elif has_ml and has_bayesian:
+            # ML + Bayesian
+            f.write(f"{box['top_left']}{box['horizontal'] * (clade_width)}{box['top_tee']}{box['horizontal'] * taxa_width}{box['top_tee']}")
+            f.write(f"{box['horizontal'] * 32}{box['top_tee']}{box['horizontal'] * 31}{box['top_right']}\n")
+            
+            f.write(f"{box['vertical']} {'Clade ID':<{clade_width-1}} {box['vertical']} {'Taxa':<{taxa_width-1}} {box['vertical']}")
+            f.write(f"    {'Maximum Likelihood':<28} {box['vertical']}         {'Bayesian (Normalized)':<23}        {box['vertical']}\n")
+            
+        # Data rows
+        f.write(f"{box['left_tee']}{box['horizontal'] * (clade_width)}{box['cross']}{box['horizontal'] * taxa_width}{box['cross']}")
+        if has_ml and has_bayesian and has_parsimony:
+            f.write(f"{box['horizontal'] * 10}{box['cross']}{box['horizontal'] * 10}{box['cross']}{box['horizontal'] * 10}{box['cross']}")
+            f.write(f"{box['horizontal'] * 8}{box['cross']}{box['horizontal'] * 8}{box['cross']}{box['horizontal'] * 8}{box['cross']}{box['horizontal'] * 23}{box['right_tee']}\n")
+        
+        # Write data rows
+        for clade_id, data in sorted(decay_indices.items()):
+            taxa_count = len(data.get('taxa', []))
+            
+            f.write(f"{box['vertical']} {clade_id:<{clade_width-1}} {box['vertical']} {taxa_count:<{taxa_width-1}} {box['vertical']}")
+            
+            if has_ml:
+                lnl_diff = data.get('lnl_diff', 0)
+                au_pval = data.get('AU_pvalue', 1.0)
+                significant = data.get('significant_AU', False)
+                support_str = "***" if au_pval < 0.001 else "**" if au_pval < 0.01 else "*" if au_pval < 0.05 else "ns"
+                f.write(f" {lnl_diff:>8.3f} {box['vertical']} {au_pval:>8.4f} {box['vertical']} {support_str:>8} {box['vertical']}")
+            
+            if has_bayesian:
+                bd = data.get('bayes_decay', 0)
+                ld_site = data.get('LD_per_site', 0)
+                ld_pct = data.get('LD_percent', 0)
+                f.write(f" {bd:>6.2f} {box['vertical']} {ld_site:>7.6f} {box['vertical']} {ld_pct:>6.3f} {box['vertical']}")
+            
+            if has_parsimony:
+                pars_decay = data.get('pars_decay', 0)
+                f.write(f" {pars_decay:<21} {box['vertical']}")
+            
+            f.write("\n")
+        
+        # Bottom border
+        f.write(f"{box['bottom_left']}{box['horizontal'] * (clade_width)}{box['bottom_tee']}{box['horizontal'] * taxa_width}{box['bottom_tee']}")
+        if has_ml and has_bayesian and has_parsimony:
+            f.write(f"{box['horizontal'] * 10}{box['bottom_tee']}{box['horizontal'] * 10}{box['bottom_tee']}{box['horizontal'] * 10}{box['bottom_tee']}")
+            f.write(f"{box['horizontal'] * 8}{box['bottom_tee']}{box['horizontal'] * 8}{box['bottom_tee']}{box['horizontal'] * 8}{box['bottom_tee']}{box['horizontal'] * 23}{box['bottom_right']}\n")
+    
+    def write_dataset_relative_rankings(self, f, decay_indices, has_bayesian, has_ml, has_parsimony):
+        """Write dataset-relative support rankings section."""
+        if not decay_indices:
+            return
+            
+        # Calculate rankings based on ML ΔlnL values
+        ml_values = []
+        for data in decay_indices.values():
+            lnl_diff = data.get('lnl_diff')
+            if lnl_diff is not None:
+                ml_values.append(lnl_diff)
+        
+        if not ml_values:
+            return
+            
+        ml_values.sort()
+        mean_ml = sum(ml_values) / len(ml_values)
+        std_ml = (sum((x - mean_ml) ** 2 for x in ml_values) / len(ml_values)) ** 0.5
+        
+        # Create rankings
+        rankings = []
+        for clade_id, data in decay_indices.items():
+            lnl_diff = data.get('lnl_diff')
+            if lnl_diff is not None:
+                percentile = (sum(1 for x in ml_values if x <= lnl_diff) / len(ml_values)) * 100
+                z_score = (lnl_diff - mean_ml) / std_ml if std_ml > 0 else 0
+                rankings.append((clade_id, percentile, z_score, lnl_diff))
+        
+        rankings.sort(key=lambda x: x[1], reverse=True)  # Sort by percentile, highest first
+        
+        f.write("\n### Dataset-Relative Support Rankings\n\n")
+        f.write("Rankings based on ML likelihood decay values within this dataset. \n\n")
+        f.write("**Important**: \nThese rankings show relative support within this dataset only and do not indicate absolute phylogenetic reliability.\n\n")
+        
+        # Top ranked
+        f.write("**Highest relative support within dataset:**\n\n")
+        for i, (clade_id, percentile, z_score, raw_ml) in enumerate(rankings[:5], 1):
+            f.write(f"{i}. {clade_id}: {percentile:.1f}th percentile, Z-score={z_score:+.2f}, Raw ML={raw_ml:.2f}\n")
+        
+        # Bottom ranked
+        if len(rankings) > 5:
+            f.write("\n**Lowest relative support within dataset:**\n\n")
+            for i, (clade_id, percentile, z_score, raw_ml) in enumerate(rankings[-3:], len(rankings)-2):
+                f.write(f"{i}. {clade_id}: {percentile:.1f}th percentile, Z-score={z_score:+.2f}, Raw ML={raw_ml:.2f}\n")
+
+
 class AlignmentManager:
     """Handles alignment loading and format conversion operations."""
     
@@ -698,6 +837,7 @@ class panDecayIndices:
             # Initialize alignment manager for debug/keep_files mode
             self._alignment_manager = AlignmentManager(temp_path=self.temp_path, debug=self.debug)
             self._tree_manager = TreeManager(temp_path=self.temp_path, debug=self.debug, external_runner=self._external_runner)
+            self._output_manager = OutputManager(temp_path=self.temp_path, debug=self.debug, output_style=self.output_style)
         else: # Auto-cleanup
             self._temp_dir_obj = tempfile.TemporaryDirectory(prefix="mldecay_")
             self.temp_path = Path(self._temp_dir_obj.name)
@@ -721,6 +861,7 @@ class panDecayIndices:
         # Initialize alignment manager
         self._alignment_manager = AlignmentManager(temp_path=self.temp_path, debug=self.debug)
         self._tree_manager = TreeManager(temp_path=self.temp_path, debug=self.debug, external_runner=self._external_runner)
+        self._output_manager = OutputManager(temp_path=self.temp_path, debug=self.debug, output_style=self.output_style)
 
         # --- PAUP* Model Settings ---
         self.parsmodel = False # Default, will be set by _convert_model_to_paup if discrete
@@ -2040,24 +2181,6 @@ class panDecayIndices:
         # Check constraint mode
         return self.should_test_clade(clade_taxa, user_constraints)
     
-    def _get_box_chars(self):
-        """Get box drawing characters based on output style."""
-        if self.output_style == "unicode":
-            return {
-                'h': '─', 'v': '│', 'tl': '╭', 'tr': '╮', 'bl': '╰', 'br': '╯',
-                'cross': '┼', 'hdown': '┬', 'hup': '┴', 'vright': '├', 'vleft': '┤',
-                'h_thick': '═', 'v_thick': '║', 'tl_thick': '╔', 'tr_thick': '╗',
-                'bl_thick': '╚', 'br_thick': '╝'
-            }
-        elif self.output_style == "ascii":
-            return {
-                'h': '-', 'v': '|', 'tl': '+', 'tr': '+', 'bl': '+', 'br': '+',
-                'cross': '+', 'hdown': '+', 'hup': '+', 'vright': '+', 'vleft': '+',
-                'h_thick': '=', 'v_thick': '|', 'tl_thick': '+', 'tr_thick': '+',
-                'bl_thick': '+', 'br_thick': '+'
-            }
-        else:  # minimal
-            return None
     
     def _format_table_row(self, values, widths, alignments=None):
         """Format a table row with proper alignment and spacing."""
@@ -4521,7 +4644,7 @@ class panDecayIndices:
 
     def _write_support_table(self, f, has_ml, has_bayesian, has_parsimony, has_posterior, has_bootstrap):
         """Write the formatted support values table."""
-        box = self._get_box_chars()
+        box = self._output_manager.get_box_chars()
         
         # Check if effect size data is available
         has_effect_size = any(
@@ -4727,7 +4850,7 @@ class panDecayIndices:
         has_posterior = any(d.get('posterior_prob') is not None for d in self.decay_indices.values())
         has_bootstrap = hasattr(self, 'bootstrap_tree') and self.bootstrap_tree
         
-        box = self._get_box_chars()
+        box = self._output_manager.get_box_chars()
         
         with output_path.open('w') as f:
             # Header section
@@ -4763,7 +4886,7 @@ class panDecayIndices:
             f.write("─" * 21 + "\n" if self.output_style == "unicode" else "-" * 21 + "\n")
             
             # Write the formatted table
-            self._write_support_table(f, has_ml, has_bayesian, has_parsimony, has_posterior, has_bootstrap)
+            self._output_manager.write_support_table(f, self.decay_indices, has_ml, has_bayesian, has_parsimony, has_posterior, has_bootstrap)
             
             # Support legend
             f.write("\nSupport Legend: *** = p < 0.001, ** = p < 0.01, * = p < 0.05, ns = not significant\n")
@@ -5266,7 +5389,7 @@ class panDecayIndices:
 
             # Add normalized support rankings if dataset-relative methods are available
             if self.normalize_ld and any(m in ['dataset_relative', 'percentile_rank', 'z_score'] for m in self.ld_normalization_methods):
-                self._write_dataset_relative_rankings(f, has_bayesian, has_ml, has_parsimony)
+                self._output_manager.write_dataset_relative_rankings(f, self.decay_indices, has_bayesian, has_ml, has_parsimony)
 
             # Build dynamic table header based on available data
             header_parts = ["| Clade ID | Taxa Count "]
