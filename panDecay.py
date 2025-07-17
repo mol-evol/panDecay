@@ -282,6 +282,159 @@ class DatasetNormalizer:
         logger.info("Dataset-relative normalizations applied successfully")
 
 
+class TreeManager:
+    """Manages tree operations including building, parsing, annotation, and constraint generation."""
+    
+    def __init__(self, temp_path=None, debug=False, external_runner=None):
+        self.temp_path = temp_path or Path.cwd()
+        self.debug = debug
+        self.external_runner = external_runner
+        self._files_to_cleanup = []
+    
+    def clean_newick_tree(self, tree_path, delete_cleaned=True):
+        """
+        Clean Newick tree files that may have metadata after the semicolon.
+
+        Args:
+            tree_path: Path to the tree file
+            delete_cleaned: Whether to delete the cleaned file after use (if caller manages reading)
+
+        Returns:
+            Path to a cleaned tree file or the original path if no cleaning was needed
+        """
+        try:
+            content = Path(tree_path).read_text()
+
+            # Check if there's any text after a semicolon (including whitespace)
+            semicolon_match = re.search(r';(.+)', content, re.DOTALL)
+            if semicolon_match:
+                # Get everything up to the first semicolon
+                clean_content = content.split(';')[0] + ';'
+
+                # Write the cleaned tree to a new file
+                cleaned_path = Path(str(tree_path) + '.cleaned')
+                cleaned_path.write_text(clean_content)
+
+                # Mark the file for later deletion if requested
+                if delete_cleaned:
+                    self._files_to_cleanup.append(cleaned_path)
+
+                if self.debug:
+                    logger.debug(f"Original tree content: '{content}'")
+                    logger.debug(f"Cleaned tree content: '{clean_content}'")
+
+                logger.debug(f"Cleaned tree file {tree_path} - removed metadata after semicolon")
+                return cleaned_path
+
+            return tree_path  # No cleaning needed
+        except Exception as e:
+            logger.warning(f"Error cleaning Newick tree {tree_path}: {e}")
+            if self.debug:
+                logger.debug(f"Traceback for tree cleaning error: {traceback.format_exc()}")
+            return tree_path  # Return original path if cleaning fails
+    
+    def parse_mrbayes_posterior_probs(self, con_tree_path):
+        """
+        Parse posterior probabilities from MrBayes consensus tree file.
+        
+        Args:
+            con_tree_path: Path to MrBayes consensus tree file
+            
+        Returns:
+            Dict mapping clade taxa sets to posterior probabilities
+        """
+        posterior_probs = {}
+        
+        try:
+            # Read and parse MrBayes consensus tree
+            con_tree = Phylo.read(str(con_tree_path), "newick")
+            
+            # Extract posterior probabilities from internal nodes
+            for node in con_tree.get_nonterminals():
+                if node.confidence is not None:
+                    # Get taxa for this clade
+                    clade_taxa = tuple(sorted([leaf.name for leaf in node.get_terminals()]))
+                    posterior_probs[clade_taxa] = node.confidence
+                    
+                    if self.debug:
+                        logger.debug(f"Clade {clade_taxa}: posterior probability = {node.confidence}")
+            
+            logger.info(f"Extracted {len(posterior_probs)} posterior probabilities from consensus tree")
+            return posterior_probs
+            
+        except Exception as e:
+            logger.error(f"Failed to parse posterior probabilities from {con_tree_path}: {e}")
+            if self.debug:
+                logger.debug(f"Traceback: {traceback.format_exc()}")
+            return {}
+
+    def manual_parse_mrbayes_tree(self, newick_str):
+        """
+        Manually parse a Newick tree string with MrBayes posterior probabilities.
+        
+        Args:
+            newick_str: Newick format tree string
+            
+        Returns:
+            Dict mapping clade taxa to posterior probabilities
+        """
+        posterior_probs = {}
+        
+        def parse_clade(s, pos=0):
+            """Recursively parse a Newick tree string."""
+            taxa = []
+            pp = None
+            
+            if s[pos] == '(':
+                # Internal node
+                pos += 1
+                while s[pos] != ')':
+                    if s[pos] == ',':
+                        pos += 1
+                    subtaxa, subpp, pos = parse_clade(s, pos)
+                    taxa.extend(subtaxa)
+                    
+                pos += 1  # Skip ')'
+                
+                # Parse node label (posterior probability)
+                if pos < len(s) and s[pos] not in ',):':
+                    label_start = pos
+                    while pos < len(s) and s[pos] not in ',):':
+                        pos += 1
+                    label = s[label_start:pos]
+                    try:
+                        pp = float(label)
+                    except ValueError:
+                        pass
+                        
+            else:
+                # Terminal node
+                name_start = pos
+                while pos < len(s) and s[pos] not in ',):':
+                    pos += 1
+                taxon_name = s[name_start:pos]
+                taxa = [taxon_name]
+                
+            # Skip branch length
+            if pos < len(s) and s[pos] == ':':
+                pos += 1
+                while pos < len(s) and s[pos] not in ',):':
+                    pos += 1
+                    
+            if pp is not None and len(taxa) > 1:
+                clade_key = tuple(sorted(taxa))
+                posterior_probs[clade_key] = pp
+                
+            return taxa, pp, pos
+        
+        try:
+            parse_clade(newick_str.strip().rstrip(';'))
+            return posterior_probs
+        except Exception as e:
+            logger.error(f"Failed to manually parse MrBayes tree: {e}")
+            return {}
+
+
 class AlignmentManager:
     """Handles alignment loading and format conversion operations."""
     
@@ -544,6 +697,7 @@ class panDecayIndices:
 
             # Initialize alignment manager for debug/keep_files mode
             self._alignment_manager = AlignmentManager(temp_path=self.temp_path, debug=self.debug)
+            self._tree_manager = TreeManager(temp_path=self.temp_path, debug=self.debug, external_runner=self._external_runner)
         else: # Auto-cleanup
             self._temp_dir_obj = tempfile.TemporaryDirectory(prefix="mldecay_")
             self.temp_path = Path(self._temp_dir_obj.name)
@@ -566,6 +720,7 @@ class panDecayIndices:
 
         # Initialize alignment manager
         self._alignment_manager = AlignmentManager(temp_path=self.temp_path, debug=self.debug)
+        self._tree_manager = TreeManager(temp_path=self.temp_path, debug=self.debug, external_runner=self._external_runner)
 
         # --- PAUP* Model Settings ---
         self.parsmodel = False # Default, will be set by _convert_model_to_paup if discrete
@@ -781,7 +936,7 @@ class panDecayIndices:
             ml_tree_path = self.temp_path / ML_TREE_FN
             if ml_tree_path.exists() and ml_tree_path.stat().st_size > 0:
                 # Clean the tree file if it has metadata after semicolon
-                cleaned_tree_path = self._clean_newick_tree(ml_tree_path)
+                cleaned_tree_path = self._tree_manager.clean_newick_tree(ml_tree_path)
                 self.ml_tree = Phylo.read(str(cleaned_tree_path), "newick")
                 logger.info(f"Successfully built ML tree. Log-likelihood: {self.ml_likelihood if self.ml_likelihood is not None else 'N/A'}")
                 if self.ml_likelihood is None:
@@ -794,47 +949,6 @@ class panDecayIndices:
             logger.error(f"ML tree construction failed: {e}")
             raise # Re-raise to be handled by the main try-except block
 
-    def _clean_newick_tree(self, tree_path, delete_cleaned=True):
-        """
-        Clean Newick tree files that may have metadata after the semicolon.
-
-        Args:
-            tree_path: Path to the tree file
-            delete_cleaned: Whether to delete the cleaned file after use (if caller manages reading)
-
-        Returns:
-            Path to a cleaned tree file or the original path if no cleaning was needed
-        """
-        try:
-            content = Path(tree_path).read_text()
-
-            # Check if there's any text after a semicolon (including whitespace)
-            semicolon_match = re.search(r';(.+)', content, re.DOTALL)
-            if semicolon_match:
-                # Get everything up to the first semicolon
-                clean_content = content.split(';')[0] + ';'
-
-                # Write the cleaned tree to a new file
-                cleaned_path = Path(str(tree_path) + '.cleaned')
-                cleaned_path.write_text(clean_content)
-
-                # Mark the file for later deletion if requested
-                if delete_cleaned:
-                    self._files_to_cleanup.append(cleaned_path)
-
-                if self.debug:
-                    logger.debug(f"Original tree content: '{content}'")
-                    logger.debug(f"Cleaned tree content: '{clean_content}'")
-
-                logger.debug(f"Cleaned tree file {tree_path} - removed metadata after semicolon")
-                return cleaned_path
-
-            return tree_path  # No cleaning needed
-        except Exception as e:
-            logger.warning(f"Error cleaning Newick tree {tree_path}: {e}")
-            if self.debug:
-                logger.debug(f"Traceback for tree cleaning error: {traceback.format_exc()}")
-            return tree_path  # Return original path if cleaning fails
 
     def run_bootstrap_analysis(self, num_replicates=100):
         """
@@ -888,7 +1002,7 @@ class panDecayIndices:
                     logger.debug(f"Bootstrap tree file content:\n{bootstrap_content}")
 
                 # Clean the tree file if it has metadata after semicolon
-                cleaned_tree_path = self._clean_newick_tree(bootstrap_tree_path)
+                cleaned_tree_path = self._tree_manager.clean_newick_tree(bootstrap_tree_path)
 
                 # Log the cleaned bootstrap tree file for debugging
                 if self.debug:
@@ -1237,7 +1351,7 @@ class panDecayIndices:
                 con_tree_path = self.temp_path / f"{nexus_file.name}.con.tre"
                 if con_tree_path.exists():
                     logger.debug(f"Parsing posterior probabilities from {con_tree_path}")
-                    self.posterior_probs = self._parse_mrbayes_posterior_probs(con_tree_path)
+                    self.posterior_probs = self._tree_manager.parse_mrbayes_posterior_probs(con_tree_path)
                 else:
                     logger.warning(f"Consensus tree not found: {con_tree_path}")
             
@@ -4044,7 +4158,7 @@ class panDecayIndices:
                 # Work on a copy to avoid modifying self.ml_tree
                 temp_tree_for_au = self.temp_path / f"ml_tree_for_au_annotation.nwk"
                 Phylo.write(self.ml_tree, str(temp_tree_for_au), "newick")
-                cleaned_tree_path = self._clean_newick_tree(temp_tree_for_au)
+                cleaned_tree_path = self._tree_manager.clean_newick_tree(temp_tree_for_au)
                 au_tree = Phylo.read(str(cleaned_tree_path), "newick")
 
                 annotated_nodes_count = 0
@@ -4079,7 +4193,7 @@ class panDecayIndices:
             try:
                 temp_tree_for_lnl = self.temp_path / f"ml_tree_for_lnl_annotation.nwk"
                 Phylo.write(self.ml_tree, str(temp_tree_for_lnl), "newick")
-                cleaned_tree_path = self._clean_newick_tree(temp_tree_for_lnl)
+                cleaned_tree_path = self._tree_manager.clean_newick_tree(temp_tree_for_lnl)
                 lnl_tree = Phylo.read(str(cleaned_tree_path), "newick")
 
                 annotated_nodes_count = 0
@@ -4191,7 +4305,7 @@ class panDecayIndices:
 
                 # Now, we'll manually construct a combined tree by using string replacement on the base tree
                 # First, make a working copy of the ML tree
-                cleaned_tree_path = self._clean_newick_tree(temp_tree_for_combined)
+                cleaned_tree_path = self._tree_manager.clean_newick_tree(temp_tree_for_combined)
                 combined_tree = Phylo.read(str(cleaned_tree_path), "newick")
 
                 # Add our custom annotations
@@ -4224,7 +4338,7 @@ class panDecayIndices:
                     # Create a copy of the ML tree for bootstrap annotation
                     temp_tree_for_bootstrap = self.temp_path / f"ml_tree_for_bootstrap_annotation.nwk"
                     Phylo.write(self.ml_tree, str(temp_tree_for_bootstrap), "newick")
-                    cleaned_tree_path = self._clean_newick_tree(temp_tree_for_bootstrap)
+                    cleaned_tree_path = self._tree_manager.clean_newick_tree(temp_tree_for_bootstrap)
                     ml_tree_for_bootstrap = Phylo.read(str(cleaned_tree_path), "newick")
                     
                     # Extract bootstrap values from the consensus tree
@@ -4257,7 +4371,7 @@ class panDecayIndices:
                 try:
                     temp_tree_for_comprehensive = self.temp_path / f"ml_tree_for_comprehensive_annotation.nwk"
                     Phylo.write(self.ml_tree, str(temp_tree_for_comprehensive), "newick")
-                    cleaned_tree_path = self._clean_newick_tree(temp_tree_for_comprehensive)
+                    cleaned_tree_path = self._tree_manager.clean_newick_tree(temp_tree_for_comprehensive)
                     comprehensive_tree = Phylo.read(str(cleaned_tree_path), "newick")
 
                     # Get bootstrap values for each clade
@@ -4357,7 +4471,7 @@ class panDecayIndices:
                 try:
                     temp_tree_for_bd = self.temp_path / f"ml_tree_for_bd_annotation.nwk"
                     Phylo.write(self.ml_tree, str(temp_tree_for_bd), "newick")
-                    cleaned_tree_path = self._clean_newick_tree(temp_tree_for_bd)
+                    cleaned_tree_path = self._tree_manager.clean_newick_tree(temp_tree_for_bd)
                     bd_tree = Phylo.read(str(cleaned_tree_path), "newick")
 
                     annotated_nodes_count = 0
