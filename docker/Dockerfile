@@ -130,7 +130,7 @@ export PANDECAY_FORMAT=${PANDECAY_FORMAT:-both}
 case "${1:-help}" in
     analyze)
         shift
-        echo "🧬 Running panDecay analysis..."
+        echo "Running panDecay analysis..."
         python3 /app/panDecay.py "$@" \
             --threads "${PANDECAY_THREADS}" \
             --viz-format "${PANDECAY_FORMAT}" \
@@ -162,7 +162,7 @@ case "${1:-help}" in
     validate)
         shift
         config_file="${1:-/app/config/example_config.yaml}"
-        echo "✅ Validating configuration file: ${config_file}"
+        echo "Validating configuration file: ${config_file}"
         python3 /app/config_loader.py validate "${config_file}"
         ;;
     
@@ -174,7 +174,7 @@ case "${1:-help}" in
             echo "Usage: migrate <ini_file> <yaml_file>"
             exit 1
         fi
-        echo "🔄 Migrating configuration from INI to YAML..."
+        echo "Migrating configuration from INI to YAML..."
         python3 /app/config_loader.py migrate "${ini_file}" "${yaml_file}"
         ;;
     
@@ -190,7 +190,7 @@ import panDecay
 import config_loader
 import dual_visualization
 import async_constraint_processor
-print('✅ All modules imported successfully')
+print('All modules imported successfully')
 print(f'Async processing: {panDecay.HAS_ASYNC_PROCESSING}')
 print(f'Enhanced config: {panDecay.HAS_ENHANCED_CONFIG}')
 print(f'Dual visualization: {panDecay.HAS_DUAL_VISUALIZATION}')
@@ -209,10 +209,10 @@ print(f'Dual visualization: {panDecay.HAS_DUAL_VISUALIZATION}')
     *)
         # If first argument looks like a file or starts with -, pass to panDecay directly
         if [[ -f "${1}" || "${1}" == -* ]]; then
-            echo "🧬 Running panDecay with arguments: $*"
+            echo "Running panDecay with arguments: $*"
             python3 /app/panDecay.py "$@"
         else
-            echo "❌ Unknown command: ${1}"
+            echo "ERROR: Unknown command: ${1}"
             echo ""
             show_help
             exit 1

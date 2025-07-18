@@ -66,7 +66,7 @@ def run_unit_tests():
 
 def run_integration_tests():
     """Run integration tests with mocked dependencies."""
-    print("🔗 Running integration tests...")
+    print("Running integration tests...")
     try:
         # Check if pytest is available
         try:
@@ -233,7 +233,7 @@ def main():
     script_dir = Path(__file__).parent
     os.chdir(script_dir)
     
-    print(f"🚀 Running {args.level} tests...")
+    print(f"Running {args.level} tests...")
     start_time = time.time()
     
     # Run the selected test level
@@ -252,13 +252,13 @@ def main():
     end_time = time.time()
     duration = end_time - start_time
     
-    print(f"\n⏱️  Tests completed in {duration:.1f} seconds")
+    print(f"\nTests completed in {duration:.1f} seconds")
     
     if success:
-        print("🎉 All tests passed!")
+        print("All tests passed!")
         return 0
     else:
-        print("💥 Some tests failed!")
+        print("Some tests failed!")
         return 1
 
 

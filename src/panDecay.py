@@ -1916,7 +1916,7 @@ class panDecayIndices:
                 
                 # Log progress
                 if result_data['bayes_decay'] < 0:
-                    logger.warning(f"⚠️  {clade_id} has negative Bayes Decay ({result_data['bayes_decay']:.4f}), suggesting potential convergence or estimation issues")
+                    logger.warning(f"WARNING: {clade_id} has negative Bayes Decay ({result_data['bayes_decay']:.4f}), suggesting potential convergence or estimation issues")
             else:
                 logger.warning(f"Constrained analysis failed for {clade_id}")
         
@@ -1980,7 +1980,7 @@ class panDecayIndices:
             
         negative_clades = [cid for cid, data in bayesian_results.items() if data['bayes_decay'] < 0]
         if negative_clades:
-            logger.warning(f"\n⚠️  WARNING: {len(negative_clades)}/{len(bayesian_results)} clades have negative Bayes Decay values!")
+            logger.warning(f"\nWARNING: {len(negative_clades)}/{len(bayesian_results)} clades have negative Bayes Decay values!")
             logger.warning("This suggests potential issues with MCMC convergence or marginal likelihood estimation.")
             logger.warning("Consider:")
             logger.warning("  1. Increasing MCMC generations (--bayes-ngen 5000000 or higher)")
@@ -2954,7 +2954,7 @@ class panDecayIndices:
         
         # Log warnings at warning level
         for warning in convergence_data['warnings']:
-            logger.warning(f"  ⚠️  {warning}")
+            logger.warning(f"  WARNING: {warning}")
         
         # If strict mode and not converged, treat as failure
         if self.convergence_strict and not convergence_data['converged']:
@@ -4201,7 +4201,7 @@ class panDecayIndices:
         f.write(f"- **Z-scores > +1.0**: Well above dataset average\n")
         f.write(f"- **Z-scores < -1.0**: Well below dataset average\n\n")
         
-        f.write("⚠️  **Important Disclaimers:**\n")
+        f.write("**Important Disclaimers:**\n")
         f.write("- High relative ranking does not guarantee reliable phylogenetic support\n")
         f.write("- Rankings are meaningful only within this specific dataset\n") 
         f.write("- Cross-dataset comparisons require careful consideration of data quality\n")
@@ -6024,7 +6024,7 @@ class panDecayIndices:
                 # Check for negative values and add warning
                 negative_count = sum(1 for pd in pars_decays if pd < 0)
                 if negative_count > 0:
-                    f.write(f"\n**⚠️ WARNING**: {negative_count}/{len(pars_decays)} branches have negative Parsimony Decay values.\n")
+                    f.write(f"\n**WARNING**: {negative_count}/{len(pars_decays)} branches have negative Parsimony Decay values.\n")
                     f.write("This suggests potential issues with tree searching or constraint implementation.\n\n")
                 
                 # Report on parsimony decay distribution
@@ -6135,7 +6135,7 @@ class panDecayIndices:
             f.write(f"- Final ASDSF range: {min(all_asdsf):.6f} - {max(all_asdsf):.6f} (threshold: {self.max_asdsf})\n")
         
         if convergence_issues:
-            f.write(f"\n**⚠️ WARNING**: {len(convergence_issues)} runs did not meet convergence criteria:\n")
+            f.write(f"\n**WARNING**: {len(convergence_issues)} runs did not meet convergence criteria:\n")
             for run_id in convergence_issues[:5]:  # Show first 5
                 f.write(f"  - {run_id}\n")
             if len(convergence_issues) > 5:
@@ -7561,7 +7561,7 @@ def run_smoke_tests() -> bool:
         logger.error(f"✗ Test 4 failed: {e}")
         return False
     
-    logger.info("\n🎉 All smoke tests passed! Effect size calculations are working correctly.")
+    logger.info("\nAll smoke tests passed! Effect size calculations are working correctly.")
     return True
 
 def _create_argument_parser():
@@ -7763,7 +7763,7 @@ def main() -> None:
             from config_loader import load_configuration, detect_config_format
             try:
                 config = load_configuration(args.validate_config)
-                logger.info(f"✅ Configuration file is valid: {args.validate_config}")
+                logger.info(f"Configuration file is valid: {args.validate_config}")
                 logger.info(f"   Format: {detect_config_format(Path(args.validate_config)).upper()}")
                 logger.info(f"   Analysis types: {', '.join(config.analysis.analysis_types)}")
                 logger.info(f"   Normalization: {config.analysis.normalization}")

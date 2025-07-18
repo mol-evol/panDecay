@@ -12,7 +12,7 @@ This guide helps you upgrade from panDecay v1.0 to v1.1, which introduces signif
 - **Docker Containerization**: Production-ready containers with PAUP* and MrBayes
 - **Enhanced Error Handling**: Improved diagnostics and graceful degradation
 
-### 🔄 Backward Compatibility
+### Backward Compatibility
 
 **All existing workflows continue to work unchanged.** The new features are additive and optional.
 

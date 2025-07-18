@@ -195,10 +195,10 @@ def main():
     print(f"\n=== Test Results: {passed}/{total} passed ===")
     
     if passed == total:
-        print("🎉 All tests passed! Dataset-relative framework is working correctly.")
+        print("All tests passed! Dataset-relative framework is working correctly.")
         return 0
     else:
-        print("❌ Some tests failed. Please review the issues above.")
+        print("Some tests failed. Please review the issues above.")
         return 1
 
 if __name__ == '__main__':

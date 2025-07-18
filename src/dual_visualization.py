@@ -616,7 +616,7 @@ class DualVisualizationSystem:
     </div>
     
     <div class="section">
-        <h2>📊 Static Visualizations (Publication Ready)</h2>
+        <h2>Static Visualizations (Publication Ready)</h2>
         <p>High-resolution static plots suitable for publications and reports.</p>
         <div class="file-list">
             <ul>
@@ -633,7 +633,7 @@ class DualVisualizationSystem:
     </div>
     
     <div class="section">
-        <h2>🔍 Interactive Visualizations (Exploratory)</h2>
+        <h2>Interactive Visualizations (Exploratory)</h2>
         <p>Interactive plots for data exploration with zoom, hover, and filtering capabilities.</p>
         <div class="file-list">
             <ul>
@@ -650,7 +650,7 @@ class DualVisualizationSystem:
     </div>
     
     <div class="section">
-        <h2>📋 Usage Guidelines</h2>
+        <h2>Usage Guidelines</h2>
         <ul>
             <li><strong>Static plots:</strong> Use for manuscripts, presentations, and formal reports</li>
             <li><strong>Interactive plots:</strong> Use for data exploration, detailed analysis, and presentations</li>

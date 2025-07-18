@@ -4,23 +4,29 @@
 
 panDecay is a Python command-line tool for calculating phylogenetic decay indices across multiple analysis frameworks. Version 1.1 introduces major enhancements including **async processing**, **dual visualization**, **YAML configuration**, and **Docker containerization**.
 
-## ✨ What's New in v1.1
+## What's New in v1.1
 
-- 🚀 **50-80% faster** with async constraint processing
-- 📊 **Dual visualization** - static (matplotlib) + interactive (Plotly) plots  
-- ⚙️ **Modern YAML/TOML configuration** with Pydantic validation
-- 🐳 **Docker containers** with PAUP* and MrBayes pre-installed
-- 📖 **Enhanced documentation** with comprehensive guides
+- **50-80% faster** with async constraint processing
+- **Dual visualization** - static (matplotlib) + interactive (Plotly) plots  
+- **Modern YAML/TOML configuration** with Pydantic validation
+- **Docker containers** with PAUP* and MrBayes pre-installed
+- **Enhanced documentation** with comprehensive guides
 
 [**v1.1 Feature Guide**](docs/MIGRATION_GUIDE.md) | [**Docker Guide**](docs/DOCKER_GUIDE.md) | [**Configuration Guide**](docs/CONFIGURATION_GUIDE.md)
 
-## 📚 Documentation
+## Documentation
 
-- **[Developer Guide](docs/DEVELOPER_GUIDE.md)** - Architecture, modules, and extension points
-- **[API Reference](docs/API_REFERENCE.md)** - Complete API documentation for programmatic use
+### Getting Started
+- **[Tutorial - panDecay 101](docs/TUTORIAL.md)** - Complete beginner's guide with step-by-step examples
+
+### Reference Documentation  
 - **[Configuration Guide](docs/CONFIGURATION_GUIDE.md)** - YAML/TOML configuration reference
 - **[Docker Guide](docs/DOCKER_GUIDE.md)** - Container deployment and usage
 - **[Migration Guide](docs/MIGRATION_GUIDE.md)** - v1.1 features and migration
+
+### Developer Resources
+- **[Developer Guide](docs/DEVELOPER_GUIDE.md)** - Architecture, modules, and extension points
+- **[API Reference](docs/API_REFERENCE.md)** - Complete API documentation for programmatic use
 
 ## Quick Start
 
@@ -212,10 +218,10 @@ This approach provides honest, statistically sound relative rankings without the
 *   **Bootstrap Analysis**: Optional bootstrap support values alongside decay indices
 
 ### Core Capabilities
-*   **🚀 Async Constraint Processing**: Parallel execution of constraints for 50-80% performance improvement
-*   **📊 Dual Visualization System**: Both static (matplotlib) and interactive (Plotly) visualizations
-*   **⚙️ Modern Configuration**: YAML/TOML configuration with Pydantic validation and format detection
-*   **🐳 Docker Support**: Production-ready containers with PAUP* and MrBayes pre-installed
+*   **Async Constraint Processing**: Parallel execution of constraints for 50-80% performance improvement
+*   **Dual Visualization System**: Both static (matplotlib) and interactive (Plotly) visualizations
+*   **Modern Configuration**: YAML/TOML configuration with Pydantic validation and format detection
+*   **Docker Support**: Production-ready containers with PAUP* and MrBayes pre-installed
 *   Performs the Approximately Unbiased (AU) test for statistical assessment of ML branch support
 *   Supports DNA, Protein, and binary discrete morphological data
 *   Optional site-specific likelihood analysis to identify which alignment positions support or conflict with each branch
