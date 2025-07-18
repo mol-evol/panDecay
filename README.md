@@ -14,6 +14,14 @@ panDecay is a Python command-line tool for calculating phylogenetic decay indice
 
 [**v1.1 Feature Guide**](docs/MIGRATION_GUIDE.md) | [**Docker Guide**](docs/DOCKER_GUIDE.md) | [**Configuration Guide**](docs/CONFIGURATION_GUIDE.md)
 
+## 📚 Documentation
+
+- **[Developer Guide](docs/DEVELOPER_GUIDE.md)** - Architecture, modules, and extension points
+- **[API Reference](docs/API_REFERENCE.md)** - Complete API documentation for programmatic use
+- **[Configuration Guide](docs/CONFIGURATION_GUIDE.md)** - YAML/TOML configuration reference
+- **[Docker Guide](docs/DOCKER_GUIDE.md)** - Container deployment and usage
+- **[Migration Guide](docs/MIGRATION_GUIDE.md)** - v1.1 features and migration
+
 ## Quick Start
 
 ### With Docker (Recommended)
