@@ -1,0 +1,123 @@
+# Docker Compose for panDecay
+# Supports both development and production deployments
+version: '3.8'
+
+services:
+  # Main panDecay service
+  pandecay:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        - BUILDKIT_INLINE_CACHE=1
+    image: pandecay:latest
+    container_name: pandecay-main
+    
+    # Environment variables
+    environment:
+      - PANDECAY_THREADS=${PANDECAY_THREADS:-auto}
+      - PANDECAY_DEBUG=${PANDECAY_DEBUG:-false}
+      - PANDECAY_FORMAT=${PANDECAY_FORMAT:-both}
+      - PANDECAY_ASYNC=${PANDECAY_ASYNC:-true}
+    
+    # Volume mounts
+    volumes:
+      - ./data:/data:ro                    # Input data (read-only)
+      - ./output:/output                   # Output directory
+      - ./config:/workspace/config:ro      # Configuration files (read-only)
+      - ./examples:/workspace/examples:ro  # Example files (read-only)
+    
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '${PANDECAY_CPU_LIMIT:-4.0}'
+          memory: ${PANDECAY_MEMORY_LIMIT:-8G}
+        reservations:
+          cpus: '${PANDECAY_CPU_RESERVATION:-1.0}'
+          memory: ${PANDECAY_MEMORY_RESERVATION:-2G}
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import panDecay; print('OK')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    
+    # Restart policy
+    restart: unless-stopped
+
+  # Development service with interactive capabilities
+  pandecay-dev:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: pandecay:latest
+    container_name: pandecay-dev
+    
+    # Interactive mode
+    stdin_open: true
+    tty: true
+    
+    # Environment for development
+    environment:
+      - PANDECAY_THREADS=auto
+      - PANDECAY_DEBUG=true
+      - PANDECAY_FORMAT=both
+      - PANDECAY_ASYNC=true
+    
+    # Development volume mounts (with write access)
+    volumes:
+      - .:/workspace                       # Full project directory
+      - ./data:/data                       # Input data
+      - ./output:/output                   # Output directory
+      - pandecay-cache:/home/pandecay/.cache  # Cache directory
+    
+    # Override entrypoint for development
+    entrypoint: ["/bin/bash"]
+    
+    # Keep container running
+    command: ["-c", "while true; do sleep 30; done"]
+    
+    profiles:
+      - development
+
+  # Batch processing service for multiple analyses
+  pandecay-batch:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: pandecay:latest
+    
+    # Environment for batch processing
+    environment:
+      - PANDECAY_THREADS=${BATCH_THREADS:-auto}
+      - PANDECAY_DEBUG=false
+      - PANDECAY_FORMAT=static
+      - PANDECAY_ASYNC=true
+    
+    # Volume mounts for batch processing
+    volumes:
+      - ./batch_data:/data:ro              # Batch input data
+      - ./batch_output:/output             # Batch output
+      - ./batch_config:/workspace/config:ro # Batch configurations
+    
+    # Resource limits for batch processing
+    deploy:
+      resources:
+        limits:
+          cpus: '${BATCH_CPU_LIMIT:-8.0}'
+          memory: ${BATCH_MEMORY_LIMIT:-16G}
+    
+    profiles:
+      - batch
+
+volumes:
+  pandecay-cache:
+    driver: local
+
+networks:
+  default:
+    name: pandecay-network
+    driver: bridge

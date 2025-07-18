@@ -1,0 +1,37 @@
+# Test requirements for panDecay
+# These are additional dependencies needed for running tests
+
+# Core testing framework
+pytest>=7.0.0
+pytest-cov>=4.0.0
+pytest-mock>=3.10.0
+pytest-xdist>=3.0.0  # For parallel test execution
+
+# Code coverage
+coverage>=7.0.0
+
+# Code quality and linting
+flake8>=6.0.0
+black>=22.0.0
+isort>=5.12.0
+
+# Type checking
+mypy>=1.0.0
+
+# Documentation testing
+doctest
+
+# Performance testing
+pytest-benchmark>=4.0.0
+
+# Test data generation
+hypothesis>=6.0.0
+
+# HTML coverage reports
+pytest-html>=3.0.0
+
+# Memory usage testing
+memory-profiler>=0.60.0
+
+# Temporary file testing utilities
+pytest-tmp-files>=0.1.0

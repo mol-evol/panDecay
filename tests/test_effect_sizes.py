@@ -22,8 +22,8 @@ from unittest.mock import Mock, patch
 import tempfile
 from pathlib import Path
 
-# Add the current directory to path so we can import panDecay
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Add src directory to path so we can import panDecay
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'src'))
 from panDecay import panDecayIndices
 
 # Try to import pytest, fall back to unittest if not available

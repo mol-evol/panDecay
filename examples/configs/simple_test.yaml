@@ -1,0 +1,10 @@
+input_output:
+  alignment_file: "alignment.fas"
+  data_type: "dna"
+  
+analysis:
+  analysis_types: ["ml"]
+  
+model:
+  dna_model: "GTR"
+  gamma: true

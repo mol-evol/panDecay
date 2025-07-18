@@ -27,6 +27,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Improved error handling and fallback mechanisms for edge cases in effect size calculations
 
 ### Removed
+- **Configuration migration functionality**
+  - Removed `--migrate-config` command-line argument and associated implementation
+  - Removed `migrate_ini_to_yaml()` function and migration utilities
+  - Since panDecay has never been released, there are no existing users with legacy configurations to migrate
+  - All three configuration formats (INI, YAML, TOML) remain fully supported
 - **HTML tree visualization functionality**
   - Removed all HTML-based interactive tree visualization code (~600 lines)
   - HTML visualization was causing persistent browser compatibility and CORS issues

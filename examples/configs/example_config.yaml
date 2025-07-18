@@ -1,0 +1,127 @@
+# panDecay YAML Configuration Example
+# This file demonstrates the new YAML configuration format with enhanced features
+
+# Input and Output Settings
+input_output:
+  alignment_file: "alignment.fas"          # Path to input alignment file
+  alignment_format: "fasta"                # Format: fasta, phylip, nexus, clustal, stockholm
+  data_type: "dna"                         # Type: dna, protein, discrete
+  output_prefix: "pan_decay_analysis"      # Prefix for output files
+  tree_prefix: "annotated_tree"            # Prefix for annotated tree files
+  temp_directory: null                     # Custom temp directory (null = system default)
+  keep_files: false                        # Keep temporary files after analysis
+  debug: false                             # Enable debug mode with detailed logging
+
+# Analysis Configuration
+analysis:
+  analysis_types: ["ml", "bayesian"]       # Types: ml, bayesian, parsimony (can combine multiple)
+  bootstrap: false                         # Perform bootstrap analysis
+  bootstrap_reps: 100                      # Number of bootstrap replicates (10-10000)
+  site_analysis: false                     # Perform site-specific analysis
+
+# Evolutionary Model Settings
+model:
+  dna_model: "GTR"                         # DNA models: JC, K80, HKY, GTR
+  protein_model: "WAG"                     # Protein models: JTT, WAG, LG, Dayhoff
+  discrete_model: "Mk"                     # Discrete models: Mk
+  gamma: true                              # Add gamma rate heterogeneity
+  gamma_shape: null                        # Fixed gamma shape (null = estimate)
+  invariant: false                         # Add proportion of invariable sites
+  prop_invar: null                         # Fixed prop. invariant (null = estimate)
+  base_freq: "estimate"                    # Base frequencies: equal, estimate, empirical
+  nst: null                                # Number of substitution types for DNA (1, 2, 6)
+
+# Computational Settings
+computational:
+  threads: "auto"                          # Threads: auto, all, or specific number
+  paup_path: "paup"                        # Path to PAUP* executable
+  starting_tree: null                      # Starting tree file (null = none)
+  paup_block: null                         # Custom PAUP* commands file (null = none)
+  ml_timeout: 3600                         # ML search timeout in seconds
+  constraint_timeout: 600                  # Constraint analysis timeout in seconds
+  site_analysis_timeout: 600               # Site analysis timeout in seconds
+  
+  # Async Constraint Processing (NEW - Experimental)
+  use_async_constraints: false             # Enable parallel constraint processing
+  max_async_workers: null                  # Maximum parallel workers (null = auto)
+
+# Bayesian Analysis Settings
+bayesian:
+  software: "mrbayes"                      # Bayesian software: mrbayes
+  mrbayes_path: "mb"                       # Path to MrBayes executable
+  
+  # MCMC Settings
+  ngen: 1000000                            # Number of MCMC generations
+  burnin: 0.25                             # Burnin fraction (0-0.9)
+  chains: 4                                # Number of MCMC chains
+  sample_freq: 1000                        # Sample frequency
+  print_freq: 10000                        # Print frequency
+  diag_freq: 50000                         # Diagnostics frequency
+  
+  # Marginal Likelihood Estimation
+  marginal_likelihood: "ss"                # Method: ss (stepping-stone), ps (path sampling), hm (harmonic mean)
+  ss_alpha: 0.4                            # Stepping-stone alpha parameter
+  ss_nsteps: 50                            # Number of stepping-stone steps
+  
+  # Convergence Checking
+  check_convergence: true                  # Check MCMC convergence diagnostics
+  min_ess: 200                             # Minimum ESS threshold
+  max_psrf: 1.01                           # Maximum PSRF threshold
+  max_asdsf: 0.01                          # Maximum ASDSF threshold
+  convergence_strict: false                # Fail analysis if convergence criteria not met
+  
+  # Parallel Processing
+  use_mpi: false                           # Use MPI version of MrBayes
+  mpi_processors: null                     # Number of MPI processors (null = auto)
+  mpirun_path: "mpirun"                    # Path to mpirun executable
+  
+  # BEAGLE Acceleration
+  use_beagle: false                        # Use BEAGLE library for acceleration
+  beagle_device: "auto"                    # BEAGLE device: cpu, gpu, auto
+  beagle_precision: "double"               # BEAGLE precision: single, double
+  beagle_scaling: "dynamic"                # BEAGLE scaling: none, dynamic, always
+
+# Visualization Settings (NEW - Dual System)
+visualization:
+  enable: true                             # Generate visualizations
+  format: "both"                           # Format: static, interactive, both, png, pdf, svg, html
+  annotation: "decay"                      # Annotation type: au, lnl, decay
+  
+  # Static Plot Configuration (Publication Ready)
+  static:
+    dpi: 300                               # Resolution for static plots
+    formats: ["png", "pdf"]                # Output formats for static plots
+    style: "publication"                   # Plot style: publication, seaborn, etc.
+    figsize: [12, 8]                       # Figure size [width, height]
+    font_size: 12                          # Font size for labels and titles
+    color_palette: "viridis"               # Color palette for plots
+  
+  # Interactive Plot Configuration (Exploratory)
+  interactive:
+    theme: "plotly_white"                  # Plotly theme: plotly_white, plotly_dark, etc.
+    export_html: true                      # Export interactive plots as HTML
+    include_controls: true                 # Include zoom, pan, hover controls
+    width: 1200                            # Plot width in pixels
+    height: 800                            # Plot height in pixels
+    color_scale: "viridis"                 # Color scale for interactive plots
+
+# Constraint Analysis Settings
+constraints:
+  mode: "all"                              # Mode: all, specific, exclude
+  test_branches: null                      # Specific branches to test (list of strings)
+  constraint_file: null                    # File containing constraint definitions
+  custom_constraints: null                 # Custom constraint definitions (dict)
+  
+  # Example custom constraints (uncomment to use):
+  # custom_constraints:
+  #   primates: ["Homo_sapiens", "Pan_troglodytes", "Gorilla_gorilla"]
+  #   rodents: ["Rattus_norvegicus", "Mus_musculus"]
+  #   birds: ["Gallus_gallus", "Taeniopygia_guttata"]
+
+# Advanced Settings (optional)
+# These settings provide fine-grained control over the analysis
+
+# Environment Variables (optional)
+# You can use environment variable interpolation:
+# paup_path: "${PAUP_PATH:-paup}"         # Use PAUP_PATH env var, default to "paup"
+# threads: "${PANDECAY_THREADS:-auto}"    # Use PANDECAY_THREADS env var, default to "auto"
