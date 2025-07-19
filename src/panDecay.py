@@ -17,6 +17,7 @@ import time
 import datetime
 import glob
 import traceback
+import threading
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union, Any, Set, Callable, IO
 
@@ -26,9 +27,15 @@ try:
     from .config_models import PanDecayConfig
     HAS_ENHANCED_CONFIG = True
 except ImportError:
-    HAS_ENHANCED_CONFIG = False
-    logger = logging.getLogger(__name__)
-    logger.warning("Enhanced configuration support not available. Install pydantic and pyyaml for YAML/TOML support.")
+    # Fallback to absolute import for when module is run directly
+    try:
+        from config_loader import load_configuration, ConfigurationError
+        from config_models import PanDecayConfig
+        HAS_ENHANCED_CONFIG = True
+    except ImportError:
+        HAS_ENHANCED_CONFIG = False
+        logger = logging.getLogger(__name__)
+        logger.warning("Enhanced configuration support not available. Install pydantic and pyyaml for YAML/TOML support.")
 
 # Async constraint processing support
 try:
@@ -40,11 +47,33 @@ except ImportError:
     asyncio = None
 
 # Dual visualization support
+# Dual visualization system removed - using matplotlib only
+
+# Import modular analysis engines
 try:
-    from .dual_visualization import DualVisualizationSystem, create_visualizations
-    HAS_DUAL_VISUALIZATION = True
+    from .analysis import AnalysisEngine, AnalysisResult, AnalysisConfig
+    from .analysis import MLAnalysisEngine, BayesianAnalysisEngine, ParsimonyAnalysisEngine
+    from .io import OutputManager, TreeAnnotator, ReportGenerator
+    from .visualization import PlotManager
+    HAS_MODULAR_ARCHITECTURE = True
 except ImportError:
-    HAS_DUAL_VISUALIZATION = False
+    try:
+        from analysis import AnalysisEngine, AnalysisResult, AnalysisConfig
+        from analysis import MLAnalysisEngine, BayesianAnalysisEngine, ParsimonyAnalysisEngine
+        # Use absolute imports to avoid conflict with builtin io module
+        import sys
+        import os
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'io'))
+        from output_manager import OutputManager
+        from tree_annotator import TreeAnnotator
+        from report_generator import ReportGenerator
+        sys.path.pop(0)
+        from visualization import PlotManager
+        HAS_MODULAR_ARCHITECTURE = True
+    except ImportError as e:
+        HAS_MODULAR_ARCHITECTURE = False
+        logger = logging.getLogger(__name__)
+        logger.warning(f"Modular architecture components not available: {e}. Falling back to monolithic design.")
 
 VERSION = "1.1.0"
 # Set up logging
@@ -216,8 +245,8 @@ class ExternalToolRunner:
         combined_log_file_path = self.temp_path / log_filename_str
         
         cmd = [self.paup_path, str(paup_cmd_file_path)]
-        logger.info(f"Running PAUP* command file: {paup_cmd_filename_str} "
-                   f"(Log: {log_filename_str})")
+        logger.debug(f"Running PAUP* command file: {paup_cmd_filename_str} "
+                    f"(Log: {log_filename_str})")
         
         with open(combined_log_file_path, 'w') as f_log:
             process = subprocess.Popen(
@@ -241,7 +270,7 @@ class ExternalToolRunner:
             process.wait()
             stdout_content = ''.join(stdout_lines)
             
-        logger.info(f"PAUP* output saved to: {combined_log_file_path}")
+        logger.debug(f"PAUP* output saved to: {combined_log_file_path}")
         
         if self.debug and stdout_content:
             stdout_sample = (stdout_content[:STDOUT_SAMPLE_SIZE] + "..." 
@@ -334,7 +363,7 @@ class DatasetNormalizer:
         mean_ld = np.mean(ld_array)
         std_ld = np.std(ld_array, ddof=1) if len(ld_array) > 1 else 0
         
-        logger.info(f"Dataset LD statistics ({method_prefix}): "
+        logger.debug(f"Dataset LD statistics ({method_prefix}): "
                    f"min={min_ld:.3f}, max={max_ld:.3f}, "
                    f"mean={mean_ld:.3f}, std={std_ld:.3f}")
         
@@ -435,6 +464,114 @@ class DatasetNormalizer:
         logger.info("Dataset-relative normalizations applied successfully")
 
 
+class ProgressSpinner:
+    """
+    Animated progress spinner for long-running operations.
+    
+    Provides visual feedback during subprocess execution with animated spinner,
+    elapsed time counter, and graceful fallback for non-TTY environments.
+    """
+    
+    def __init__(self, message: str, enable_spinner: bool = None):
+        """
+        Initialize progress spinner.
+        
+        Args:
+            message: Message to display with spinner
+            enable_spinner: Force enable/disable spinner. If None, auto-detect TTY
+        """
+        self.message = message
+        self.spinner_chars = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+        self.current_char = 0
+        self.running = False
+        self.thread = None
+        self.start_time = None
+        
+        # Auto-detect if we should show spinner
+        if enable_spinner is None:
+            self.show_spinner = (
+                sys.stdout.isatty() and 
+                os.getenv('TERM', '').lower() != 'dumb' and
+                os.getenv('CI', '').lower() != 'true'
+            )
+        else:
+            self.show_spinner = enable_spinner
+    
+    def _animate(self):
+        """Animation loop that runs in separate thread."""
+        while self.running:
+            if self.show_spinner:
+                elapsed = int(time.time() - self.start_time) if self.start_time else 0
+                char = self.spinner_chars[self.current_char % len(self.spinner_chars)]
+                
+                # Format: "⠋ Building ML tree... (15s)"
+                output = f"\r{char} {self.message}... ({elapsed}s)"
+                sys.stdout.write(output)
+                sys.stdout.flush()
+                
+                self.current_char += 1
+            
+            time.sleep(0.1)
+    
+    def start(self):
+        """Start the spinner animation."""
+        if self.running:
+            return
+            
+        self.start_time = time.time()
+        self.running = True
+        
+        if self.show_spinner:
+            # Start animation thread
+            self.thread = threading.Thread(target=self._animate, daemon=True)
+            self.thread.start()
+        else:
+            # Fallback: show static message
+            print(f"{self.message}...")
+    
+    def stop(self, success_message: str = None):
+        """Stop the spinner and optionally show completion message."""
+        if not self.running:
+            return
+            
+        self.running = False
+        
+        if self.show_spinner:
+            # Clear the spinner line
+            if self.start_time:
+                elapsed = int(time.time() - self.start_time)
+                if success_message:
+                    sys.stdout.write(f"\r{success_message} ({elapsed}s)\n")
+                else:
+                    sys.stdout.write(f"\r{self.message}... completed ({elapsed}s)\n")
+            else:
+                sys.stdout.write(f"\r{' ' * 80}\r")  # Clear line
+            sys.stdout.flush()
+            
+            # Wait for thread to finish (it should finish quickly)
+            if self.thread and self.thread.is_alive():
+                self.thread.join(timeout=0.2)
+        else:
+            # Fallback: show completion
+            if success_message:
+                print(success_message)
+            else:
+                print(f"{self.message}... completed")
+    
+    def __enter__(self):
+        """Context manager entry."""
+        self.start()
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit."""
+        if exc_type is not None:
+            # There was an exception
+            self.stop("Failed")
+        else:
+            self.stop()
+
+
 class TreeManager:
     """Manages tree operations including building, parsing, annotation, and constraint generation."""
     
@@ -499,8 +636,40 @@ class TreeManager:
         posterior_probs = {}
         
         try:
-            # Read and parse MrBayes consensus tree
-            con_tree = Phylo.read(str(con_tree_path), "newick")
+            # Parse MrBayes consensus tree file (may contain multiple trees)
+            trees = list(Phylo.parse(str(con_tree_path), "newick"))
+            
+            if not trees:
+                logger.warning(f"No trees found in consensus tree file: {con_tree_path}")
+                return {}
+            
+            # Find the tree with the most internal nodes that have confidence values
+            # This handles NEXUS files where multiple "trees" are parsed
+            best_tree = None
+            best_score = -1
+            
+            for i, tree in enumerate(trees):
+                # Count internal nodes with confidence values
+                nodes_with_confidence = sum(1 for node in tree.get_nonterminals() 
+                                          if node.confidence is not None)
+                total_terminals = len(list(tree.get_terminals()))
+                
+                # Score based on nodes with confidence and reasonable number of terminals
+                if total_terminals >= 2:  # Must have at least 2 terminals to be a real tree
+                    score = nodes_with_confidence * 100 + total_terminals
+                    if score > best_score:
+                        best_score = score
+                        best_tree = tree
+                        if self.debug:
+                            logger.debug(f"Tree {i+1}: {nodes_with_confidence} confidence nodes, "
+                                       f"{total_terminals} terminals, score={score}")
+            
+            if best_tree is None:
+                logger.warning("No suitable tree found with confidence values")
+                return {}
+            
+            con_tree = best_tree
+            logger.debug(f"Found {len(trees)} tree(s) in file, selected best tree with score {best_score}")
             
             # Extract posterior probabilities from internal nodes
             for node in con_tree.get_nonterminals():
@@ -516,10 +685,83 @@ class TreeManager:
             return posterior_probs
             
         except Exception as e:
-            logger.error(f"Failed to parse posterior probabilities from {con_tree_path}: {e}")
+            logger.warning(f"BioPython parsing failed for {con_tree_path}: {e}")
+            logger.info("Attempting manual parsing of consensus tree file...")
+            
             if self.debug:
-                logger.debug(f"Traceback: {traceback.format_exc()}")
-            return {}
+                logger.debug(f"BioPython traceback: {traceback.format_exc()}")
+            
+            # Fallback to manual parsing
+            try:
+                with open(con_tree_path, 'r') as f:
+                    content = f.read()
+                
+                # Parse translate block if present
+                translate_map = {}
+                in_translate = False
+                for line in content.splitlines():
+                    line = line.strip()
+                    if line.startswith("translate"):
+                        in_translate = True
+                        continue
+                    elif in_translate:
+                        if line == ";":
+                            in_translate = False
+                            continue
+                        # Parse translate entry: "1 taxon1,"
+                        if line and not line.startswith(";"):
+                            parts = line.replace(",", "").split()
+                            if len(parts) >= 2:
+                                translate_map[parts[0]] = parts[1]
+                
+                if self.debug and translate_map:
+                    logger.debug(f"Found translate map: {translate_map}")
+                
+                # Find the tree line (starts with "tree con_")
+                tree_line = None
+                for line in content.splitlines():
+                    if line.strip().startswith("tree con_"):
+                        tree_line = line
+                        break
+                
+                if tree_line:
+                    # Extract the Newick string from the tree line
+                    parts = tree_line.split("=", 1)
+                    if len(parts) >= 2:
+                        newick_str = parts[1].strip()
+                        
+                        # Remove MrBayes annotations like [&U]
+                        if newick_str.startswith("["):
+                            end_bracket = newick_str.find("]")
+                            if end_bracket != -1:
+                                newick_str = newick_str[end_bracket + 1:].strip()
+                        
+                        # Use manual parsing
+                        raw_probs = self.manual_parse_mrbayes_tree(newick_str)
+                        
+                        # Apply translate map if available
+                        if translate_map:
+                            translated_probs = {}
+                            for clade_nums, prob in raw_probs.items():
+                                translated_clade = tuple(sorted([
+                                    translate_map.get(num, num) for num in clade_nums
+                                ]))
+                                translated_probs[translated_clade] = prob
+                            posterior_probs = translated_probs
+                        else:
+                            posterior_probs = raw_probs
+                        
+                        logger.info(f"Manual parsing extracted {len(posterior_probs)} posterior probabilities")
+                        return posterior_probs
+                
+                logger.error("Could not find consensus tree in file using manual parsing")
+                return {}
+                
+            except Exception as manual_e:
+                logger.error(f"Manual parsing also failed: {manual_e}")
+                if self.debug:
+                    logger.debug(f"Manual parsing traceback: {traceback.format_exc()}")
+                return {}
 
     def manual_parse_mrbayes_tree(self, newick_str):
         """
@@ -756,8 +998,87 @@ class AlignmentManager:
         self.temp_path = temp_path
         self.debug = debug
     
-    def load_alignment(self, alignment_file, alignment_format="fasta"):
+    def detect_alignment_format(self, alignment_file):
+        """
+        Detect alignment format from file extension and content.
+        
+        Returns the detected format string or raises an exception if detection fails.
+        """
+        alignment_path = Path(alignment_file)
+        
+        # Check if file exists
+        if not alignment_path.exists():
+            raise FileNotFoundError(f"Alignment file not found: {alignment_file}")
+        
+        # First check file extension
+        ext = alignment_path.suffix.lower()
+        extension_format = None
+        if ext in ['.nex', '.nexus']:
+            extension_format = 'nexus'
+        elif ext in ['.phy', '.phylip']:
+            extension_format = 'phylip'
+        elif ext in ['.fa', '.fas', '.fasta']:
+            extension_format = 'fasta'
+        elif ext in ['.aln', '.clustal']:
+            extension_format = 'clustal'
+        elif ext in ['.sto', '.stockholm']:
+            extension_format = 'stockholm'
+        
+        # Check file content for format signature
+        content_format = None
+        try:
+            with open(alignment_file, 'r') as f:
+                # Read first few lines to detect format
+                lines = [f.readline().strip() for _ in range(3)]
+                first_line = lines[0].upper() if lines[0] else ""
+                
+                if first_line.startswith('#NEXUS'):
+                    content_format = 'nexus'
+                elif first_line.startswith('>'):
+                    content_format = 'fasta'
+                elif 'CLUSTAL' in first_line:
+                    content_format = 'clustal'
+                elif first_line.startswith('#STOCKHOLM'):
+                    content_format = 'stockholm'
+                elif len(lines) >= 2 and lines[0] and lines[1]:
+                    # Possible PHYLIP format: first line has dimensions
+                    try:
+                        parts = first_line.split()
+                        if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+                            content_format = 'phylip'
+                    except Exception:
+                        pass
+        except Exception as e:
+            logger.warning(f"Could not read file content for format detection: {e}")
+        
+        # Determine final format
+        if extension_format and content_format:
+            if extension_format == content_format:
+                logger.debug(f"Format detection: extension and content agree on '{extension_format}'")
+                return extension_format
+            else:
+                logger.warning(f"Format mismatch: extension suggests '{extension_format}', content suggests '{content_format}'. Using content-based detection.")
+                return content_format
+        elif content_format:
+            logger.debug(f"Format detection: content-based detection found '{content_format}'")
+            return content_format
+        elif extension_format:
+            logger.debug(f"Format detection: extension-based detection found '{extension_format}'")
+            return extension_format
+        else:
+            # Default fallback with warning
+            logger.warning(f"Could not determine format for '{alignment_file}', defaulting to FASTA")
+            return 'fasta'
+
+    def load_alignment(self, alignment_file, alignment_format=None):
         """Load alignment from file and return alignment object and metadata."""
+        # Auto-detect format if not explicitly specified
+        if alignment_format is None:
+            alignment_format = self.detect_alignment_format(alignment_file)
+            logger.debug(f"Auto-detected alignment format: {alignment_format}")
+        else:
+            logger.debug(f"Using specified alignment format: {alignment_format}")
+        
         try:
             alignment = AlignIO.read(str(alignment_file), alignment_format)
             alignment_length = alignment.get_alignment_length()
@@ -825,7 +1146,7 @@ class AlignmentManager:
         
         # Convert to NEXUS or copy if already NEXUS
         if alignment_format.lower() == "nexus":
-            logger.info("Input is already NEXUS format, copying directly to temp directory")
+            logger.debug("Input is already NEXUS format, copying directly to temp directory")
             shutil.copy(str(alignment_file), str(nexus_file_path))
         else:
             self.convert_to_nexus(alignment, data_type, nexus_file_path)
@@ -855,6 +1176,8 @@ class panDecayIndices:
     - ML (Maximum Likelihood) with AU test
     - Bayesian analysis with marginal likelihood comparisons
     - Parsimony analysis with step differences
+    
+    Refactored architecture uses modular analysis engines and I/O components.
     """
 
     def __init__(self, alignment_file: Union[str, Path], alignment_format: str = "fasta", model: str = "GTR+G",
@@ -978,7 +1301,7 @@ class panDecayIndices:
                 self.threads = total_cores - 1 # Leave 1 core
             else:
                 self.threads = 1 # Use 1 core if only 1 is available
-            logger.info(f"Using 'auto' threads: PAUP* will be configured for {self.threads} thread(s) (leaving some for system).")
+            logger.debug(f"Using 'auto' threads: PAUP* will be configured for {self.threads} thread(s) (leaving some for system).")
         elif str(threads).lower() == "all": # Add an explicit "all" option if you really want it
             self.threads = multiprocessing.cpu_count()
             logger.warning(f"PAUP* configured to use ALL {self.threads} threads. System may become unresponsive.")
@@ -995,7 +1318,7 @@ class panDecayIndices:
                 logger.warning(f"Invalid thread count '{threads}', defaulting to {THREAD_COUNT_MINIMUM}.")
                 self.threads = 1
 
-        logger.info(f"PAUP* will be configured to use up to {self.threads} thread(s).")
+        logger.debug(f"PAUP* will be configured to use up to {self.threads} thread(s).")
 
         # --- Temporary Directory Setup ---
         self._temp_dir_obj = None  # For TemporaryDirectory lifecycle
@@ -1010,7 +1333,7 @@ class panDecayIndices:
                 self.work_dir_name = f"mldecay_{timestamp}"
                 self.temp_path = debug_runs_path / self.work_dir_name
                 self.temp_path.mkdir(parents=True, exist_ok=True)
-            logger.info(f"Using temporary directory: {self.temp_path}")
+            logger.debug(f"Using temporary directory: {self.temp_path}")
             
             # Initialize external tool runner for debug/keep_files mode
             self._external_runner = ExternalToolRunner(
@@ -1034,7 +1357,7 @@ class panDecayIndices:
             self._temp_dir_obj = tempfile.TemporaryDirectory(prefix="mldecay_")
             self.temp_path = Path(self._temp_dir_obj.name)
             self.work_dir_name = self.temp_path.name
-            logger.info(f"Using temporary directory (auto-cleanup): {self.temp_path}")
+            logger.debug(f"Using temporary directory (auto-cleanup): {self.temp_path}")
 
         # Initialize external tool runner now that temp_path is set
         self._external_runner = ExternalToolRunner(
@@ -1081,6 +1404,61 @@ class panDecayIndices:
         if self.keep_files or self.debug: # Copy original alignment for debugging
              shutil.copy(str(self.alignment_file), self.temp_path / f"original_alignment.{self.alignment_format}")
 
+        # Initialize modular analysis engines if available
+        if HAS_MODULAR_ARCHITECTURE:
+            # Create common analysis configuration
+            self.analysis_config = AnalysisConfig(
+                alignment_file=self.alignment_file,
+                temp_path=self.temp_path,
+                paup_path=self.paup_path,
+                threads=self.threads,
+                debug=self.debug,
+                data_type=self.data_type,
+                model=self.model_str
+            )
+            
+            # Initialize analysis engines with required parameters
+            self.ml_engine = MLAnalysisEngine(
+                self.analysis_config, 
+                self.temp_path, 
+                self._external_runner, 
+                self.debug
+            ) if self.do_ml else None
+            
+            self.bayesian_engine = BayesianAnalysisEngine(
+                self.analysis_config, 
+                self.temp_path, 
+                self._external_runner, 
+                self.debug
+            ) if self.do_bayesian else None
+            
+            self.parsimony_engine = ParsimonyAnalysisEngine(
+                self.analysis_config, 
+                self.temp_path, 
+                self._external_runner, 
+                self.debug
+            ) if self.do_parsimony else None
+            
+            # Initialize I/O components
+            self.output_manager = OutputManager(self.temp_path, self.debug, self.output_style)
+            self.tree_annotator = TreeAnnotator(self.debug)
+            self.report_generator = ReportGenerator(VERSION)
+            
+            # Initialize visualization component
+            self.plot_manager = PlotManager()
+            
+            logger.info("Initialized modular analysis architecture")
+        else:
+            # Fallback to monolithic design
+            self.ml_engine = None
+            self.bayesian_engine = None
+            self.parsimony_engine = None
+            self.output_manager = self._output_manager  # Use existing output manager
+            self.tree_annotator = None
+            self.report_generator = None
+            self.plot_manager = None
+            logger.warning("Using monolithic architecture - modular components not available")
+
         self.ml_tree = None
         self.ml_likelihood = None
         self.decay_indices = {}
@@ -1090,7 +1468,7 @@ class panDecayIndices:
         if hasattr(self, '_temp_dir_obj') and self._temp_dir_obj:
             logger.debug(f"Attempting to cleanup temp_dir_obj for {self.temp_path}")
             self._temp_dir_obj.cleanup()
-            logger.info(f"Auto-cleaned temporary directory: {self.temp_path}")
+            logger.debug(f"Auto-cleaned temporary directory: {self.temp_path}")
         elif hasattr(self, 'temp_path') and self.temp_path.exists() and not self.keep_files:
             logger.info(f"Manually cleaning up temporary directory: {self.temp_path}")
             shutil.rmtree(self.temp_path)
@@ -1250,10 +1628,11 @@ class panDecayIndices:
             logger.debug(f"Executing PAUP* with model: {self.model_str}, threads: {self.threads}")
 
         try:
-            paup_result = self._external_runner.run_paup_command_file(ML_SEARCH_NEX_FN, ML_LOG_FN, timeout_sec=DEFAULT_ML_TIMEOUT)
+            with ProgressSpinner("Building ML tree"):
+                paup_result = self._external_runner.run_paup_command_file(ML_SEARCH_NEX_FN, ML_LOG_FN, timeout_sec=DEFAULT_ML_TIMEOUT)
 
             self.ml_likelihood = self._external_runner.parse_likelihood_from_score_file(self.temp_path / ML_SCORE_FN)
-            logger.info(f"DIAGNOSTIC: ML likelihood from score file: {self.ml_likelihood}")
+            logger.debug(f"ML likelihood from score file: {self.ml_likelihood}")
             
             if self.ml_likelihood is None and paup_result.stdout: # Fallback to log
                 logger.info(f"Fallback: Parsing ML likelihood from PAUP* log {ML_LOG_FN}")
@@ -1264,7 +1643,7 @@ class panDecayIndices:
                 if self.ml_likelihood: logger.info(f"Extracted ML likelihood from log: {self.ml_likelihood}")
                 else: logger.warning("Could not extract ML likelihood from PAUP* log.")
             
-            logger.info(f"DIAGNOSTIC: Final ML likelihood after all parsing attempts: {self.ml_likelihood}")
+            logger.debug(f"Final ML likelihood after all parsing attempts: {self.ml_likelihood}")
 
             ml_tree_path = self.temp_path / ML_TREE_FN
             if ml_tree_path.exists() and ml_tree_path.stat().st_size > 0:
@@ -1428,7 +1807,8 @@ class panDecayIndices:
         if self.debug: logger.debug(f"Constraint search {tree_idx} script ({cmd_file_path}):\n{paup_script_content}")
 
         try:
-            self._external_runner.run_paup_command_file(constr_cmd_fn, constr_log_fn, timeout_sec=DEFAULT_CONSTRAINT_TIMEOUT)
+            with ProgressSpinner(f"Testing ML constraint {tree_idx}"):
+                self._external_runner.run_paup_command_file(constr_cmd_fn, constr_log_fn, timeout_sec=DEFAULT_CONSTRAINT_TIMEOUT)
 
             score_file_path = self.temp_path / constr_score_fn
             constrained_lnl = self._external_runner.parse_likelihood_from_score_file(score_file_path)
@@ -1630,9 +2010,10 @@ class panDecayIndices:
             timeout_seconds = max(7200, (self.bayes_ngen / 500) * self.bayes_chains)
             logger.debug(f"MrBayes timeout set to {timeout_seconds} seconds")
             
-            result = subprocess.run(cmd, cwd=str(self.temp_path), 
-                                  capture_output=True, text=True, 
-                                  timeout=timeout_seconds)
+            with ProgressSpinner(f"MCMC analysis ({self.bayes_ngen:,} generations)"):
+                result = subprocess.run(cmd, cwd=str(self.temp_path), 
+                                      capture_output=True, text=True, 
+                                      timeout=timeout_seconds)
             
             if result.returncode != 0:
                 logger.error(f"MrBayes failed with return code {result.returncode}")
@@ -1880,13 +2261,10 @@ class panDecayIndices:
             # Display progress box
             taxa_sample = self._get_representative_taxa_sample(clade_taxa)
             
-            box_content = [
-                f"Testing clade {clade_log_idx} ({branch_num} of {len(testable_branches)}) • {len(clade_taxa)} taxa",
-                f"Testing constraint on: {taxa_sample}",
-                "Running MrBayes with negative constraint",
-                f"{self.bayes_ngen:,} generations, {self.bayes_chains} chains"
-            ]
-            logger.info(self._format_progress_box("Bayesian Analysis", box_content))
+            # More concise progress reporting  
+            logger.info(f"Testing constraint {branch_num}/{len(testable_branches)}: {clade_log_idx} ({len(clade_taxa)} taxa)")
+            logger.debug(f"MCMC: {self.bayes_ngen:,} generations, {self.bayes_chains} chains")
+            logger.debug(f"Constraint taxa: {taxa_sample}")
             
             # Create constrained NEXUS file
             mrbayes_block = self._generate_mrbayes_nexus(
@@ -1954,22 +2332,8 @@ class panDecayIndices:
         }
         logger.debug(f"Bayesian results for {clade_id}: {list(result_data.keys())}")
         
-        # Update progress box with results
-        result_lines = [
-            f"MrBayes completed successfully",
-            f"Marginal likelihood (stepping-stone): {constrained_ml:.3f}",
-            f"Bayes Decay: {bayes_decay:.2f}"
-        ]
-        
-        # Add normalized metrics to progress display if available
-        if self.normalize_ld and normalized_ld_metrics:
-            if 'bd_per_site' in normalized_ld_metrics:
-                bd_ps = normalized_ld_metrics['bd_per_site']
-                result_lines.append(f"BD/site: {bd_ps:.6f}")
-            if 'bd_relative' in normalized_ld_metrics:
-                bd_rel = normalized_ld_metrics['bd_relative']
-                result_lines.append(f"BD%: {bd_rel*100:.3f}%")
-        logger.info(self._format_progress_box("Bayesian Analysis Results", result_lines))
+        # Concise progress update
+        logger.info(f"Completed: Clade {clade_id} (BD: {bayes_decay:.2f})")
         
         return result_data
 
@@ -2630,24 +2994,23 @@ class panDecayIndices:
         return progress_str
     
     def _format_progress_box(self, title: str, content_lines: List[str], width: int = 78) -> str:
-        """Format a progress box with title and content using simple dashed style."""
+        """Format a clean progress section with title and content."""
         if self.output_style == "minimal":
-            return f"\n{title}\n" + "\n".join(content_lines) + "\n"
+            return f"\n{title.upper()}\n" + "\n".join(content_lines) + "\n"
         
         output = []
         
-        # Title line with dashes
-        output.append(f"--- {title} ---")
+        # Clean title with separator
+        output.append(f"{title.upper()}")
+        output.append("=" * len(title))
         
-        # Content lines (no padding needed for simple style)
+        # Content lines
         for line in content_lines:
             if line == "---":  # Skip separator lines in content
                 continue
             output.append(line)
         
-        # Bottom dashes (match the longest line)
-        max_len = max(len(line) for line in output)
-        output.append("-" * max_len)
+        output.append("")  # Add blank line after section
         
         return "\n".join(output)
     
@@ -3013,7 +3376,7 @@ class panDecayIndices:
             if original_tree is not None:
                 self.ml_tree = original_tree
             
-        logger.info(f"PARSIMONY DIAGNOSTIC: Parsimony analysis completed successfully with {len(parsimony_decay)} branches")
+        logger.debug(f"Parsimony analysis completed successfully with {len(parsimony_decay)} branches")
         return parsimony_decay
 
     def _setup_parsimony_analysis(self) -> Optional[Tuple[float, Any]]:
@@ -3046,7 +3409,7 @@ class panDecayIndices:
         original_tree = self.ml_tree
         
         try:
-            logger.info("PARSIMONY DIAGNOSTIC: Starting parsimony tree building...")
+            logger.debug("Starting parsimony tree building...")
             self._external_runner.run_paup_command_file(PARS_NEX_FN, PARS_LOG_FN)
             
             # Parse parsimony score
@@ -3055,7 +3418,7 @@ class panDecayIndices:
                 logger.error("PARSIMONY DIAGNOSTIC: Could not parse parsimony score - ANALYSIS FAILED")
                 return None
                 
-            logger.info(f"PARSIMONY DIAGNOSTIC: Successfully parsed initial parsimony score: {pars_score}")
+            logger.debug(f"Successfully parsed initial parsimony score: {pars_score}")
             
             # Load the parsimony tree for clade identification
             if not self._load_parsimony_tree_for_analysis(PARS_TREE_FN, original_tree):
@@ -3079,12 +3442,12 @@ class panDecayIndices:
         """
         score_path = self.temp_path / score_filename
         pars_score = None
-        logger.info(f"PARSIMONY DIAGNOSTIC: Looking for parsimony score at {score_path}")
+        logger.debug(f"Looking for parsimony score at {score_path}")
         
         if score_path.exists():
             score_content = score_path.read_text()
             logger.debug(f"Parsimony score file content:\n{score_content}")
-            logger.info("PARSIMONY DIAGNOSTIC: Parsing parsimony score...")
+            logger.debug("Parsing parsimony score...")
             
             # Parse parsimony score from PAUP output
             # Try different patterns that PAUP might use
@@ -3134,7 +3497,7 @@ class panDecayIndices:
             True if tree loading succeeded, False otherwise
         """
         pars_tree_path = self.temp_path / tree_filename
-        logger.info(f"PARSIMONY DIAGNOSTIC: Looking for parsimony tree at {pars_tree_path}")
+        logger.debug(f"Looking for parsimony tree at {pars_tree_path}")
         
         if not pars_tree_path.exists():
             logger.error("PARSIMONY DIAGNOSTIC: Parsimony tree file not found - ANALYSIS FAILED")
@@ -3205,12 +3568,8 @@ class panDecayIndices:
             # Display progress box
             taxa_sample = self._get_representative_taxa_sample(clade_taxa)
             
-            box_content = [
-                f"Testing clade {clade_log_idx} ({branch_num} of {len(testable_branches)}) • {len(clade_taxa)} taxa",
-                f"Testing constraint on: {taxa_sample}",
-                "Running PAUP* with converse constraint"
-            ]
-            logger.info(self._format_progress_box("Parsimony Analysis", box_content))
+            # Concise progress indicator  
+            logger.info(f"Progress: [{branch_num}/{len(testable_branches)}] Testing clade {clade_log_idx}")
             
             # Run constraint analysis for this branch
             constraint_result = self._run_parsimony_constraint_analysis(clade_log_idx, clade_taxa, pars_score)
@@ -3250,7 +3609,8 @@ class panDecayIndices:
         constraint_path.write_text(constraint_script)
         
         try:
-            self._external_runner.run_paup_command_file(f"pars_constraint_{clade_log_idx}.nex", f"paup_pars_constraint_{clade_log_idx}.log")
+            with ProgressSpinner(f"Testing parsimony constraint {clade_log_idx}"):
+                self._external_runner.run_paup_command_file(f"pars_constraint_{clade_log_idx}.nex", f"paup_pars_constraint_{clade_log_idx}.log")
             
             # Parse constrained score
             constrained_score = self._parse_parsimony_score(f"pars_constraint_score_{clade_log_idx}.txt")
@@ -3263,7 +3623,7 @@ class panDecayIndices:
                     'constrained_score': constrained_score,
                     'taxa': clade_taxa
                 }
-                logger.info(f"PARSIMONY DIAGNOSTIC: Clade_{clade_log_idx}: Parsimony decay = {decay_value} (constrained: {constrained_score}, optimal: {pars_score})")
+                logger.debug(f"Clade_{clade_log_idx}: Parsimony decay = {decay_value} (constrained: {constrained_score}, optimal: {pars_score})")
                 return result
             else:
                 logger.warning(f"PARSIMONY DIAGNOSTIC: Failed to parse constrained score for Clade_{clade_log_idx} - skipping branch")
@@ -3349,6 +3709,220 @@ class panDecayIndices:
         """
         Calculate decay indices based on the selected analysis mode.
         
+        Uses modular analysis engines if available, otherwise falls back to monolithic implementation.
+        
+        Args:
+            perform_site_analysis: Whether to perform site-specific analysis (ML only)
+            
+        Returns:
+            Dictionary of decay indices
+        """
+        # Temporarily disable modular for testing
+        if False and HAS_MODULAR_ARCHITECTURE and self.ml_engine is not None:
+            return self._calculate_decay_indices_modular(perform_site_analysis)
+        else:
+            return self._calculate_decay_indices_monolithic(perform_site_analysis)
+    
+    def _calculate_decay_indices_modular(self, perform_site_analysis: bool = False) -> Dict[str, Dict[str, Any]]:
+        """
+        Modern modular implementation using analysis engines.
+        """
+        logger.info("Using modular analysis architecture")
+        
+        # Ensure we have a tree for clade identification
+        if not self.ml_tree:
+            if self.ml_engine:
+                logger.info("Building tree with ML engine...")
+                optimal_tree, likelihood = self.ml_engine.build_optimal_tree(
+                    self.alignment_file, 
+                    self._get_paup_model_setup_cmds()
+                )
+                if optimal_tree:
+                    self.ml_tree = optimal_tree
+                    self.ml_likelihood = likelihood
+                    logger.info(f"ML tree built successfully (likelihood: {likelihood})")
+                else:
+                    logger.error("Failed to build tree with ML engine")
+                    return {}
+            else:
+                logger.error("No ML engine available and no existing tree")
+                return {}
+        
+        # Initialize results dictionary
+        self.decay_indices = {}
+        
+        # Log analysis types
+        methods = []
+        if self.do_ml and self.ml_engine: methods.append("ML")
+        if self.do_bayesian and self.bayesian_engine: methods.append("Bayesian") 
+        if self.do_parsimony and self.parsimony_engine: methods.append("Parsimony")
+        
+        logger.info(f"Starting modular decay analysis: {' + '.join(methods)}")
+        
+        # Get clade list from tree for all analyses
+        clade_list = self._parse_clades_from_tree(self.ml_tree)
+        if not clade_list:
+            logger.error("No clades identified from tree")
+            return {}
+        
+        logger.info(f"Analyzing {len(clade_list)} clades")
+        
+        # Run ML analysis using ML engine
+        if self.do_ml and self.ml_engine:
+            try:
+                logger.info("Running ML analysis with modular engine...")
+                for clade_id, taxa_list in clade_list.items():
+                    result = self.ml_engine.analyze_constraint(
+                        self.alignment_file, 
+                        self._get_paup_model_setup_cmds(), 
+                        taxa_list, 
+                        clade_id
+                    )
+                    if result.success:
+                        self.decay_indices[clade_id] = {
+                            'taxa_names': taxa_list,
+                            'taxa_count': len(taxa_list),
+                            'delta_lnL': result.support_value,
+                            'AU_pvalue': result.p_value,
+                            'constrained_likelihood': result.constrained_likelihood,
+                            'tree_likelihood': result.tree_likelihood
+                        }
+                        if result.additional_metrics:
+                            self.decay_indices[clade_id].update(result.additional_metrics)
+                    else:
+                        logger.warning(f"ML analysis failed for clade {clade_id}: {result.error_message}")
+                
+                logger.info(f"COMPLETED: ML analysis ({len(self.decay_indices)} branches tested)")
+            except Exception as e:
+                logger.error(f"ML analysis failed: {e}")
+                if not self.do_bayesian and not self.do_parsimony:
+                    return {}
+        
+        # Run Bayesian analysis using Bayesian engine
+        if self.do_bayesian and self.bayesian_engine:
+            try:
+                logger.info("Running Bayesian analysis with modular engine...")
+                for clade_id, taxa_list in clade_list.items():
+                    result = self.bayesian_engine.analyze_constraint(
+                        self.alignment_file, 
+                        self._get_paup_model_setup_cmds(), 
+                        taxa_list, 
+                        clade_id
+                    )
+                    if result.success:
+                        bayes_data = {
+                            'bayes_decay': result.support_value,
+                            'LD_per_site': result.additional_metrics.get('LD_per_site', 0.0),
+                            'LD_percent': result.additional_metrics.get('LD_percent', 0.0)
+                        }
+                        
+                        if clade_id in self.decay_indices:
+                            # Merge with existing ML results
+                            self.decay_indices[clade_id].update(bayes_data)
+                        else:
+                            # Create new entry for Bayesian-only results
+                            self.decay_indices[clade_id] = {
+                                'taxa_names': taxa_list,
+                                'taxa_count': len(taxa_list),
+                                **bayes_data
+                            }
+                    else:
+                        logger.warning(f"Bayesian analysis failed for clade {clade_id}: {result.error_message}")
+                
+                logger.info(f"COMPLETED: Bayesian analysis")
+            except Exception as e:
+                logger.error(f"Bayesian analysis failed: {e}")
+        
+        # Run Parsimony analysis using Parsimony engine
+        if self.do_parsimony and self.parsimony_engine:
+            try:
+                logger.info("Running Parsimony analysis with modular engine...")
+                for clade_id, taxa_list in clade_list.items():
+                    result = self.parsimony_engine.analyze_constraint(
+                        self.alignment_file, 
+                        self._get_paup_model_setup_cmds(), 
+                        taxa_list, 
+                        clade_id
+                    )
+                    if result.success:
+                        pars_data = {'parsimony_decay': int(result.support_value)}
+                        
+                        if clade_id in self.decay_indices:
+                            # Merge with existing results
+                            self.decay_indices[clade_id].update(pars_data)
+                        else:
+                            # Create new entry for Parsimony-only results
+                            self.decay_indices[clade_id] = {
+                                'taxa_names': taxa_list,
+                                'taxa_count': len(taxa_list),
+                                **pars_data
+                            }
+                    else:
+                        logger.warning(f"Parsimony analysis failed for clade {clade_id}: {result.error_message}")
+                
+                logger.info(f"COMPLETED: Parsimony analysis")
+            except Exception as e:
+                logger.error(f"Parsimony analysis failed: {e}")
+        
+        # Apply normalization if requested
+        if self.normalize_ld and self.decay_indices:
+            self._apply_normalization_to_results()
+        
+        logger.info(f"Modular analysis completed: {len(self.decay_indices)} clades analyzed")
+        return self.decay_indices
+    
+    def _parse_clades_from_tree(self, tree_string: str) -> Dict[str, List[str]]:
+        """
+        Parse clades from tree string for analysis.
+        """
+        try:
+            if not self.ml_tree:
+                logger.error("No ML tree available for clade parsing")
+                return {}
+            
+            # Get internal clades (same pattern used throughout monolithic code)
+            internal_clades = [cl for cl in self.ml_tree.get_nonterminals() if cl and cl.clades]
+            
+            clade_dict = {}
+            total_taxa_count = len(self.ml_tree.get_terminals())
+            
+            for i, clade_obj in enumerate(internal_clades):
+                clade_taxa = [leaf.name for leaf in clade_obj.get_terminals()]
+                
+                # Filter out trivial branches (same logic as monolithic implementation)
+                if len(clade_taxa) <= 1 or len(clade_taxa) >= total_taxa_count - 1:
+                    continue
+                
+                # Create clade ID and add to dictionary
+                clade_id = f"Clade_{i+1}"
+                clade_dict[clade_id] = clade_taxa
+            
+            logger.info(f"Parsed {len(clade_dict)} testable clades from tree")
+            return clade_dict
+            
+        except Exception as e:
+            logger.error(f"Failed to parse clades from tree: {e}")
+            return {}
+    
+    def _apply_normalization_to_results(self) -> None:
+        """
+        Apply normalization to analysis results.
+        """
+        try:
+            if hasattr(self, '_dataset_normalizer') and self._dataset_normalizer:
+                # Use existing normalization logic
+                self._dataset_normalizer.normalize_ld_metrics(
+                    self.decay_indices, 
+                    self.ld_normalization_methods
+                )
+                logger.info("Applied normalization to results")
+        except Exception as e:
+            logger.error(f"Failed to apply normalization: {e}")
+    
+    def _calculate_decay_indices_monolithic(self, perform_site_analysis: bool = False) -> Dict[str, Dict[str, Any]]:
+        """
+        Original monolithic implementation (fallback).
+        
         Note: ML and parsimony analyses are performed separately even though both use PAUP*.
         This is because:
         1. They use different optimality criteria (likelihood vs. parsimony score)
@@ -3365,6 +3939,7 @@ class panDecayIndices:
         Returns:
             Dictionary of decay indices
         """
+        logger.info("Using monolithic analysis implementation")
         # For any analysis mode, we need a tree to identify clades
         # Build ML tree if needed for ML analysis or if no tree exists
         if self.do_ml or not self.ml_tree:
@@ -3384,26 +3959,32 @@ class panDecayIndices:
         self.decay_indices = {}
         
         # === DIAGNOSTIC LOGGING ===
-        logger.info(f"ANALYSIS FLOW: Starting decay analysis - ML:{self.do_ml}, Bayesian:{self.do_bayesian}, Parsimony:{self.do_parsimony}")
-        logger.info(f"ANALYSIS FLOW: ml_likelihood available: {self.ml_likelihood is not None}")
+        # Start decay analysis with configured methods
+        methods = []
+        if self.do_ml: methods.append("ML")
+        if self.do_bayesian: methods.append("Bayesian") 
+        if self.do_parsimony: methods.append("Parsimony")
+        
+        logger.info(f"Starting decay analysis: {' + '.join(methods)}")
+        logger.debug(f"ML likelihood available: {self.ml_likelihood is not None}")
         if self.ml_likelihood is not None:
-            logger.info(f"ANALYSIS FLOW: ml_likelihood value: {self.ml_likelihood}")
+            logger.debug(f"ML likelihood value: {self.ml_likelihood}")
         
         # Calculate ML decay indices if requested
         if self.do_ml:
             if self.ml_likelihood is None:
                 logger.warning("ML likelihood is missing. Will attempt relative decay analysis...")
-                logger.warning("ANALYSIS FLOW: ML likelihood is None - attempting relative analysis only")
+                logger.warning("ML likelihood unavailable - attempting relative analysis only")
                 
             # Try ML analysis regardless of likelihood availability for relative comparisons
             try:
                 logger.info("Calculating ML decay indices...")
                 self.decay_indices = self._calculate_ml_decay_indices(perform_site_analysis)
-                logger.info(f"ANALYSIS FLOW: ML analysis completed, found {len(self.decay_indices)} branches")
-                logger.info(f"ANALYSIS FLOW: ML decay_indices keys: {list(self.decay_indices.keys())}")
+                logger.info(f"COMPLETED: ML analysis ({len(self.decay_indices)} branches tested)")
+                logger.debug(f"ML branches: {list(self.decay_indices.keys())}")
             except Exception as e:
-                logger.error(f"ANALYSIS FLOW: ML analysis FAILED with exception: {e}")
-                logger.error("ANALYSIS FLOW: Continuing with other analyses if available...")
+                logger.error(f"ML analysis failed: {e}")
+                logger.error("Continuing with other analyses if available...")
                 if not self.do_bayesian and not self.do_parsimony:
                     return {}
                 # Continue with other analyses
@@ -3419,10 +4000,10 @@ class panDecayIndices:
             bayesian_results = self._calculate_bayesian_decay_indices()
             
             # === DIAGNOSTIC LOGGING ===
-            logger.info(f"ANALYSIS FLOW: Bayesian analysis completed, found {len(bayesian_results) if bayesian_results else 0} branches")
+            logger.info(f"COMPLETED: Bayesian analysis ({len(bayesian_results) if bayesian_results else 0} branches tested)")
             if bayesian_results:
-                logger.info(f"ANALYSIS FLOW: Bayesian decay_indices keys: {list(bayesian_results.keys())}")
-                logger.info(f"ANALYSIS FLOW: Before Bayesian merge - existing keys: {list(self.decay_indices.keys())}")
+                logger.debug(f"Bayesian branches: {list(bayesian_results.keys())}")
+                logger.debug(f"Before Bayesian merge - existing keys: {list(self.decay_indices.keys())}")
             
             # Merge Bayesian results with existing results
             if bayesian_results:
@@ -3432,12 +4013,12 @@ class panDecayIndices:
                         # Copy all Bayesian data except 'taxa' to avoid overwriting
                         bayes_update = {k: v for k, v in bayes_data.items() if k != 'taxa'}
                         self.decay_indices[clade_id].update(bayes_update)
-                        logger.debug(f"ANALYSIS FLOW: Merged Bayesian data for existing clade {clade_id}")
+                        logger.debug(f"Merged Bayesian data for existing clade {clade_id}")
                     else:
                         # Create new entry for Bayesian-only results
                         self.decay_indices[clade_id] = bayes_data
-                        logger.debug(f"ANALYSIS FLOW: Created new Bayesian-only entry for clade {clade_id}")
-                logger.info(f"ANALYSIS FLOW: After Bayesian merge - total keys: {list(self.decay_indices.keys())}")
+                        logger.debug(f"Created new Bayesian-only entry for clade {clade_id}")
+                logger.debug(f"After Bayesian merge - total keys: {list(self.decay_indices.keys())}")
         
         # Calculate parsimony decay indices if requested
         if self.do_parsimony:
@@ -3445,12 +4026,12 @@ class panDecayIndices:
             parsimony_results = self.run_parsimony_decay_analysis()
             
             # === DIAGNOSTIC LOGGING ===
-            logger.info(f"ANALYSIS FLOW: Parsimony analysis completed, found {len(parsimony_results) if parsimony_results else 0} branches")
+            logger.info(f"COMPLETED: Parsimony analysis ({len(parsimony_results) if parsimony_results else 0} branches tested)")
             if parsimony_results:
-                logger.info(f"ANALYSIS FLOW: Parsimony decay_indices keys: {list(parsimony_results.keys())}")
-                logger.info(f"ANALYSIS FLOW: Before Parsimony merge - existing keys: {list(self.decay_indices.keys())}")
+                logger.debug(f"Parsimony branches: {list(parsimony_results.keys())}")
+                logger.debug(f"Before Parsimony merge - existing keys: {list(self.decay_indices.keys())}")
             else:
-                logger.warning("ANALYSIS FLOW: Parsimony analysis returned empty results")
+                logger.warning("Parsimony analysis returned empty results")
             
             # Merge parsimony results with existing results
             if parsimony_results:
@@ -3462,21 +4043,22 @@ class panDecayIndices:
                             'pars_score': pars_data.get('pars_score'),
                             'pars_constrained_score': pars_data.get('constrained_score')
                         })
-                        logger.debug(f"ANALYSIS FLOW: Merged parsimony data for existing clade {clade_id}")
+                        logger.debug(f"Merged parsimony data for existing clade {clade_id}")
                     else:
                         # Create new entry for parsimony-only results
                         self.decay_indices[clade_id] = pars_data
-                        logger.debug(f"ANALYSIS FLOW: Created new parsimony-only entry for clade {clade_id}")
-                logger.info(f"ANALYSIS FLOW: After Parsimony merge - total keys: {list(self.decay_indices.keys())}")
+                        logger.debug(f"Created new parsimony-only entry for clade {clade_id}")
+                logger.debug(f"After Parsimony merge - total keys: {list(self.decay_indices.keys())}")
         
-        # === FINAL DIAGNOSTIC LOGGING ===
-        logger.info(f"ANALYSIS FLOW: Final decay_indices contains {len(self.decay_indices)} branches")
+        # Final summary
+        logger.info(f"Analysis completed: {len(self.decay_indices)} branches analyzed")
+        logger.debug("Branch analysis summary:")
         for clade_id, data in self.decay_indices.items():
             analysis_types = []
             if 'lnl_diff' in data or 'au_pvalue' in data: analysis_types.append('ML')
             if 'bayes_decay' in data: analysis_types.append('Bayesian')
             if 'pars_decay' in data: analysis_types.append('Parsimony')
-            logger.info(f"ANALYSIS FLOW: {clade_id} has data for: {', '.join(analysis_types) if analysis_types else 'NO ANALYSIS TYPES'}")
+            logger.debug(f"{clade_id} has data for: {', '.join(analysis_types) if analysis_types else 'NO ANALYSIS TYPES'}")
         
         if not self.decay_indices:
             logger.warning("No branch support values were calculated.")
@@ -3653,12 +4235,9 @@ class panDecayIndices:
         # Display progress box
         taxa_sample = self._get_representative_taxa_sample(clade_taxa_names)
         
-        box_content = [
-            f"Testing clade {clade_log_idx} ({branch_num} of {total_branches}) • {len(clade_taxa_names)} taxa",
-            f"Testing constraint on: {taxa_sample}",
-            "Running PAUP* with reverse constraint"
-        ]
-        logger.info(self._format_progress_box("ML Analysis", box_content))
+        # More concise progress reporting
+        logger.info(f"Testing constraint {branch_num}/{total_branches}: {clade_log_idx} ({len(clade_taxa_names)} taxa)")
+        logger.debug(f"Constraint taxa: {taxa_sample}")
         
         # Generate and score constraint tree
         rel_constr_tree_fn, constr_lnl = self._generate_and_score_constraint_tree(clade_taxa_names, clade_log_idx)
@@ -3904,16 +4483,16 @@ class panDecayIndices:
         if site_data:
             logger.debug(f"Site data keys: {list(site_data.keys()) if isinstance(site_data, dict) else 'Not a dict'}")
         
-        # === NORMALIZATION DIAGNOSTIC LOGGING ===
-        logger.info(f"NORM DIAGNOSTIC: alignment_length = {getattr(self, 'alignment_length', 'NOT_SET')}")
-        logger.info(f"NORM DIAGNOSTIC: unconstrained_ml = {unconstrained_ml}")
-        logger.info(f"NORM DIAGNOSTIC: raw_bd = {raw_bd}")
-        logger.info(f"NORM DIAGNOSTIC: ml_decay = {ml_decay}")
+        # Normalization diagnostic logging (debug level only)
+        logger.debug(f"Normalization: alignment_length = {getattr(self, 'alignment_length', 'NOT_SET')}")
+        logger.debug(f"Normalization: unconstrained_ml = {unconstrained_ml}")
+        logger.debug(f"Normalization: raw_bd = {raw_bd}")
+        logger.debug(f"Normalization: ml_decay = {ml_decay}")
         
         if site_data and isinstance(site_data, dict):
-            logger.info(f"NORM DIAGNOSTIC: site_data signal_std = {site_data.get('signal_std', 'NOT_FOUND')}")
-            logger.info(f"NORM DIAGNOSTIC: site_data signal_mad = {site_data.get('signal_mad', 'NOT_FOUND')}")
-            logger.info(f"NORM DIAGNOSTIC: site_data weighted_support_ratio = {site_data.get('weighted_support_ratio', 'NOT_FOUND')}")
+            logger.debug(f"Normalization: site_data signal_std = {site_data.get('signal_std', 'NOT_FOUND')}")
+            logger.debug(f"Normalization: site_data signal_mad = {site_data.get('signal_mad', 'NOT_FOUND')}")
+            logger.debug(f"Normalization: site_data weighted_support_ratio = {site_data.get('weighted_support_ratio', 'NOT_FOUND')}")
 
     def _calculate_basic_normalized_metrics(self, raw_bd: float, unconstrained_ml: float, normalized_metrics: Dict[str, Any]) -> None:
         """
@@ -3926,20 +4505,18 @@ class panDecayIndices:
         """
         # Per-site BD (BD / alignment_length)
         if "per_site" in self.ld_normalization_methods:
-            # Add extra diagnostic logging for zero bd_per_site issue
-            logger.info(f"NORM DIAGNOSTIC: alignment_length check = {self.alignment_length}")
-            logger.info(f"NORM DIAGNOSTIC: alignment_length > 0 = {self.alignment_length > 0}")
-            logger.info(f"NORM DIAGNOSTIC: raw_bd = {raw_bd}")
+            logger.debug(f"Per-site calculation: alignment_length = {self.alignment_length}")
+            logger.debug(f"Per-site calculation: raw_bd = {raw_bd}")
             
             if self.alignment_length > 0:
                 bd_per_site = raw_bd / self.alignment_length
-                logger.info(f"NORM DIAGNOSTIC: per_site calculation successful: {raw_bd} / {self.alignment_length} = {bd_per_site}")
+                logger.debug(f"Per-site calculation: {raw_bd} / {self.alignment_length} = {bd_per_site}")
             else:
                 bd_per_site = 0
-                logger.error(f"NORM DIAGNOSTIC: alignment_length is {self.alignment_length}, setting bd_per_site to 0")
+                logger.error(f"Invalid alignment length ({self.alignment_length}), setting bd_per_site to 0")
                 
             normalized_metrics["bd_per_site"] = bd_per_site
-            logger.info(f"NORM DIAGNOSTIC: per_site final value stored: {bd_per_site}")
+            logger.debug(f"Per-site final value: {bd_per_site}")
             
         # Relative BD (BD / |unconstrained_ML|)
         if "relative" in self.ld_normalization_methods:
@@ -3995,7 +4572,7 @@ class panDecayIndices:
         mean_ld = np.mean(ld_array)
         std_ld = np.std(ld_array, ddof=1) if len(ld_array) > 1 else 0
         
-        logger.info(f"Dataset LD statistics ({method_prefix}): "
+        logger.debug(f"Dataset LD statistics ({method_prefix}): "
                    f"min={min_ld:.3f}, max={max_ld:.3f}, "
                    f"mean={mean_ld:.3f}, std={std_ld:.3f}")
         
@@ -4585,7 +5162,8 @@ class panDecayIndices:
         if self.debug: logger.debug(f"AU test PAUP* script ({au_cmd_path}):\n{paup_script_content}")
 
         try:
-            self._external_runner.run_paup_command_file(AU_TEST_NEX_FN, AU_LOG_FN, timeout_sec=max(1800, 600 * num_trees / 10)) # Dynamic timeout
+            with ProgressSpinner(f"Running AU test on {num_trees} trees"):
+                self._external_runner.run_paup_command_file(AU_TEST_NEX_FN, AU_LOG_FN, timeout_sec=max(1800, 600 * num_trees / 10)) # Dynamic timeout
 
             # Parse results from the AU test results file
             return self._parse_au_results(self.temp_path / AU_LOG_FN)
@@ -4667,7 +5245,7 @@ class panDecayIndices:
                         }
 
                 if au_results:
-                    logger.info(f"Successfully parsed AU test results for {len(au_results)} trees.")
+                    logger.debug(f"Successfully parsed AU test results for {len(au_results)} trees.")
                     for tree_idx, data in sorted(au_results.items()):
                         logger.debug(f"Tree {tree_idx}: lnL={data['lnL']:.4f}, AU p-value={data['AU_pvalue']}")
                     return au_results
@@ -4705,7 +5283,7 @@ class panDecayIndices:
                         }
 
                 if au_results:
-                    logger.info(f"Successfully parsed detailed AU test results for {len(au_results)} trees.")
+                    logger.debug(f"Successfully parsed detailed AU test results for {len(au_results)} trees.")
                     return au_results
 
             # Third approach: try to parse AU scores from the direct output in the log
@@ -4749,7 +5327,7 @@ class panDecayIndices:
                         }
 
                 if au_results:
-                    logger.info(f"Successfully parsed direct AU test results for {len(au_results)} trees.")
+                    logger.debug(f"Successfully parsed direct AU test results for {len(au_results)} trees.")
                     return au_results
 
             # Try to parse from scorefile if results not found in log
@@ -4829,7 +5407,7 @@ class panDecayIndices:
                     logger.debug(f"Failed to parse AU result line '{line}': {e}")
 
             if au_results:
-                logger.info(f"Successfully parsed {len(au_results)} AU test results from score file.")
+                logger.debug(f"Successfully parsed {len(au_results)} AU test results from score file.")
                 return au_results
             else:
                 logger.warning("No AU test results could be parsed from score file.")
@@ -4843,19 +5421,50 @@ class panDecayIndices:
 
     def annotate_trees(self, output_dir: Path, base_filename: str = "annotated_tree"):
         """
-        Create annotated trees with different support values:
-        1. A tree with AU p-values as branch labels
-        2. A tree with log-likelihood differences as branch labels
-        3. A combined tree with both values as FigTree-compatible branch labels
-        4. A tree with bootstrap values if bootstrap analysis was performed
-        5. A comprehensive tree with bootstrap, AU, and LnL values if bootstrap was performed
-
+        Create annotated trees with different support values using modular components.
+        
         Args:
             output_dir: Directory to save the tree files
             base_filename: Base name for the tree files (without extension)
 
         Returns:
             Dict with paths to the created tree files
+        """
+        if HAS_MODULAR_ARCHITECTURE and self.tree_annotator:
+            return self._annotate_trees_modular(output_dir, base_filename)
+        else:
+            return self._annotate_trees_monolithic(output_dir, base_filename)
+    
+    def _annotate_trees_modular(self, output_dir: Path, base_filename: str = "annotated_tree") -> Dict[str, Path]:
+        """
+        Create annotated trees using modular TreeAnnotator.
+        """
+        if not self.ml_tree or not self.decay_indices:
+            logger.warning("ML tree or decay indices missing. Cannot annotate trees.")
+            return {}
+        
+        try:
+            has_bootstrap = hasattr(self, 'bootstrap_tree') and self.bootstrap_tree
+            
+            tree_files = self.tree_annotator.annotate_trees(
+                self.ml_tree,
+                self.decay_indices,
+                output_dir,
+                base_filename,
+                has_bootstrap
+            )
+            
+            logger.info(f"Created {len(tree_files)} annotated tree files using modular annotator")
+            return tree_files
+            
+        except Exception as e:
+            logger.error(f"Failed to create annotated trees with modular annotator: {e}")
+            # Fall back to monolithic implementation
+            return self._annotate_trees_monolithic(output_dir, base_filename)
+    
+    def _annotate_trees_monolithic(self, output_dir: Path, base_filename: str = "annotated_tree") -> Dict[str, Path]:
+        """
+        Original monolithic tree annotation implementation.
         """
         if not self.ml_tree or not self.decay_indices:
             logger.warning("ML tree or decay indices missing. Cannot annotate trees.")
@@ -5306,11 +5915,11 @@ class panDecayIndices:
         # Data rows
         for clade_id, data in sorted(self.decay_indices.items()):
             # === TABLE GENERATION DIAGNOSTIC ===
-            logger.info(f"TABLE DIAGNOSTIC: {clade_id} data keys: {list(data.keys()) if isinstance(data, dict) else 'NOT_DICT'}")
+            logger.debug(f"Table data keys for {clade_id}: {list(data.keys()) if isinstance(data, dict) else 'NOT_DICT'}")
             ml_fields = {k: v for k, v in data.items() if k in ['lnl_diff', 'AU_pvalue', 'constrained_lnl', 'significant_AU']} if isinstance(data, dict) else {}
             bayes_fields = {k: v for k, v in data.items() if k in ['bayes_decay', 'marginal_likelihood']} if isinstance(data, dict) else {}
-            logger.info(f"TABLE DIAGNOSTIC: {clade_id} ML fields: {ml_fields}")
-            logger.info(f"TABLE DIAGNOSTIC: {clade_id} Bayesian fields: {bayes_fields}")
+            logger.debug(f"ML fields for {clade_id}: {ml_fields}")
+            logger.debug(f"Bayesian fields for {clade_id}: {bayes_fields}")
             
             taxa_list = sorted(data.get('taxa', []))
             num_taxa = len(taxa_list)
@@ -5496,6 +6105,88 @@ class panDecayIndices:
         logger.info(f"Results written to {self._get_display_path(output_path)}")
     
     def write_results(self, output_path: Path):
+        """
+        Write analysis results using modular output components.
+        """
+        if HAS_MODULAR_ARCHITECTURE and self.output_manager:
+            return self._write_results_modular(output_path)
+        else:
+            return self._write_results_monolithic(output_path)
+    
+    def _write_results_modular(self, output_path: Path):
+        """
+        Write results using modular output manager.
+        """
+        if not self.decay_indices:
+            logger.warning("No branch support results to write.")
+            try:
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                with output_path.open('w') as f:
+                    f.write("No branch support results calculated.\n")
+                    if self.ml_likelihood is not None:
+                        f.write(f"ML tree log-likelihood: {self.ml_likelihood:.6f}\n")
+                return
+            except Exception as e_write:
+                logger.error(f"Failed to write empty results file {output_path}: {e_write}")
+                return
+        
+        try:
+            # Determine what analysis types are available
+            has_ml = self.do_ml and any('delta_lnL' in d for d in self.decay_indices.values())
+            has_bayesian = self.do_bayesian and any('bayes_decay' in d for d in self.decay_indices.values())
+            has_parsimony = self.do_parsimony and any('parsimony_decay' in d for d in self.decay_indices.values())
+            has_posterior = any('posterior_prob' in d for d in self.decay_indices.values())
+            has_bootstrap = hasattr(self, 'bootstrap_tree') and self.bootstrap_tree
+            
+            # Prepare analysis configuration for output components
+            analysis_config = {
+                'has_ml': has_ml,
+                'has_bayesian': has_bayesian, 
+                'has_parsimony': has_parsimony,
+                'ml_likelihood': self.ml_likelihood,
+                'alignment_file': str(self.alignment_file),
+                'data_type': self.data_type,
+                'analysis_mode': self.analysis_mode,
+                'model': self.model_str,
+                'normalization': 'full' if self.dataset_relative else ('basic' if self.normalize_ld else 'none')
+            }
+            
+            # Write main results file
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            with output_path.open('w') as f:
+                # Write header and summary
+                self.output_manager.write_analysis_summary(f, analysis_config, self.decay_indices)
+                f.write("\n")
+                
+                # Write the main support table
+                self.output_manager.write_support_table(
+                    f, self.decay_indices, has_ml, has_bayesian, 
+                    has_parsimony, has_posterior, has_bootstrap
+                )
+                f.write("\n")
+                
+                # Write detailed clade information
+                self.output_manager.write_clade_details(
+                    f, self.decay_indices, has_ml, has_bayesian, has_parsimony
+                )
+                
+                # Write dataset-relative rankings if normalization was applied
+                if self.dataset_relative and self.decay_indices:
+                    self.output_manager.write_dataset_relative_rankings(
+                        f, self.decay_indices, has_bayesian, has_ml, has_parsimony
+                    )
+            
+            logger.info(f"Modular results written to: {output_path}")
+            
+        except Exception as e:
+            logger.error(f"Failed to write modular results: {e}")
+            # Fall back to monolithic implementation
+            self._write_results_monolithic(output_path)
+    
+    def _write_results_monolithic(self, output_path: Path):
+        """
+        Original monolithic result writing implementation.
+        """
         if not self.decay_indices:
             logger.warning("No branch support results to write.")
             # Create an empty or minimal file? For now, just return.
@@ -5710,19 +6401,19 @@ class panDecayIndices:
         has_bootstrap = hasattr(self, 'bootstrap_tree') and self.bootstrap_tree
         
         # === OUTPUT DIAGNOSTIC LOGGING ===
-        logger.info(f"OUTPUT DIAGNOSTIC: Analysis detection - ML:{has_ml}, Bayesian:{has_bayesian}, Parsimony:{has_parsimony}")
-        logger.info(f"OUTPUT DIAGNOSTIC: Total decay_indices entries: {len(self.decay_indices) if self.decay_indices else 0}")
+        logger.debug(f"Analysis detection - ML:{has_ml}, Bayesian:{has_bayesian}, Parsimony:{has_parsimony}")
+        logger.debug(f"Total decay_indices entries: {len(self.decay_indices) if self.decay_indices else 0}")
         
         # Detailed breakdown of what's in decay_indices
         if self.decay_indices:
             for clade_id, data in list(self.decay_indices.items())[:3]:  # Show first 3 for debugging
                 keys = list(data.keys()) if isinstance(data, dict) else "NOT_DICT"
-                logger.info(f"OUTPUT DIAGNOSTIC: {clade_id} contains keys: {keys}")
+                logger.debug(f"{clade_id} contains keys: {keys}")
                 # Check specifically for ML data
                 ml_data = {k: v for k, v in data.items() if k in ['lnl_diff', 'au_pvalue', 'constrained_lnl', 'significant_AU']} if isinstance(data, dict) else {}
-                logger.info(f"OUTPUT DIAGNOSTIC: {clade_id} ML data: {ml_data}")
+                logger.debug(f"{clade_id} ML data: {ml_data}")
         else:
-            logger.warning("OUTPUT DIAGNOSTIC: decay_indices is empty or None!")
+            logger.debug("decay_indices is empty or None!")
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with output_path.open('w') as f:
@@ -5743,6 +6434,9 @@ class panDecayIndices:
             
             # Write interpretation section
             self._write_interpretation_section(f, has_ml, has_bayesian, has_parsimony, has_bootstrap)
+            
+            # Write site analysis section if available
+            self._write_site_analysis_section(f)
 
         logger.info(f"Detailed report written to {self._get_display_path(output_path)}")
 
@@ -5987,6 +6681,47 @@ class panDecayIndices:
             f.write("- LD values scale with dataset characteristics - do not compare absolute values across studies\n")
             f.write("- For cross-study comparisons, use normalized metrics (effect sizes) instead of raw LD values\n")
             f.write("- Compare relative LD values across branches within this analysis to identify well-supported clades\n")
+    
+    def _write_site_analysis_section(self, f):
+        """Write site analysis summary as markdown table if available."""
+        # Check if any clade has site analysis data
+        has_site_data = any('site_data' in data for data in self.decay_indices.values()) if self.decay_indices else False
+        
+        if not has_site_data:
+            return
+        
+        f.write("\n## Site-by-Site Analysis Summary\n\n")
+        f.write("This table shows the breakdown of individual alignment sites and their support for each clade:\n\n")
+        
+        # Create markdown table with headers
+        f.write("| Clade ID | Supporting Sites | Conflicting Sites | Neutral Sites | Support Ratio | Weighted Ratio |\n")
+        f.write("|----------|------------------|-------------------|---------------|---------------|----------------|\n")
+        
+        # Add data rows
+        for clade_id, data in sorted(self.decay_indices.items()):
+            if 'site_data' not in data:
+                continue
+            
+            supporting = data.get('supporting_sites', 0)
+            conflicting = data.get('conflicting_sites', 0)
+            neutral = data.get('neutral_sites', 0)
+            ratio = data.get('support_ratio', 0.0)
+            weighted_ratio = data.get('weighted_support_ratio', 0.0)
+            
+            # Format ratios nicely
+            ratio_str = "∞" if ratio == float('inf') else f"{ratio:.2f}"
+            weighted_ratio_str = "∞" if weighted_ratio == float('inf') else f"{weighted_ratio:.2f}"
+            
+            f.write(f"| {clade_id} | {supporting} | {conflicting} | {neutral} | {ratio_str} | {weighted_ratio_str} |\n")
+        
+        # Add explanation
+        f.write("\n**Column Descriptions:**\n")
+        f.write("- **Supporting Sites**: Sites where the ML tree is more likely than the constrained tree\n")
+        f.write("- **Conflicting Sites**: Sites where the constrained tree is more likely than the ML tree\n")
+        f.write("- **Neutral Sites**: Sites with minimal likelihood differences (< 0.01)\n")
+        f.write("- **Support Ratio**: Supporting sites ÷ Conflicting sites\n")
+        f.write("- **Weighted Ratio**: Support ratio weighted by magnitude of likelihood differences\n\n")
+    
     def _write_detailed_statistics(self, f, has_ml, has_bayesian, has_parsimony):
         """Write detailed statistics section for each analysis type."""
         if not self.decay_indices:
@@ -6373,99 +7108,7 @@ class panDecayIndices:
 
     def _generate_site_analysis_visualizations(self, output_dir):
         """
-        Generate site analysis visualizations using dual visualization system.
-        
-        Args:
-            output_dir: Directory to save the visualization files
-        """
-        if not HAS_DUAL_VISUALIZATION:
-            logger.warning("Dual visualization system not available, falling back to legacy method")
-            self._generate_site_analysis_visualizations_legacy(output_dir)
-            return
-        
-        try:
-            # Get visualization format preference
-            viz_format = getattr(self, 'viz_format', 'both')
-            static_formats = getattr(self, 'static_formats', ['png', 'pdf'])
-            interactive_format = getattr(self, 'interactive_format', 'html')
-            
-            # Map old format names to new system for backward compatibility
-            if viz_format in ['png', 'pdf', 'svg']:
-                # If using legacy format, use that format specifically
-                static_formats = [viz_format]
-                viz_format = 'static'
-            elif viz_format == 'html':
-                viz_format = 'interactive'
-            # 'both', 'static', 'interactive' remain as is
-            
-            # Prepare static and interactive configurations
-            static_config = {
-                'dpi': 300,
-                'formats': static_formats,  # Use the actual formats from arguments
-                'style': 'publication',
-                'figsize': (12, 8),
-                'font_size': 12
-            }
-            
-            interactive_config = {
-                'theme': 'plotly_white',
-                'export_html': True,
-                'include_controls': True,
-                'width': 1200,
-                'height': 700,
-                'format': interactive_format  # Use the actual interactive format
-            }
-            
-            # Create visualizations for decay summary
-            logger.info("Creating dual visualization system plots...")
-            created_files = create_visualizations(
-                decay_data=self.decay_indices,
-                output_dir=Path(output_dir),
-                viz_format=viz_format,
-                static_config=static_config,
-                interactive_config=interactive_config
-            )
-            
-            # Also create site-specific visualizations if site data exists
-            site_data_exists = any('site_data' in data for data in self.decay_indices.values())
-            if site_data_exists:
-                logger.info("Creating site-specific visualizations...")
-                try:
-                    viz_system = DualVisualizationSystem(
-                        output_format=viz_format,
-                        static_config=static_config,
-                        interactive_config=interactive_config
-                    )
-                    
-                    site_files = viz_system.create_visualizations(
-                        decay_data=self.decay_indices,
-                        output_dir=Path(output_dir),
-                        viz_type="site_analysis"
-                    )
-                    
-                    # Merge with existing created files
-                    for fmt, files in site_files.items():
-                        created_files.setdefault(fmt, []).extend(files)
-                        
-                except Exception as e:
-                    logger.warning(f"Site-specific visualization failed: {e}")
-            
-            # Log summary of created files
-            total_files = sum(len(files) for files in created_files.values())
-            logger.info(f"Created {total_files} visualization files")
-            
-            for fmt, files in created_files.items():
-                if files:
-                    logger.info(f"  {fmt.title()}: {len(files)} files")
-                    
-        except Exception as e:
-            logger.error(f"Dual visualization system failed: {e}")
-            logger.info("Falling back to legacy visualization method")
-            self._generate_site_analysis_visualizations_legacy(output_dir)
-
-    def _generate_site_analysis_visualizations_legacy(self, output_dir):
-        """
-        Legacy site analysis visualization method (fallback).
+        Generate site analysis visualizations using matplotlib.
         
         Args:
             output_dir: Directory to save the visualization files
@@ -6475,7 +7118,7 @@ class panDecayIndices:
             import seaborn as sns
             import numpy as np
 
-            # Get visualization options
+            # Get visualization format 
             viz_format = getattr(self, 'viz_format', 'png')
 
             for clade_id, data in self.decay_indices.items():
@@ -6669,7 +7312,7 @@ class panDecayIndices:
             logger.info("Skipping intermediate file cleanup due to debug or keep_files flag")
             return
 
-        logger.info("Cleaning up intermediate files...")
+        logger.debug("Cleaning up intermediate files...")
 
         # Delete files explicitly marked for cleanup
         for file_path in self._files_to_cleanup:
@@ -6706,37 +7349,59 @@ def get_display_path(path: Union[str, Path]) -> str:
         return str(path)
 
 def log_runtime_parameters(args_ns: Any, model_str_for_print: str) -> None:
-    """Logs a summary of runtime parameters."""
-    # (args_ns is the namespace from argparse.ArgumentParser)
-    logger.info("\n" + "=" * 80)
-    logger.info(f"panDecay: Phylogenetic Analysis using Decay Indices v{VERSION}")
-    logger.info("=" * 80)
-    logger.info("\nRUNTIME PARAMETERS:")
-    logger.info(f"  Alignment file:     {args_ns.alignment}")
-    logger.info(f"  Alignment format:   {args_ns.format}")
-    logger.info(f"  Data type:          {args_ns.data_type}")
+    """Logs a clean summary of runtime parameters."""
+    # Get sequence count and sites if available
+    try:
+        alignment_info = ""
+        if hasattr(args_ns, 'alignment') and args_ns.alignment:
+            # This will be filled in later when we read the alignment
+            alignment_info = f" ({Path(args_ns.alignment).name})"
+    except:
+        alignment_info = ""
+    
+    logger.info("=" * 70)
+    logger.info(f"panDecay v{VERSION} - Phylogenetic Decay Analysis")
+    logger.info("=" * 70)
+    logger.info("")
+    logger.info("DATASET INFORMATION:")
+    logger.info(f"  File: {Path(args_ns.alignment).name}")
+    format_display = "auto-detect" if args_ns.format is None else args_ns.format.upper()
+    logger.info(f"  Format: {format_display}, Data type: {args_ns.data_type.upper()}")
     if args_ns.paup_block:
-        logger.info(f"  PAUP* settings:     User-provided block from '{args_ns.paup_block}'")
+        logger.info(f"  Model: Custom PAUP* block")
     else:
-        logger.info(f"  Model string:       {model_str_for_print}")
-        # Further model details can be extracted from args_ns if needed
-    logger.info(f"\n  PAUP* executable:   {args_ns.paup}")
-    logger.info(f"  Threads for PAUP*:  {args_ns.threads}")
-    if args_ns.starting_tree:
-        logger.info(f"  Starting tree:      {args_ns.starting_tree}")
-    output_p = Path(args_ns.output) # Use Path for consistent name generation
-    logger.info("\nOUTPUT SETTINGS:")
-    logger.info(f"  Results file:       {output_p}")
-    logger.info(f"  Annotated trees:    {args_ns.tree}_au.nwk, {args_ns.tree}_delta_lnl.nwk, {args_ns.tree}_combined.nwk")
-    logger.info(f"  Detailed report:    {output_p.with_suffix('.md')}")
-    if args_ns.temp: logger.info(f"  Temp directory:     {args_ns.temp}")
-    if args_ns.debug: logger.info(f"  Debug mode:         Enabled (log: panDecay_debug.log)")
-    if args_ns.keep_files: logger.info(f"  Keep temp files:    Enabled")
-    if args_ns.visualize:
-        logger.info("\nVISUALIZATIONS:")
-        logger.info(f"  Enabled, format:    {args_ns.viz_format}")
-        logger.info(f"  Tree plot:          {output_p.parent / (output_p.stem + '_tree.' + args_ns.viz_format)}")
-    logger.info("\n" + "=" * 80 + "\n")
+        logger.info(f"  Model: {model_str_for_print}, Threads: {args_ns.threads}")
+    
+    logger.info("")
+    logger.info("ANALYSIS CONFIGURATION:")
+    
+    # Determine analysis types
+    analysis_types = []
+    if hasattr(args_ns, 'analysis'):
+        if 'ml' in args_ns.analysis.lower() or args_ns.analysis.lower() == 'all':
+            analysis_types.append('ML')
+        if 'bayesian' in args_ns.analysis.lower() or args_ns.analysis.lower() == 'all':
+            analysis_types.append('Bayesian') 
+        if 'parsimony' in args_ns.analysis.lower() or args_ns.analysis.lower() == 'all':
+            analysis_types.append('Parsimony')
+    
+    logger.info(f"  Methods: {' + '.join(analysis_types) if analysis_types else 'ML'}")
+    
+    # Show normalization if enabled
+    if hasattr(args_ns, 'normalization') and args_ns.normalization != 'none':
+        logger.info(f"  Normalization: {args_ns.normalization.title()}")
+    
+    # Show visualizations if enabled
+    if hasattr(args_ns, 'visualize') and args_ns.visualize:
+        viz_type = getattr(args_ns, 'viz_format', 'static')
+        if viz_type == 'both':
+            logger.info(f"  Visualizations: Static + Interactive")
+        else:
+            logger.info(f"  Visualizations: {viz_type.title()}")
+    
+    logger.info("")
+    logger.info("=" * 70)
+    logger.info("")
 
     @staticmethod
     def read_paup_block(paup_block_file_path: Path):
@@ -7328,9 +7993,24 @@ def create_decay_calc_from_args(args: Any) -> Any:
     temp_dir_path = Path(args.temp) if args.temp else None
     starting_tree_path = Path(args.starting_tree) if args.starting_tree else None
     
+    # Determine alignment format: auto-detect or use user override
+    if args.format is None and args.alignment:
+        # Auto-detect format from file
+        temp_manager = AlignmentManager(Path.cwd(), debug=False)
+        alignment_format = temp_manager.detect_alignment_format(args.alignment)
+        logger.info(f"Auto-detected alignment format: {alignment_format}")
+    elif args.format is not None:
+        # User specified format override
+        alignment_format = args.format
+        logger.info(f"Using user-specified alignment format: {alignment_format}")
+    else:
+        # Fallback for edge cases
+        alignment_format = "fasta"
+        logger.warning("No alignment file specified, using default format: fasta")
+    
     return panDecayIndices(
         alignment_file=args.alignment,
-        alignment_format=args.format,
+        alignment_format=alignment_format,
         model=effective_model_str,
         temp_dir=temp_dir_path,
         paup_path=args.paup,
@@ -7572,7 +8252,9 @@ def _create_argument_parser():
     )
     # Arguments (similar to original, ensure help messages are clear)
     parser.add_argument("alignment", nargs='?', help="Input alignment file path (can be specified in config file).")
-    parser.add_argument("--format", default="fasta", help="Alignment format.")
+    parser.add_argument("--format", default=None, 
+                       choices=["fasta", "phylip", "nexus", "clustal", "stockholm"],
+                       help="Override auto-detected alignment format. Format is automatically detected from file extension and content by default.")
     parser.add_argument("--model", default="GTR", help="Base substitution model (e.g., GTR, HKY, JC). Combine with --gamma and --invariable.")
     parser.add_argument("--gamma", action="store_true", help="Add Gamma rate heterogeneity (+G) to model.")
     parser.add_argument("--invariable", action="store_true", help="Add invariable sites (+I) to model.")
@@ -7587,9 +8269,9 @@ def _create_argument_parser():
     batch_opts = parser.add_argument_group('Batch Processing Options')
     batch_opts.add_argument("--batch", action="store_true", help="Enable batch processing mode for multiple alignment files.")
     batch_opts.add_argument("--input-dir", help="Directory containing alignment files for batch processing (use with --batch).")
-    batch_opts.add_argument("--file-pattern", default="*", help="File pattern for batch processing (e.g., '*.fasta', '*.nex'). Default: '*' (all files)")
-    batch_opts.add_argument("--batch-output-dir", help="Output directory for batch results (default: current directory).")
-    batch_opts.add_argument("--batch-jobs", type=int, default=1, help="Number of parallel batch jobs (default: 1, max: number of CPU cores).")
+    batch_opts.add_argument("--file-pattern", default="*", help="File pattern for batch processing (e.g., '*.fasta', '*.nex')")
+    batch_opts.add_argument("--batch-output-dir", help="Output directory for batch results (defaults to current directory).")
+    batch_opts.add_argument("--batch-jobs", type=int, default=1, help="Number of parallel batch jobs (max: number of CPU cores).")
     batch_opts.add_argument("--batch-summary", default="batch_summary.txt", help="Summary file for batch analysis results.")
     
     # Model parameter overrides
@@ -7600,16 +8282,16 @@ def _create_argument_parser():
     mparams.add_argument("--rates", choices=["equal", "gamma"], help="Site rate variation model (overrides --gamma flag if specified).")
     mparams.add_argument("--protein-model", help="Specific protein model (e.g., JTT, WAG; overrides base --model for protein data).")
     mparams.add_argument("--nst", type=int, choices=[1, 2, 6], help="Number of substitution types (DNA; overrides model-based nst).")
-    mparams.add_argument("--parsmodel", action=argparse.BooleanOptionalAction, default=None, help="Use parsimony-based branch lengths (discrete data; default: yes for discrete). Use --no-parsmodel to disable.")
+    mparams.add_argument("--parsmodel", action=argparse.BooleanOptionalAction, default=None, help="Use parsimony-based branch lengths (discrete data; defaults to yes for discrete data). Use --no-parsmodel to disable.")
 
     run_ctrl = parser.add_argument_group('Runtime Control')
     run_ctrl.add_argument("--threads", default="auto", help="Number of threads for PAUP* (e.g., 4 or 'auto').")
     run_ctrl.add_argument("--async-constraints", action="store_true", help="Enable parallel constraint processing for faster analysis (experimental).")
-    run_ctrl.add_argument("--max-async-workers", type=int, help="Maximum number of parallel constraint workers (default: auto).")
-    run_ctrl.add_argument("--constraint-timeout", type=int, default=600, help="Timeout per constraint task in seconds (default: 600).")
+    run_ctrl.add_argument("--max-async-workers", type=int, help="Maximum number of parallel constraint workers (defaults to auto).")
+    run_ctrl.add_argument("--constraint-timeout", type=int, default=600, help="Timeout per constraint task in seconds.")
     run_ctrl.add_argument("--starting-tree", help="Path to a user-provided starting tree file (Newick).")
     run_ctrl.add_argument("--paup-block", help="Path to file with custom PAUP* commands for model/search setup (overrides most model args).")
-    run_ctrl.add_argument("--temp", help="Custom directory for temporary files (default: system temp).")
+    run_ctrl.add_argument("--temp", help="Custom directory for temporary files (defaults to system temp).")
     run_ctrl.add_argument("--keep-files", action="store_true", help="Keep temporary files after analysis.")
     run_ctrl.add_argument("--debug", action="store_true", help="Enable detailed debug logging (implies --keep-files).")
 
@@ -7618,18 +8300,18 @@ def _create_argument_parser():
     analysis_mode.add_argument("--analysis", 
                               choices=["ml", "bayesian", "parsimony", "ml+parsimony", "bayesian+parsimony", "ml+bayesian", "all"], 
                               default="ml",
-                              help="Type of decay analysis to perform (default: ml). "
+                              help="Type of decay analysis to perform. "
                                    "Options: ml, bayesian, parsimony, ml+parsimony, bayesian+parsimony, ml+bayesian, all")
     
     # Add bootstrap options
     bootstrap_opts = parser.add_argument_group('Bootstrap Analysis (optional)')
     bootstrap_opts.add_argument("--bootstrap", action="store_true", help="Perform bootstrap analysis to calculate support values.")
-    bootstrap_opts.add_argument("--bootstrap-reps", type=int, default=100, help="Number of bootstrap replicates (default: 100)")
+    bootstrap_opts.add_argument("--bootstrap-reps", type=int, default=100, help="Number of bootstrap replicates")
     
     # Bayesian-specific options
     bayesian_opts = parser.add_argument_group('Bayesian Analysis Options')
     bayesian_opts.add_argument("--bayesian-software", choices=["mrbayes"], 
-                              default="mrbayes", help="Bayesian software to use (default: mrbayes)")
+                              default="mrbayes", help="Bayesian software to use")
     bayesian_opts.add_argument("--mrbayes-path", default="mb", help="Path to MrBayes executable")
     bayesian_opts.add_argument("--bayes-model", help="Model for Bayesian analysis (if different from ML model)")
     bayesian_opts.add_argument("--bayes-ngen", type=int, default=1000000, help="Number of MCMC generations")
@@ -7667,25 +8349,21 @@ def _create_argument_parser():
     convergence_opts.add_argument("--check-convergence", action=argparse.BooleanOptionalAction, default=True,
                                  help="Check MCMC convergence diagnostics")
     convergence_opts.add_argument("--min-ess", type=int, default=200,
-                                 help="Minimum ESS (Effective Sample Size) threshold (default: 200)")
+                                 help="Minimum ESS (Effective Sample Size) threshold")
     convergence_opts.add_argument("--max-psrf", type=float, default=1.01,
-                                 help="Maximum PSRF (Potential Scale Reduction Factor) threshold (default: 1.01)")
+                                 help="Maximum PSRF (Potential Scale Reduction Factor) threshold")
     convergence_opts.add_argument("--max-asdsf", type=float, default=0.01,
-                                 help="Maximum ASDSF (Average Standard Deviation of Split Frequencies) threshold (default: 0.01)")
+                                 help="Maximum ASDSF (Average Standard Deviation of Split Frequencies) threshold")
     convergence_opts.add_argument("--convergence-strict", action="store_true",
-                                 help="Fail analysis if convergence criteria not met (default: warn only)")
+                                 help="Fail analysis if convergence criteria not met (defaults to warn only)")
     convergence_opts.add_argument("--mrbayes-parse-timeout", type=float, default=30.0,
-                                 help="Timeout for parsing MrBayes consensus trees in seconds (0 to disable, default: 30)")
+                                 help="Timeout for parsing MrBayes consensus trees in seconds (0 to disable)")
 
     viz_opts = parser.add_argument_group('Visualization Output (optional)')
-    viz_opts.add_argument("--visualize", action="store_true", help="Generate visualization plots using dual system (static + interactive).")
-    viz_opts.add_argument("--viz-format", default="both", 
-                         choices=["static", "interactive", "both"], 
-                         help="Visualization system: static (matplotlib only), interactive (Plotly only), both")
-    viz_opts.add_argument("--static-formats", default="png,pdf",
-                         help="Static plot file formats as comma-separated list: png,pdf,svg (default: png,pdf)")
-    viz_opts.add_argument("--interactive-format", default="html", choices=["html"],
-                         help="Interactive plot file format (default: html)")
+    viz_opts.add_argument("--visualize", action="store_true", help="Generate visualization plots using matplotlib.")
+    viz_opts.add_argument("--viz-format", default="png", 
+                         choices=["png", "pdf", "svg"], 
+                         help="Visualization file format")
     viz_opts.add_argument("--annotation", default="lnl", choices=["au", "lnl"], help="Type of support values to visualize in distribution plots (au=AU p-values, lnl=likelihood differences).")
     viz_opts.add_argument("--output-style", choices=["unicode", "ascii", "minimal"], default="unicode",
                          help="Output formatting style: unicode (modern), ascii (compatible), minimal (basic)")
@@ -7910,14 +8588,7 @@ def main() -> None:
                 viz_base_name = output_main_path.stem
                 
                 # Handle format for backward compatibility 
-                viz_format = args.viz_format
-                if viz_format in ['png', 'pdf', 'svg']:
-                    # Legacy format specification
-                    file_format = viz_format
-                    viz_format = 'static'
-                else:
-                    # Use first static format as default
-                    file_format = args.static_formats.split(',')[0] if args.static_formats else 'png'
+                file_format = args.viz_format
                     
                 viz_kwargs = {'width': 10, 'height': 6, 'format': file_format}
 
@@ -7936,15 +8607,57 @@ def main() -> None:
                     # Pass visualization preferences to the panDecayIndices instance
                     if args.visualize:
                         decay_calc.viz_format = args.viz_format
-                        decay_calc.static_formats = args.static_formats.split(',') if args.static_formats else ['png', 'pdf']
-                        decay_calc.interactive_format = args.interactive_format
 
                     site_output_dir = output_main_path.parent / f"{output_main_path.stem}_site_analysis"
                     decay_calc.write_site_analysis_results(site_output_dir)
                     logger.info(f"Site-specific analysis results written to {get_display_path(site_output_dir)}")
 
             decay_calc.cleanup_intermediate_files()
-            logger.info("panDecay analysis completed successfully.")
+            
+            # Generate clean completion summary
+            logger.info("")
+            logger.info("=" * 70)
+            logger.info("ANALYSIS COMPLETE")
+            logger.info("=" * 70)
+            
+            # Count branches with different types of support
+            total_branches = len(decay_calc.decay_indices)
+            if total_branches > 0:
+                # Count analysis types completed
+                analysis_summary = []
+                ml_count = sum(1 for data in decay_calc.decay_indices.values() if 'lnl_diff' in data)
+                bayes_count = sum(1 for data in decay_calc.decay_indices.values() if 'bayes_decay' in data)
+                pars_count = sum(1 for data in decay_calc.decay_indices.values() if 'pars_decay' in data)
+                
+                if ml_count > 0: analysis_summary.append(f"ML Analysis: {ml_count} branches")
+                if bayes_count > 0: analysis_summary.append(f"Bayesian Analysis: {bayes_count} branches")
+                if pars_count > 0: analysis_summary.append(f"Parsimony Analysis: {pars_count} branches")
+                
+                for summary in analysis_summary:
+                    logger.info(f"COMPLETED: {summary}")
+                
+                # Count significant support if AU test was performed
+                if ml_count > 0:
+                    significant = sum(1 for data in decay_calc.decay_indices.values() 
+                                    if 'AU_pvalue' in data and data['AU_pvalue'] < 0.05)
+                    weak = sum(1 for data in decay_calc.decay_indices.values() 
+                             if 'AU_pvalue' in data and data['AU_pvalue'] >= 0.05)
+                    logger.info(f"COMPLETED: Statistical testing")
+                    logger.info(f"")
+                    logger.info(f"Strong Support (p<0.05): {significant}/{total_branches} branches")
+                    logger.info(f"Weak Support (p≥0.05): {weak}/{total_branches} branches")
+            
+            logger.info("")
+            logger.info("OUTPUT FILES:")
+            logger.info(f"Results: {get_display_path(output_main_path)}")
+            if hasattr(decay_calc, 'tree_files_created') and decay_calc.tree_files_created:
+                logger.info(f"Trees: {len(decay_calc.tree_files_created)} annotated tree files")
+            if args.visualize:
+                logger.info(f"Plots: Visualization files created")
+            
+            logger.info("")
+            logger.info("Analysis completed successfully!")
+            logger.info("=" * 70)
         else:
             logger.error("ML tree construction failed or likelihood missing. Halting.")
             sys.exit(1) # Ensure exit if ML tree is critical and failed

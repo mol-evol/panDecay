@@ -143,13 +143,13 @@ case "${1:-help}" in
             --yaml|yaml)
                 shift
                 output_file="${1:-/output/pandecay_config.yaml}"
-                echo "📝 Generating YAML configuration template..."
+                echo "Generating YAML configuration template..."
                 python3 /app/panDecay.py --generate-yaml-config "${output_file}"
                 ;;
             --ini|ini)
                 shift
                 output_file="${1:-/output/pandecay_config.ini}"
-                echo "📝 Generating INI configuration template..."
+                echo "Generating INI configuration template..."
                 python3 /app/panDecay.py --generate-config "${output_file}"
                 ;;
             *)
@@ -179,7 +179,7 @@ case "${1:-help}" in
         ;;
     
     test)
-        echo "🧪 Running system tests..."
+        echo "Running system tests..."
         echo "Testing PAUP*..."
         paup -v || echo "PAUP* test completed"
         echo "Testing MrBayes..."
@@ -198,7 +198,7 @@ print(f'Dual visualization: {panDecay.HAS_DUAL_VISUALIZATION}')
         ;;
     
     bash|shell)
-        echo "🐚 Opening interactive shell..."
+        echo "Opening interactive shell..."
         exec /bin/bash
         ;;
     

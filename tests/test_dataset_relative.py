@@ -58,7 +58,7 @@ def test_dataset_relative_calculations():
     assert abs(np.mean(expected_z_scores)) < 1e-10, "Z-score mean should be ~0"
     assert abs(np.std(expected_z_scores, ddof=1) - 1.0) < 1e-10, "Z-score std should be ~1"
     
-    print("✓ Mathematical calculations are correct")
+    print("Mathematical calculations are correct")
     return True
 
 def test_no_effect_size_references():
@@ -85,20 +85,20 @@ def test_no_effect_size_references():
             found_terms.append(term)
     
     if found_terms:
-        print(f"✗ Found forbidden effect size terms in code: {found_terms}")
+        print(f"Found forbidden effect size terms in code: {found_terms}")
         return False
     else:
-        print("✓ No Cohen's d effect size references found in code")
+        print("No Cohen's d effect size references found in code")
     
     # Check command line arguments
     if '--bd-normalization-methods effect_size' in content:
-        print("✗ Found old effect size command line option")
+        print("Found old effect size command line option")
         return False
     
     if 'ld-normalization-methods' in content:
-        print("✓ New LD normalization framework is present")
+        print("New LD normalization framework is present")
     else:
-        print("✗ New LD normalization framework not found")
+        print("New LD normalization framework not found")
         return False
     
     return True
@@ -109,7 +109,7 @@ def test_panDecay_with_test_data():
     
     # Check if test data exists
     if not os.path.exists('test_simple.fas'):
-        print("⚠ test_simple.fas not found, skipping integration test")
+        print("test_simple.fas not found, skipping integration test")
         return True
     
     # Run a quick test with new dataset-relative framework
@@ -126,13 +126,13 @@ def test_panDecay_with_test_data():
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
         
         if result.returncode != 0:
-            print(f"✗ panDecay failed with return code {result.returncode}")
+            print(f"panDecay failed with return code {result.returncode}")
             print(f"STDERR: {result.stderr}")
             return False
         
         # Check that output file was created
         if os.path.exists('test_integration_output.txt'):
-            print("✓ Output file created successfully")
+            print("Output file created successfully")
             
             # Check output contains new analysis
             with open('test_integration_output.txt', 'r') as f:
@@ -140,9 +140,9 @@ def test_panDecay_with_test_data():
             
             # Check for successful analysis completion
             if 'panDecay Branch Support Analysis Results' in output_content:
-                print("✓ Analysis completed successfully")
+                print("Analysis completed successfully")
             else:
-                print("✗ Analysis did not complete properly")
+                print("Analysis did not complete properly")
                 return False
                 
             # Check that no effect size columns remain
@@ -153,21 +153,21 @@ def test_panDecay_with_test_data():
                     found_forbidden.append(col)
             
             if found_forbidden:
-                print(f"✗ Found forbidden effect size references: {found_forbidden}")
+                print(f"Found forbidden effect size references: {found_forbidden}")
                 return False
             else:
-                print("✓ No effect size references found in output")
+                print("No effect size references found in output")
             
             return True
         else:
-            print("✗ Output file not created")
+            print("Output file not created")
             return False
             
     except subprocess.TimeoutExpired:
-        print("✗ panDecay test timed out after 5 minutes")
+        print("panDecay test timed out after 5 minutes")
         return False
     except Exception as e:
-        print(f"✗ Error running panDecay: {e}")
+        print(f"Error running panDecay: {e}")
         return False
 
 def main():
@@ -188,9 +188,9 @@ def main():
             if test_func():
                 passed += 1
             else:
-                print(f"✗ {test_func.__name__} failed")
+                print(f"{test_func.__name__} failed")
         except Exception as e:
-            print(f"✗ {test_func.__name__} crashed: {e}")
+            print(f"{test_func.__name__} crashed: {e}")
     
     print(f"\n=== Test Results: {passed}/{total} passed ===")
     

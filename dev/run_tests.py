@@ -22,26 +22,26 @@ from pathlib import Path
 
 def run_smoke_tests():
     """Run quick smoke tests."""
-    print("🚭 Running smoke tests...")
+    print("Running smoke tests...")
     try:
         # Import and run the built-in smoke tests
         import panDecay
         result = panDecay.run_smoke_tests()
         
         if result:
-            print("✓ Smoke tests passed")
+            print("Smoke tests passed")
             return True
         else:
-            print("✗ Smoke tests failed")
+            print("Smoke tests failed")
             return False
     except Exception as e:
-        print(f"✗ Smoke tests failed with exception: {e}")
+        print(f"Smoke tests failed with exception: {e}")
         return False
 
 
 def run_unit_tests():
     """Run unit tests for individual components."""
-    print("🧪 Running unit tests...")
+    print("Running unit tests...")
     try:
         # Run the simplified test suite
         result = subprocess.run([
@@ -49,18 +49,18 @@ def run_unit_tests():
         ], capture_output=True, text=True, timeout=60)
         
         if result.returncode == 0:
-            print("✓ Unit tests passed")
+            print("Unit tests passed")
             return True
         else:
-            print("✗ Unit tests failed")
+            print("Unit tests failed")
             print(result.stdout)
             print(result.stderr)
             return False
     except subprocess.TimeoutExpired:
-        print("✗ Unit tests timed out")
+        print("Unit tests timed out")
         return False
     except Exception as e:
-        print(f"✗ Unit tests failed with exception: {e}")
+        print(f"Unit tests failed with exception: {e}")
         return False
 
 
@@ -82,10 +82,10 @@ def run_integration_tests():
             ], capture_output=True, text=True, timeout=300)
             
             if result.returncode == 0:
-                print("✓ Integration tests passed")
+                print("Integration tests passed")
                 return True
             else:
-                print("✗ Integration tests failed")
+                print("Integration tests failed")
                 print(result.stdout)
                 return False
         else:
@@ -95,24 +95,24 @@ def run_integration_tests():
             ], capture_output=True, text=True, timeout=300)
             
             if result.returncode == 0:
-                print("✓ Integration tests passed")
+                print("Integration tests passed")
                 return True
             else:
-                print("✗ Integration tests failed")
+                print("Integration tests failed")
                 print(result.stdout)
                 return False
                 
     except subprocess.TimeoutExpired:
-        print("✗ Integration tests timed out")
+        print("Integration tests timed out")
         return False
     except Exception as e:
-        print(f"✗ Integration tests failed with exception: {e}")
+        print(f"Integration tests failed with exception: {e}")
         return False
 
 
 def run_full_tests():
     """Run the complete test suite."""
-    print("🎯 Running full test suite...")
+    print("Running full test suite...")
     
     # Run all test levels
     smoke_passed = run_smoke_tests()
@@ -126,57 +126,57 @@ def run_full_tests():
     all_passed = all([smoke_passed, unit_passed, integration_passed, syntax_passed, import_passed])
     
     if all_passed:
-        print("✓ All tests passed!")
+        print("All tests passed!")
         return True
     else:
-        print("✗ Some tests failed!")
+        print("Some tests failed!")
         return False
 
 
 def check_syntax():
     """Check Python syntax."""
-    print("📝 Checking Python syntax...")
+    print("Checking Python syntax...")
     try:
         result = subprocess.run([
             sys.executable, "-m", "py_compile", "panDecay.py"
         ], capture_output=True, text=True, timeout=30)
         
         if result.returncode == 0:
-            print("✓ Syntax check passed")
+            print("Syntax check passed")
             return True
         else:
-            print("✗ Syntax check failed")
+            print("Syntax check failed")
             print(result.stderr)
             return False
     except Exception as e:
-        print(f"✗ Syntax check failed with exception: {e}")
+        print(f"Syntax check failed with exception: {e}")
         return False
 
 
 def check_imports():
     """Check that all imports work correctly."""
-    print("📦 Checking imports...")
+    print("Checking imports...")
     try:
         result = subprocess.run([
             sys.executable, "-c", "import panDecay; print('Import successful')"
         ], capture_output=True, text=True, timeout=30)
         
         if result.returncode == 0:
-            print("✓ Import check passed")
+            print("Import check passed")
             return True
         else:
-            print("✗ Import check failed")
+            print("Import check failed")
             print(result.stderr)
             return False
     except Exception as e:
-        print(f"✗ Import check failed with exception: {e}")
+        print(f"Import check failed with exception: {e}")
         return False
 
 
 def print_test_summary():
     """Print a summary of available tests."""
     print("""
-🧪 panDecay Test Suite
+panDecay Test Suite
 
 Available test levels:
   smoke       - Quick smoke tests (< 10 seconds)

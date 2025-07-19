@@ -271,34 +271,25 @@ class VisualizationConfig(BaseModel):
     enable: bool = Field(
         default=False, description="Generate visualizations"
     )
-    format: Literal["static", "interactive", "both", "png", "pdf", "svg", "html"] = Field(
-        default="both", description="Visualization format"
+    format: Literal["png", "pdf", "svg"] = Field(
+        default="png", description="Visualization file format"
     )
     
-    # Static plot settings
-    static: Dict[str, Any] = Field(
-        default={
-            "dpi": 300,
-            "formats": ["png", "pdf"],
-            "style": "publication",
-            "figsize": [10, 8],
-            "font_size": 12,
-            "color_palette": "viridis"
-        },
-        description="Static plot configuration"
+    # Plot settings
+    dpi: int = Field(
+        default=300, description="Resolution for plot output"
     )
-    
-    # Interactive plot settings
-    interactive: Dict[str, Any] = Field(
-        default={
-            "theme": "plotly_white",
-            "export_html": True,
-            "include_controls": True,
-            "width": 1000,
-            "height": 800,
-            "color_scale": "viridis"
-        },
-        description="Interactive plot configuration"
+    style: str = Field(
+        default="publication", description="Plot style"
+    )
+    figsize: List[int] = Field(
+        default=[10, 8], description="Figure size [width, height]"
+    )
+    font_size: int = Field(
+        default=12, description="Font size for plots"
+    )
+    color_palette: str = Field(
+        default="viridis", description="Color palette for plots"
     )
     
     annotation: Literal["au", "lnl", "decay"] = Field(

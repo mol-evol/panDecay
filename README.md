@@ -706,8 +706,15 @@ If `--site-analysis` is used, additional output files are generated in a directo
 This feature allows you to identify which alignment positions support or conflict with each branch in the tree.
 
 ### Visualizations (Optional)
-If `--visualize` is used, static plots are generated (requires `matplotlib` and `seaborn`):
+If `--visualize` is used, plots are generated based on the `--viz-format` setting:
+
+**Static plots** (requires `matplotlib` and `seaborn`):
 *   **Support Distribution Plot** (`<output_stem>_dist_au.<viz_format>` and `<output_stem>_dist_delta_lnl.<viz_format>`): Histograms showing the distribution of AU p-values and ΔlnL values across all tested branches.
+
+**Interactive plots** (requires `plotly`):
+*   **Note**: Interactive Plotly visualizations are only generated during site-specific analysis with the `--site-analysis` flag
+*   Without `--site-analysis`, only static matplotlib plots are created even with `--viz-format interactive` or `--viz-format both`
+*   To generate interactive visualizations, use: `--site-analysis --visualize --viz-format interactive` (or `both`)
 
 # Understanding the Site Analysis Plots in panDecay
 

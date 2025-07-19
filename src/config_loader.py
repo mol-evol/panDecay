@@ -25,10 +25,17 @@ try:
 except ImportError:
     HAS_TOML = False
 
-from .config_models import (
-    PanDecayConfig, InputOutputConfig, AnalysisConfig, ModelConfig,
-    ComputationalConfig, BayesianConfig, VisualizationConfig, ConstraintConfig
-)
+try:
+    from .config_models import (
+        PanDecayConfig, InputOutputConfig, AnalysisConfig, ModelConfig,
+        ComputationalConfig, BayesianConfig, VisualizationConfig, ConstraintConfig
+    )
+except ImportError:
+    # Fallback to absolute import for when module is run directly
+    from config_models import (
+        PanDecayConfig, InputOutputConfig, AnalysisConfig, ModelConfig,
+        ComputationalConfig, BayesianConfig, VisualizationConfig, ConstraintConfig
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -318,11 +325,12 @@ def load_ini_config(config_path: Path) -> Dict[str, Any]:
         if key == 'visualize':
             visualization['enable'] = convert_value(value)
         elif key == 'viz_format':
-            # Map old format to new format
+            # Use format directly (png, pdf, svg only)
             if value in ['png', 'pdf', 'svg']:
-                visualization['format'] = 'static'
-            else:
                 visualization['format'] = value
+            else:
+                # Default to png for any invalid format
+                visualization['format'] = 'png'
         elif key == 'annotation':
             visualization['annotation'] = value
     
@@ -451,17 +459,12 @@ def create_example_yaml_config(output_path: Path) -> None:
         },
         'visualization': {
             'enable': True,
-            'format': 'both',
-            'static': {
-                'dpi': 300,
-                'formats': ['png', 'pdf'],
-                'style': 'publication'
-            },
-            'interactive': {
-                'theme': 'plotly_white',
-                'export_html': True,
-                'include_controls': True
-            }
+            'format': 'png',
+            'dpi': 300,
+            'style': 'publication',
+            'figsize': [10, 8],
+            'font_size': 12,
+            'color_palette': 'viridis'
         },
         'constraints': {
             'mode': 'all'
@@ -526,17 +529,12 @@ def create_example_toml_config(output_path: Path) -> None:
         },
         'visualization': {
             'enable': True,
-            'format': 'both',
-            'static': {
-                'dpi': 300,
-                'formats': ['png', 'pdf'],
-                'style': 'publication'
-            },
-            'interactive': {
-                'theme': 'plotly_white',
-                'export_html': True,
-                'include_controls': True
-            }
+            'format': 'png',
+            'dpi': 300,
+            'style': 'publication',
+            'figsize': [10, 8],
+            'font_size': 12,
+            'color_palette': 'viridis'
         },
         'constraints': {
             'mode': 'all'
