@@ -1,0 +1,18 @@
+Alignment Visualization Summary
+===================================
+
+Total alignment sites: 898
+Number of clades analyzed: 9
+Number of visualization chunks: 1
+Layout strategy: single
+
+Files created:
+---------------
+• alignment_full.png - Main alignment visualization
+• alignment_full_support.png - Combined site support overlay
+
+Color scheme:
+---------------
+• Green bars: Sites supporting the branch (positive ΔlnL)
+• Red bars: Sites conflicting with the branch (negative ΔlnL)
+• Bar height: Proportional to |ΔlnL| magnitude
