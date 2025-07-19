@@ -371,6 +371,438 @@ class PlotManager:
         
         return label_map.get(key, key.replace('_', ' ').title())
     
+    def create_alignment_visualization(self, alignment, site_data_by_clade: Dict[str, Dict[int, Dict[str, Any]]], 
+                                     output_dir: Path, chunk_size: int = 2000, 
+                                     layout: str = "auto", format: str = "png") -> bool:
+        """
+        Create alignment visualization with site-specific support overlays.
+        
+        Args:
+            alignment: BioPython alignment object
+            site_data_by_clade: Dictionary mapping clade IDs to site-specific data
+            output_dir: Directory to save visualization files
+            chunk_size: Maximum sites per visualization chunk
+            layout: Layout mode ("auto", "single", "separate")
+            format: Output format (png, pdf, svg)
+            
+        Returns:
+            True if visualizations created successfully, False otherwise
+        """
+        if not HAS_MATPLOTLIB:
+            logger.error("Matplotlib not available for alignment visualization")
+            return False
+        
+        try:
+            # Create output directory
+            viz_dir = output_dir / "alignment_visualization"
+            viz_dir.mkdir(exist_ok=True)
+            
+            # Get alignment dimensions
+            num_sites = alignment.get_alignment_length()
+            num_clades = len(site_data_by_clade)
+            
+            # Determine layout strategy
+            if layout == "auto":
+                layout = self._determine_layout_strategy(num_sites, num_clades)
+            
+            # Create alignment chunks if needed
+            chunks = self._chunk_alignment(alignment, chunk_size)
+            
+            success = True
+            for i, (chunk_start, chunk_end, chunk_alignment) in enumerate(chunks):
+                chunk_name = f"alignment_chunk_{i+1}_sites_{chunk_start+1}-{chunk_end}" if len(chunks) > 1 else "alignment_full"
+                
+                # Create main alignment visualization
+                chunk_success = self._create_alignment_image(
+                    chunk_alignment, chunk_start, viz_dir / f"{chunk_name}.{format}", format
+                )
+                
+                if not chunk_success:
+                    success = False
+                    continue
+                
+                # Create site support overlays
+                if layout in ["single", "auto"] and num_clades <= 5:
+                    # All clades in one overlay below alignment
+                    overlay_success = self._create_combined_site_overlay(
+                        site_data_by_clade, chunk_start, chunk_end, 
+                        viz_dir / f"{chunk_name}_support.{format}", format
+                    )
+                else:
+                    # Separate overlay per clade
+                    overlay_success = True
+                    for clade_id, site_data in site_data_by_clade.items():
+                        clade_success = self._create_single_clade_overlay(
+                            clade_id, site_data, chunk_start, chunk_end,
+                            viz_dir / f"{chunk_name}_support_{clade_id}.{format}", format
+                        )
+                        if not clade_success:
+                            overlay_success = False
+                
+                if not overlay_success:
+                    success = False
+            
+            # Create summary file
+            self._create_visualization_summary(viz_dir, num_sites, num_clades, len(chunks), layout)
+            
+            if success:
+                logger.info(f"Created alignment visualizations in {viz_dir}")
+            
+            return success
+            
+        except Exception as e:
+            logger.error(f"Failed to create alignment visualization: {e}")
+            return False
+    
+    def _determine_layout_strategy(self, num_sites: int, num_clades: int) -> str:
+        """
+        Determine optimal layout strategy based on dataset size.
+        
+        Args:
+            num_sites: Number of alignment sites
+            num_clades: Number of clades to visualize
+            
+        Returns:
+            Layout strategy ("single" or "separate")
+        """
+        if num_sites <= 500 and num_clades <= 5:
+            return "single"
+        else:
+            return "separate"
+    
+    def _chunk_alignment(self, alignment, chunk_size: int) -> List[Tuple[int, int, Any]]:
+        """
+        Split alignment into chunks for large datasets.
+        
+        Args:
+            alignment: BioPython alignment object
+            chunk_size: Maximum sites per chunk
+            
+        Returns:
+            List of tuples (start_pos, end_pos, chunk_alignment)
+        """
+        alignment_length = alignment.get_alignment_length()
+        
+        if alignment_length <= chunk_size:
+            return [(0, alignment_length, alignment)]
+        
+        chunks = []
+        overlap = 100  # Sites to overlap between chunks
+        
+        start = 0
+        while start < alignment_length:
+            end = min(start + chunk_size, alignment_length)
+            
+            # Create chunk alignment
+            chunk_records = []
+            for record in alignment:
+                chunk_seq = record.seq[start:end]
+                chunk_record = record[:]  # Copy record
+                chunk_record.seq = chunk_seq
+                chunk_records.append(chunk_record)
+            
+            # Create alignment object for chunk
+            from Bio.Align import MultipleSeqAlignment
+            chunk_alignment = MultipleSeqAlignment(chunk_records)
+            
+            chunks.append((start, end, chunk_alignment))
+            
+            # Move start position with overlap
+            start = end - overlap
+            if start >= alignment_length - overlap:
+                break
+        
+        return chunks
+    
+    def _create_alignment_image(self, alignment, start_pos: int, output_path: Path, format: str) -> bool:
+        """
+        Create colored alignment image.
+        
+        Args:
+            alignment: BioPython alignment object (chunk)
+            start_pos: Starting position in original alignment
+            output_path: Path to save image
+            format: Output format
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            # Determine data type and color scheme
+            color_scheme = self._get_color_scheme(alignment)
+            
+            # Convert alignment to numeric matrix
+            matrix = self._alignment_to_matrix(alignment, color_scheme)
+            
+            # Create figure
+            height = len(alignment)
+            width = alignment.get_alignment_length()
+            
+            # Scale figure size based on alignment dimensions
+            fig_width = min(max(width / 100, 8), 20)  # 8-20 inches wide
+            fig_height = min(max(height / 10, 4), 12)  # 4-12 inches tall
+            
+            fig, ax = plt.subplots(figsize=(fig_width, fig_height))
+            
+            # Create image
+            im = ax.imshow(matrix, aspect='auto', interpolation='nearest')
+            
+            # Set colormap based on data type
+            if 'dna' in color_scheme:
+                colors = ['white', 'red', 'blue', 'green', 'yellow']  # Gap, A, T, G, C
+                cmap = plt.matplotlib.colors.ListedColormap(colors)
+                im.set_cmap(cmap)
+            
+            # Set labels
+            ax.set_xlabel(f"Alignment Position (starting from {start_pos + 1})")
+            ax.set_ylabel("Sequences")
+            ax.set_title(f"Multiple Sequence Alignment Visualization")
+            
+            # Set sequence labels
+            seq_names = [record.id for record in alignment]
+            ax.set_yticks(range(len(seq_names)))
+            ax.set_yticklabels(seq_names, fontsize=8)
+            
+            # Adjust tick frequency for readability
+            if width > 100:
+                tick_interval = max(width // 20, 10)
+                tick_positions = range(0, width, tick_interval)
+                ax.set_xticks(tick_positions)
+                ax.set_xticklabels([str(start_pos + pos + 1) for pos in tick_positions])
+            
+            # Save plot
+            plt.tight_layout()
+            plt.savefig(str(output_path), dpi=self.dpi, format=format, bbox_inches='tight')
+            plt.close()
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to create alignment image: {e}")
+            return False
+    
+    def _create_combined_site_overlay(self, site_data_by_clade: Dict[str, Dict[int, Dict[str, Any]]], 
+                                    start_pos: int, end_pos: int, output_path: Path, format: str) -> bool:
+        """
+        Create combined site support overlay for all clades.
+        
+        Args:
+            site_data_by_clade: Site data for all clades
+            start_pos: Start position in alignment
+            end_pos: End position in alignment
+            output_path: Path to save overlay
+            format: Output format
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            num_clades = len(site_data_by_clade)
+            fig, axes = plt.subplots(num_clades, 1, figsize=(12, 2 * num_clades), sharex=True)
+            
+            if num_clades == 1:
+                axes = [axes]
+            
+            for i, (clade_id, site_data) in enumerate(site_data_by_clade.items()):
+                # Filter sites in chunk range
+                chunk_sites = {pos: data for pos, data in site_data.items() 
+                              if start_pos <= pos < end_pos}
+                
+                if chunk_sites:
+                    self._plot_site_support_bars(axes[i], chunk_sites, start_pos, clade_id)
+                else:
+                    axes[i].text(0.5, 0.5, f"No site data for {clade_id}", 
+                               transform=axes[i].transAxes, ha='center', va='center')
+            
+            plt.xlabel(f"Alignment Position (starting from {start_pos + 1})")
+            plt.suptitle("Site-specific Branch Support")
+            plt.tight_layout()
+            plt.savefig(str(output_path), dpi=self.dpi, format=format, bbox_inches='tight')
+            plt.close()
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to create combined site overlay: {e}")
+            return False
+    
+    def _create_single_clade_overlay(self, clade_id: str, site_data: Dict[int, Dict[str, Any]], 
+                                   start_pos: int, end_pos: int, output_path: Path, format: str) -> bool:
+        """
+        Create site support overlay for single clade.
+        
+        Args:
+            clade_id: Clade identifier
+            site_data: Site-specific data for the clade
+            start_pos: Start position in alignment
+            end_pos: End position in alignment
+            output_path: Path to save overlay
+            format: Output format
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            # Filter sites in chunk range
+            chunk_sites = {pos: data for pos, data in site_data.items() 
+                          if start_pos <= pos < end_pos}
+            
+            if not chunk_sites:
+                logger.warning(f"No site data for {clade_id} in range {start_pos}-{end_pos}")
+                return False
+            
+            fig, ax = plt.subplots(figsize=(12, 3))
+            self._plot_site_support_bars(ax, chunk_sites, start_pos, clade_id)
+            
+            plt.xlabel(f"Alignment Position (starting from {start_pos + 1})")
+            plt.title(f"Site-specific Support for {clade_id}")
+            plt.tight_layout()
+            plt.savefig(str(output_path), dpi=self.dpi, format=format, bbox_inches='tight')
+            plt.close()
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to create single clade overlay for {clade_id}: {e}")
+            return False
+    
+    def _plot_site_support_bars(self, ax, site_data: Dict[int, Dict[str, Any]], 
+                               start_pos: int, clade_id: str):
+        """
+        Plot site support bars on given axis.
+        
+        Args:
+            ax: Matplotlib axis
+            site_data: Site-specific data
+            start_pos: Starting position offset
+            clade_id: Clade identifier
+        """
+        sites = sorted(site_data.keys())
+        delta_values = [site_data[site].get('delta_lnL', 0.0) for site in sites]
+        
+        # Adjust site positions relative to chunk start
+        plot_positions = [site - start_pos for site in sites]
+        
+        # Create bar colors based on support
+        colors = ['green' if delta > 0 else 'red' for delta in delta_values]
+        
+        # Plot bars
+        bars = ax.bar(plot_positions, delta_values, color=colors, alpha=0.7, width=1.0)
+        
+        # Add horizontal line at y=0
+        ax.axhline(y=0, color='black', linestyle='-', alpha=0.3)
+        
+        # Set labels
+        ax.set_ylabel("ΔlnL")
+        ax.set_title(f"{clade_id}")
+        ax.grid(True, alpha=0.3)
+        
+        # Add summary statistics
+        supporting = sum(1 for d in delta_values if d > 0)
+        conflicting = sum(1 for d in delta_values if d < 0)
+        ax.text(0.02, 0.98, f"Support: {supporting} | Conflict: {conflicting}", 
+               transform=ax.transAxes, fontsize=9, verticalalignment='top',
+               bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8))
+    
+    def _get_color_scheme(self, alignment) -> Dict[str, int]:
+        """
+        Determine appropriate color scheme based on alignment content.
+        
+        Args:
+            alignment: BioPython alignment object
+            
+        Returns:
+            Dictionary mapping characters to numeric codes
+        """
+        # Sample first sequence to determine data type
+        sample_seq = str(alignment[0].seq).upper()
+        
+        # Check for DNA
+        dna_chars = set('ATGC')
+        if set(sample_seq.replace('-', '').replace('N', '')) <= dna_chars:
+            return {
+                'dna': True,
+                '-': 0, 'N': 0,  # Gaps and ambiguous
+                'A': 1, 'T': 2, 'G': 3, 'C': 4
+            }
+        
+        # Default to discrete character mapping
+        all_chars = set()
+        for record in alignment:
+            all_chars.update(str(record.seq).upper())
+        
+        color_map = {'discrete': True}
+        for i, char in enumerate(sorted(all_chars)):
+            color_map[char] = i
+        
+        return color_map
+    
+    def _alignment_to_matrix(self, alignment, color_scheme: Dict[str, int]) -> np.ndarray:
+        """
+        Convert alignment to numeric matrix for visualization.
+        
+        Args:
+            alignment: BioPython alignment object
+            color_scheme: Character to number mapping
+            
+        Returns:
+            Numeric matrix representing alignment
+        """
+        height = len(alignment)
+        width = alignment.get_alignment_length()
+        matrix = np.zeros((height, width), dtype=int)
+        
+        for i, record in enumerate(alignment):
+            seq_str = str(record.seq).upper()
+            for j, char in enumerate(seq_str):
+                matrix[i, j] = color_scheme.get(char, 0)  # Default to 0 for unknown chars
+        
+        return matrix
+    
+    def _create_visualization_summary(self, viz_dir: Path, num_sites: int, 
+                                    num_clades: int, num_chunks: int, layout: str):
+        """
+        Create summary file describing the visualization outputs.
+        
+        Args:
+            viz_dir: Visualization directory
+            num_sites: Total number of sites
+            num_clades: Number of clades
+            num_chunks: Number of chunks created
+            layout: Layout strategy used
+        """
+        summary_path = viz_dir / "visualization_summary.txt"
+        
+        with open(summary_path, 'w') as f:
+            f.write("Alignment Visualization Summary\n")
+            f.write("=" * 35 + "\n\n")
+            f.write(f"Total alignment sites: {num_sites}\n")
+            f.write(f"Number of clades analyzed: {num_clades}\n")
+            f.write(f"Number of visualization chunks: {num_chunks}\n")
+            f.write(f"Layout strategy: {layout}\n\n")
+            
+            f.write("Files created:\n")
+            f.write("-" * 15 + "\n")
+            
+            if num_chunks == 1:
+                f.write("• alignment_full.png - Main alignment visualization\n")
+                if layout == "single":
+                    f.write("• alignment_full_support.png - Combined site support overlay\n")
+                else:
+                    f.write("• alignment_full_support_<clade>.png - Individual clade support overlays\n")
+            else:
+                f.write("• alignment_chunk_N_sites_X-Y.png - Alignment chunks\n")
+                if layout == "single":
+                    f.write("• alignment_chunk_N_sites_X-Y_support.png - Combined support overlays\n")
+                else:
+                    f.write("• alignment_chunk_N_sites_X-Y_support_<clade>.png - Individual clade overlays\n")
+            
+            f.write("\nColor scheme:\n")
+            f.write("-" * 15 + "\n")
+            f.write("• Green bars: Sites supporting the branch (positive ΔlnL)\n")
+            f.write("• Red bars: Sites conflicting with the branch (negative ΔlnL)\n")
+            f.write("• Bar height: Proportional to |ΔlnL| magnitude\n")
+
     def check_matplotlib_availability(self) -> bool:
         """
         Check if matplotlib is available for plotting.

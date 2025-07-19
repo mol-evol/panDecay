@@ -7302,6 +7302,67 @@ class panDecayIndices:
         except ImportError: logger.error("Matplotlib/Seaborn not found for visualization.")
         except Exception as e: logger.error(f"Failed support distribution plot: {e}")
 
+    def create_alignment_visualization(self, output_dir: Path, chunk_size: int = 2000, 
+                                     layout: str = "auto", format: str = "png") -> bool:
+        """
+        Create alignment visualization with site-specific support overlays.
+        
+        Args:
+            output_dir: Directory to save visualization files
+            chunk_size: Maximum sites per visualization chunk
+            layout: Layout mode ("auto", "single", "separate")
+            format: Output format (png, pdf, svg)
+            
+        Returns:
+            True if visualizations created successfully, False otherwise
+        """
+        if not hasattr(self, 'alignment') or self.alignment is None:
+            logger.error("No alignment available for visualization")
+            return False
+        
+        if not self.decay_indices:
+            logger.error("No decay indices available for site visualization")
+            return False
+        
+        # Collect site data for all clades that have it
+        site_data_by_clade = {}
+        for clade_id, data in self.decay_indices.items():
+            if 'site_data' in data and data['site_data']:
+                site_data_by_clade[clade_id] = data['site_data']
+        
+        if not site_data_by_clade:
+            logger.warning("No site-specific data available for alignment visualization")
+            return False
+        
+        # Use PlotManager to create the visualization
+        try:
+            plot_manager = self._get_plot_manager()
+            if not plot_manager.check_matplotlib_availability():
+                logger.error("Matplotlib not available for alignment visualization")
+                return False
+            
+            success = plot_manager.create_alignment_visualization(
+                alignment=self.alignment,
+                site_data_by_clade=site_data_by_clade,
+                output_dir=output_dir,
+                chunk_size=chunk_size,
+                layout=layout,
+                format=format
+            )
+            
+            return success
+            
+        except Exception as e:
+            logger.error(f"Failed to create alignment visualization: {e}")
+            return False
+    
+    def _get_plot_manager(self):
+        """Get or create PlotManager instance."""
+        if not hasattr(self, '_plot_manager'):
+            from visualization.plot_manager import PlotManager
+            self._plot_manager = PlotManager()
+        return self._plot_manager
+
 
     def cleanup_intermediate_files(self):
         """
@@ -8263,6 +8324,9 @@ def _create_argument_parser():
     parser.add_argument("--output", default="pan_decay_indices.txt", help="Output file for summary results.")
     parser.add_argument("--tree", default="annotated_tree", help="Base name for annotated tree files. Three trees will be generated with suffixes: _au.nwk (AU p-values), _delta_lnl.nwk (likelihood differences), and _combined.nwk (both values).")
     parser.add_argument("--site-analysis", action="store_true", help="Perform site-specific likelihood analysis to identify supporting/conflicting sites for each branch.")
+    parser.add_argument("--create-alignment-viz", action="store_true", help="Create alignment visualization with site-specific support overlays (requires --site-analysis).")
+    parser.add_argument("--viz-chunk-size", type=int, default=2000, help="Maximum sites per alignment visualization chunk (default: 2000).")
+    parser.add_argument("--viz-layout", choices=["auto", "single", "separate"], default="auto", help="Layout strategy for visualization: auto (adaptive), single (all clades together), separate (individual clade files).")
     parser.add_argument("--data-type", default="dna", choices=["dna", "protein", "discrete"], help="Type of sequence data.")
     
     # Batch processing options
@@ -8501,6 +8565,10 @@ def main() -> None:
     # Convert data_type to lowercase to handle case-insensitive input
     args.data_type = args.data_type.lower()
     
+    # Validate alignment visualization arguments
+    if args.create_alignment_viz and not args.site_analysis:
+        parser.error("--create-alignment-viz requires --site-analysis to be enabled")
+    
     # Validate Bayesian analysis arguments - bayesian_software now has a default
     # No validation needed since default is "mrbayes"
     
@@ -8564,6 +8632,27 @@ def main() -> None:
                         site_output_dir = Path(args.output).parent / f"{Path(args.output).stem}_site_analysis"
                         decay_calc.write_site_analysis_results(site_output_dir)
                         logger.info(f"Site-specific analysis results written to {get_display_path(site_output_dir)}")
+                        
+                        # Create alignment visualization if requested
+                        if args.create_alignment_viz:
+                            logger.info("Creating alignment visualization with site-specific support overlays...")
+                            try:
+                                success = decay_calc.create_alignment_visualization(
+                                    output_dir=Path(args.output).parent,
+                                    chunk_size=args.viz_chunk_size,
+                                    layout=args.viz_layout,
+                                    format=args.viz_format
+                                )
+                                if success:
+                                    viz_dir = Path(args.output).parent / "alignment_visualization"
+                                    logger.info(f"Alignment visualizations created in {get_display_path(viz_dir)}")
+                                else:
+                                    logger.error("Failed to create alignment visualizations")
+                            except Exception as e:
+                                logger.error(f"Error creating alignment visualization: {e}")
+                                if args.debug:
+                                    logger.exception("Full traceback:")
+                        
                         break  # Only need to do this once if any site_data exists
 
             output_main_path = Path(args.output)
@@ -8611,6 +8700,26 @@ def main() -> None:
                     site_output_dir = output_main_path.parent / f"{output_main_path.stem}_site_analysis"
                     decay_calc.write_site_analysis_results(site_output_dir)
                     logger.info(f"Site-specific analysis results written to {get_display_path(site_output_dir)}")
+                    
+                    # Create alignment visualization if requested
+                    if args.create_alignment_viz:
+                        logger.info("Creating alignment visualization with site-specific support overlays...")
+                        try:
+                            success = decay_calc.create_alignment_visualization(
+                                output_dir=output_main_path.parent,
+                                chunk_size=args.viz_chunk_size,
+                                layout=args.viz_layout,
+                                format=args.viz_format
+                            )
+                            if success:
+                                viz_dir = output_main_path.parent / "alignment_visualization"
+                                logger.info(f"Alignment visualizations created in {get_display_path(viz_dir)}")
+                            else:
+                                logger.error("Failed to create alignment visualizations")
+                        except Exception as e:
+                            logger.error(f"Error creating alignment visualization: {e}")
+                            if args.debug:
+                                logger.exception("Full traceback:")
 
             decay_calc.cleanup_intermediate_files()
             
