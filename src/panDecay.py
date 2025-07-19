@@ -5446,8 +5446,14 @@ class panDecayIndices:
         try:
             has_bootstrap = hasattr(self, 'bootstrap_tree') and self.bootstrap_tree
             
+            # Convert Tree object to string for annotation
+            import io
+            tree_string = io.StringIO()
+            Phylo.write(self.ml_tree, tree_string, "newick")
+            ml_tree_string = tree_string.getvalue().strip()
+            
             tree_files = self.tree_annotator.annotate_trees(
-                self.ml_tree,
+                ml_tree_string,
                 self.decay_indices,
                 output_dir,
                 base_filename,
