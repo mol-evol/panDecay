@@ -10,9 +10,12 @@ This package contains the main orchestration classes and utilities:
 
 from .analysis_coordinator import AnalysisCoordinator
 from .utils import format_taxon_for_paup, get_representative_taxa_sample
+from .progress_logger import ProgressLogger, FileTracker
 
 __all__ = [
     'AnalysisCoordinator',
     'format_taxon_for_paup',
-    'get_representative_taxa_sample'
+    'get_representative_taxa_sample',
+    'ProgressLogger',
+    'FileTracker'
 ]

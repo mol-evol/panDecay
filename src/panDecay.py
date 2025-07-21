@@ -55,6 +55,7 @@ try:
     from .analysis import MLAnalysisEngine, BayesianAnalysisEngine, ParsimonyAnalysisEngine
     from .io import OutputManager, TreeAnnotator, ReportGenerator
     from .visualization import PlotManager
+    from .core import ProgressLogger, FileTracker
     HAS_MODULAR_ARCHITECTURE = True
 except ImportError:
     try:
@@ -69,9 +70,27 @@ except ImportError:
         from report_generator import ReportGenerator
         sys.path.pop(0)
         from visualization import PlotManager
+        from core import ProgressLogger, FileTracker
         HAS_MODULAR_ARCHITECTURE = True
     except ImportError as e:
         HAS_MODULAR_ARCHITECTURE = False
+        # Create simple fallback classes if needed
+        class ProgressLogger:
+            def __init__(self, *args, **kwargs): pass
+            def progress(self, *args, **kwargs): pass
+            def complete(self, *args, **kwargs): pass
+            def info(self, msg): print(msg)
+            def warning(self, msg): print(f"⚠️  {msg}")
+            def error(self, msg): print(f"❌ {msg}")
+            def section_header(self, title): print(f"\n{title}\n{'-' * len(title)}")
+            def file_summary(self, *args, **kwargs): pass
+            
+        class FileTracker:
+            def __init__(self, *args, **kwargs): pass
+            def get_organized_path(self, category, filename): return Path(filename)
+            def track_file(self, *args, **kwargs): pass
+            def get_summary(self): return {}
+        
         logger = logging.getLogger(__name__)
         logger.warning(f"Modular architecture components not available: {e}. Falling back to monolithic design.")
 
@@ -1462,6 +1481,10 @@ class panDecayIndices:
         self.ml_tree = None
         self.ml_likelihood = None
         self.decay_indices = {}
+        
+        # Initialize progress logging and file tracking
+        self.progress = ProgressLogger(show_progress=True, verbose=self.debug)
+        self.file_tracker = None  # Will be initialized when we know output path
 
     def __del__(self):
         """Cleans up temporary files if TemporaryDirectory object was used."""
@@ -1587,7 +1610,6 @@ class panDecayIndices:
             # self.paup_model_cmds is the user's raw block content
             # Assume it sets threads, model, criterion, etc.
             return self.paup_model_cmds # Return as is, for direct insertion
-
 
     def build_ml_tree(self):
         logger.info("Building maximum likelihood tree...")
@@ -8631,35 +8653,6 @@ def main() -> None:
             needs_site_analysis = args.site_analysis
             decay_calc.calculate_decay_indices(perform_site_analysis=needs_site_analysis)
 
-            # Add this new code snippet here
-            if hasattr(decay_calc, 'decay_indices') and decay_calc.decay_indices:
-                for clade_id, data in decay_calc.decay_indices.items():
-                    if 'site_data' in data:
-                        site_output_dir = Path(args.output).parent / f"{Path(args.output).stem}_site_analysis"
-                        decay_calc.write_site_analysis_results(site_output_dir)
-                        logger.info(f"Site-specific analysis results written to {get_display_path(site_output_dir)}")
-                        
-                        # Create alignment visualization if requested
-                        if args.create_alignment_viz:
-                            logger.info("Creating alignment visualization with site-specific support overlays...")
-                            try:
-                                success = decay_calc.create_alignment_visualization(
-                                    output_dir=Path(args.output).parent,
-                                    chunk_size=args.viz_chunk_size,
-                                    layout=args.viz_layout,
-                                    format=args.viz_format
-                                )
-                                if success:
-                                    viz_dir = Path(args.output).parent / "alignment_visualization"
-                                    logger.info(f"Alignment visualizations created in {get_display_path(viz_dir)}")
-                                else:
-                                    logger.error("Failed to create alignment visualizations")
-                            except Exception as e:
-                                logger.error(f"Error creating alignment visualization: {e}")
-                                if args.debug:
-                                    logger.exception("Full traceback:")
-                        
-                        break  # Only need to do this once if any site_data exists
 
             output_main_path = Path(args.output)
             decay_calc.write_formatted_results(output_main_path)
