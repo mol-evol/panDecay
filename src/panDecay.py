@@ -4303,18 +4303,26 @@ class panDecayIndices:
         if not perform_site_analysis:
             return
             
-        logger.info("Performing site-specific likelihood analysis for each branch...")
+        total_clades = len([cdata for cdata in constraint_info_map.values() if cdata.get('tree_filename')])
+        self.progress.section_header("Site-Specific Likelihood Analysis")
+        self.progress.info(f"Analyzing {total_clades} branches...")
         
+        current_clade = 0
         for clade_id, cdata in list(constraint_info_map.items()):
             rel_constr_tree_fn = cdata.get('tree_filename')
             
             if rel_constr_tree_fn:
+                current_clade += 1
+                self.progress.progress(f"Processing {clade_id}", current_clade, total_clades)
+                
                 tree_files = [ML_TREE_FN, rel_constr_tree_fn]
-                site_analysis_result = self._calculate_site_likelihoods(tree_files, clade_id)
+                site_analysis_result = self._calculate_site_likelihoods(tree_files, clade_id, verbose=False)
                 
                 if site_analysis_result:
                     # Store all site analysis data
                     constraint_info_map[clade_id].update(site_analysis_result)
+                    
+        self.progress.complete(f"Site analysis completed for {current_clade} branches")
 
     def _run_au_test_and_process_results(self, all_tree_files_rel: List[str], constraint_info_map: Dict[str, Dict[str, Any]]) -> None:
         """Run AU test and process the results."""
@@ -5102,7 +5110,7 @@ class panDecayIndices:
                 support_ratio = supporting_sites / conflicting_sites if conflicting_sites > 0 else float('inf')
 
                 if verbose:
-                    logger.info(f"Branch {branch_id}: {len(site_data)} sites → {supporting_sites} support/{conflicting_sites} conflict (raw ratio: {support_ratio:.2f}) | δ: {sum_supporting_delta:.2f}/{sum_conflicting_delta:.2f} (δ-ratio: {weighted_support_ratio:.2f})")
+                    self.progress.info(f"Branch {branch_id}: {len(site_data)} sites → {supporting_sites} support/{conflicting_sites} conflict (ratio: {support_ratio:.2f})")
 
                 # Return a comprehensive dictionary with all info
                 return {
@@ -6037,6 +6045,12 @@ class panDecayIndices:
             # Fall back to original method for minimal style
             return self.write_results(output_path)
         
+        # Use FileTracker if available for organized output
+        if hasattr(self, 'file_tracker') and self.file_tracker:
+            organized_path = self.file_tracker.get_organized_path('results', output_path.name)
+            self.file_tracker.track_file('results', organized_path, 'Main analysis results')
+            output_path = organized_path
+            
         output_path.parent.mkdir(parents=True, exist_ok=True)
         
         # Check which types of results we have
@@ -6411,6 +6425,11 @@ class panDecayIndices:
 
     def generate_detailed_report(self, output_path: Path):
         """Generate a detailed analysis report in markdown format."""
+        # Use FileTracker if available for organized output
+        if hasattr(self, 'file_tracker') and self.file_tracker:
+            organized_path = self.file_tracker.get_organized_path('reports', output_path.name)
+            self.file_tracker.track_file('reports', organized_path, 'Detailed analysis report')
+            output_path = organized_path
         # Basic check
         if not self.decay_indices and self.ml_likelihood is None and not hasattr(self, 'bayes_marginal_likelihood'):
             logger.warning("No results available to generate detailed report.")
@@ -7149,6 +7168,16 @@ class panDecayIndices:
             # Get visualization format 
             viz_format = getattr(self, 'viz_format', 'png')
 
+            # Count total visualizations to create
+            viz_clades = [clade_id for clade_id, data in self.decay_indices.items() 
+                         if 'site_data' in data and data.get('site_data')]
+            total_viz = len(viz_clades)
+            
+            if total_viz > 0:
+                self.progress.section_header("Site Analysis Visualizations")
+                self.progress.info(f"Creating plots for {total_viz} clades...")
+                current_viz = 0
+
             for clade_id, data in self.decay_indices.items():
                 if 'site_data' not in data:
                     continue
@@ -7164,9 +7193,15 @@ class panDecayIndices:
                 if not deltas:
                     continue
 
+                current_viz += 1
+                self.progress.progress(f"Plotting {clade_id}", current_viz, total_viz)
+
                 # Generate main plot and histogram
                 self._create_site_analysis_plot(clade_id, data, site_nums, deltas, output_dir, viz_format)
                 self._create_site_histogram(clade_id, deltas, output_dir, viz_format)
+                
+            if total_viz > 0:
+                self.progress.complete(f"Site analysis plots completed for {current_viz} clades")
 
                 # Clean up tree files if needed
                 self._cleanup_site_analysis_files(output_dir)
@@ -8000,6 +8035,9 @@ def process_single_alignment(args_dict: Dict[str, Any]) -> Dict[str, Any]:
         # Create panDecayIndices instance and run analysis
         decay_calc = create_decay_calc_from_args(args_copy)
         
+        # Initialize file tracker for organized output
+        decay_calc.file_tracker = FileTracker(output_path=output_dir, base_name=alignment_name)
+        
         # Run the analysis
         decay_calc.build_ml_tree()
         
@@ -8756,12 +8794,22 @@ def main() -> None:
                     logger.info(f"Weak Support (p≥0.05): {weak}/{total_branches} branches")
             
             logger.info("")
-            logger.info("OUTPUT FILES:")
-            logger.info(f"Results: {get_display_path(output_main_path)}")
-            if hasattr(decay_calc, 'tree_files_created') and decay_calc.tree_files_created:
-                logger.info(f"Trees: {len(decay_calc.tree_files_created)} annotated tree files")
-            if args.visualize:
-                logger.info(f"Plots: Visualization files created")
+            # Show organized file summary if FileTracker is available
+            if hasattr(decay_calc, 'file_tracker') and decay_calc.file_tracker:
+                logger.info("OUTPUT DIRECTORY:")
+                logger.info(f"Results organized in: {get_display_path(decay_calc.file_tracker.base_path)}")
+                
+                summary = decay_calc.file_tracker.get_summary()
+                for category, files in summary.items():
+                    if files:
+                        logger.info(f"  {category.title()}: {len(files)} files")
+            else:
+                logger.info("OUTPUT FILES:")
+                logger.info(f"Results: {get_display_path(output_main_path)}")
+                if hasattr(decay_calc, 'tree_files_created') and decay_calc.tree_files_created:
+                    logger.info(f"Trees: {len(decay_calc.tree_files_created)} annotated tree files")
+                if args.visualize:
+                    logger.info(f"Plots: Visualization files created")
             
             logger.info("")
             logger.info("Analysis completed successfully!")
