@@ -5482,13 +5482,29 @@ class panDecayIndices:
             Phylo.write(self.ml_tree, tree_string, "newick")
             ml_tree_string = tree_string.getvalue().strip()
             
-            tree_files = self.tree_annotator.annotate_trees(
-                ml_tree_string,
-                self.decay_indices,
-                output_dir,
-                base_filename,
-                has_bootstrap
-            )
+            # Use FileTracker if available for organized output
+            if hasattr(self, 'file_tracker') and self.file_tracker:
+                # Create organized directory for trees
+                organized_output_dir = self.file_tracker.base_path / 'trees'
+                organized_output_dir.mkdir(parents=True, exist_ok=True)
+                tree_files = self.tree_annotator.annotate_trees(
+                    ml_tree_string,
+                    self.decay_indices,
+                    organized_output_dir,
+                    base_filename,
+                    has_bootstrap
+                )
+                # Track the created files
+                for tree_type, tree_path in tree_files.items():
+                    self.file_tracker.track_file('trees', tree_path, f'{tree_type} tree')
+            else:
+                tree_files = self.tree_annotator.annotate_trees(
+                    ml_tree_string,
+                    self.decay_indices,
+                    output_dir,
+                    base_filename,
+                    has_bootstrap
+                )
             
             logger.info(f"Created {len(tree_files)} annotated tree files using modular annotator")
             return tree_files
@@ -8707,6 +8723,12 @@ def main() -> None:
     try:
         # Use shared function to create decay calculator
         decay_calc = create_decay_calc_from_args(args)
+        
+        # Initialize file tracker for organized output
+        alignment_path = Path(args.alignment)
+        alignment_name = alignment_path.stem
+        output_dir = Path(args.output).resolve().parent
+        decay_calc.file_tracker = FileTracker(output_path=output_dir, base_name=alignment_name)
 
         decay_calc.build_ml_tree() # Can raise exceptions
 
