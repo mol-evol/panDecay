@@ -5511,12 +5511,21 @@ class panDecayIndices:
 
         try:
             # Create AU p-value annotated tree
-            au_tree_path = output_dir / f"{base_filename}_au.nwk"
+            if hasattr(self, 'file_tracker') and self.file_tracker:
+                au_tree_path = self.file_tracker.get_organized_path('trees', f"{base_filename}_au.nwk")
+                self.file_tracker.track_file('trees', au_tree_path, 'AU p-value annotated tree')
+            else:
+                output_dir.mkdir(parents=True, exist_ok=True)
+                au_tree_path = output_dir / f"{base_filename}_au.nwk"
             if self._create_au_annotated_tree(au_tree_path):
                 tree_files['au'] = au_tree_path
 
             # Create log-likelihood difference annotated tree
-            lnl_tree_path = output_dir / f"{base_filename}_delta_lnl.nwk"
+            if hasattr(self, 'file_tracker') and self.file_tracker:
+                lnl_tree_path = self.file_tracker.get_organized_path('trees', f"{base_filename}_delta_lnl.nwk")
+                self.file_tracker.track_file('trees', lnl_tree_path, 'Log-likelihood difference annotated tree')
+            else:
+                lnl_tree_path = output_dir / f"{base_filename}_delta_lnl.nwk"
             try:
                 temp_tree_for_lnl = self.temp_path / f"ml_tree_for_lnl_annotation.nwk"
                 Phylo.write(self.ml_tree, str(temp_tree_for_lnl), "newick")
@@ -5550,7 +5559,11 @@ class panDecayIndices:
                 logger.error(f"Failed to create LNL tree: {e}")
 
             # Create combined annotation tree for FigTree
-            combined_tree_path = output_dir / f"{base_filename}_combined.nwk"
+            if hasattr(self, 'file_tracker') and self.file_tracker:
+                combined_tree_path = self.file_tracker.get_organized_path('trees', f"{base_filename}_combined.nwk")
+                self.file_tracker.track_file('trees', combined_tree_path, 'Combined annotation tree')
+            else:
+                combined_tree_path = output_dir / f"{base_filename}_combined.nwk"
             try:
                 # For the combined approach, we'll directly modify the Newick string
                 # First, get both trees as strings
@@ -7083,7 +7096,11 @@ class panDecayIndices:
         Args:
             output_dir: Directory to save the summary file
         """
-        summary_path = output_dir / "site_analysis_summary.txt"
+        if hasattr(self, 'file_tracker') and self.file_tracker:
+            summary_path = self.file_tracker.get_organized_path('site_analysis', "site_analysis_summary.txt")
+            self.file_tracker.track_file('site_analysis', summary_path, 'Site analysis summary')
+        else:
+            summary_path = output_dir / "site_analysis_summary.txt"
         with summary_path.open('w') as f:
             f.write("Branch Site Analysis Summary\n")
             f.write("=========================\n\n")
@@ -7126,7 +7143,11 @@ class panDecayIndices:
             if 'site_data' not in data:
                 continue
 
-            site_data_path = output_dir / f"site_data_{clade_id}.txt"
+            if hasattr(self, 'file_tracker') and self.file_tracker:
+                site_data_path = self.file_tracker.get_organized_path('site_analysis', f"site_data_{clade_id}.txt")
+                self.file_tracker.track_file('site_analysis', site_data_path, f'Site data for {clade_id}')
+            else:
+                site_data_path = output_dir / f"site_data_{clade_id}.txt"
             with site_data_path.open('w') as f:
                 f.write(f"Site-Specific Likelihood Analysis for {clade_id}\n")
                 f.write("=" * 50 + "\n\n")
@@ -7287,7 +7308,11 @@ class panDecayIndices:
         plt.tight_layout()
 
         # Save plot in the requested format
-        plot_path = output_dir / f"site_plot_{clade_id}.{viz_format}"
+        if hasattr(self, 'file_tracker') and self.file_tracker:
+            plot_path = self.file_tracker.get_organized_path('visualizations', f"site_plot_{clade_id}.{viz_format}")
+            self.file_tracker.track_file('visualizations', plot_path, f'Site analysis plot for {clade_id}')
+        else:
+            plot_path = output_dir / f"site_plot_{clade_id}.{viz_format}"
         plt.savefig(str(plot_path), dpi=150, format=viz_format)
         plt.close(fig)
 
@@ -7313,7 +7338,11 @@ class panDecayIndices:
         plt.xlabel("Delta lnL (ML - Constrained)")
         plt.tight_layout()
 
-        hist_path = output_dir / f"site_hist_{clade_id}.{viz_format}"
+        if hasattr(self, 'file_tracker') and self.file_tracker:
+            hist_path = self.file_tracker.get_organized_path('visualizations', f"site_hist_{clade_id}.{viz_format}")
+            self.file_tracker.track_file('visualizations', hist_path, f'Site histogram for {clade_id}')
+        else:
+            hist_path = output_dir / f"site_hist_{clade_id}.{viz_format}"
         plt.savefig(str(hist_path), dpi=150, format=viz_format)
         plt.close()
 

@@ -186,22 +186,31 @@ class FileTracker:
     Tracks files created during analysis for organized output summary.
     """
     
-    def __init__(self, base_output_path: Path):
+    def __init__(self, output_path: Path, base_name: str):
         """
-        Initialize file tracker.
+        Initialize file tracker with organized directory structure.
         
         Args:
-            base_output_path: Base output file path (e.g., results.txt)
+            output_path: Parent directory where organized folder will be created
+            base_name: Base name for the analysis (e.g., alignment name)
         """
-        self.base_output_path = base_output_path
-        self.base_name = base_output_path.stem
-        self.output_dir = base_output_path.parent / f"{self.base_name}_results"
+        import datetime
+        
+        # Create timestamp-based directory name
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.output_path = output_path
+        self.base_name = base_name
+        self.organized_dir_name = f"{timestamp}_panDecay_{base_name}"
+        self.base_path = output_path / self.organized_dir_name
+        
+        # Create the organized directory structure
+        self.base_path.mkdir(parents=True, exist_ok=True)
         self.files_by_category = {
-            "main_results": [],
+            "results": [],
             "trees": [],
-            "plots": [],
+            "reports": [],
+            "visualizations": [],
             "site_analysis": [],
-            "alignment_visualization": []
         }
         
     def get_organized_path(self, category: str, filename: str) -> Path:
@@ -209,33 +218,34 @@ class FileTracker:
         Get organized path for a file in the appropriate subdirectory.
         
         Args:
-            category: File category (main_results, trees, plots, etc.)
+            category: File category (results, trees, reports, etc.)
             filename: Original filename
             
         Returns:
             Organized path in appropriate subdirectory
         """
         category_dirs = {
-            "main_results": "main_results",
+            "results": "results",
             "trees": "trees",
-            "plots": "plots", 
-            "site_analysis": "site_analysis",
-            "alignment_visualization": "alignment_visualization"
+            "reports": "reports",
+            "visualizations": "visualizations", 
+            "site_analysis": "site_analysis"
         }
         
         subdir = category_dirs.get(category, "misc")
-        organized_dir = self.output_dir / subdir
+        organized_dir = self.base_path / subdir
         organized_dir.mkdir(parents=True, exist_ok=True)
         
         return organized_dir / filename
         
-    def track_file(self, category: str, filepath: Path):
+    def track_file(self, category: str, filepath: Path, description: str = ""):
         """
         Track a created file in the appropriate category.
         
         Args:
             category: File category
             filepath: Path to the created file
+            description: Optional description of the file
         """
         self.files_by_category[category].append(filepath.name)
         
