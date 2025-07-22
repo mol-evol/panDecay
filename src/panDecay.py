@@ -12,10 +12,8 @@ import shutil
 import subprocess
 import logging
 import re
-import multiprocessing
 import time
 import datetime
-import glob
 import traceback
 import threading
 from pathlib import Path
@@ -131,6 +129,51 @@ def setup_logging(debug_mode: bool = False, log_file: Optional[str] = None) -> l
     
     logger.addHandler(console_handler)
     return logger
+
+def relocate_log_file_to_organized_dir(file_tracker, current_log_file='panDecay_debug.log'):
+    """
+    Move log file from current directory to organized output directory structure.
+    
+    Args:
+        file_tracker: FileTracker instance for organized output
+        current_log_file: Current log file name in working directory
+    """
+    try:
+        current_log_path = Path(current_log_file)
+        if current_log_path.exists():
+            # Create organized log file path
+            organized_log_path = file_tracker.get_organized_path('logs', current_log_file)
+            
+            # Move the log file
+            organized_log_path.parent.mkdir(parents=True, exist_ok=True)
+            import shutil
+            shutil.move(str(current_log_path), str(organized_log_path))
+            
+            # Track the moved file
+            file_tracker.track_file('logs', organized_log_path, 'Debug log file')
+            
+            # Update the logger's file handler to point to the new location
+            global logger
+            for handler in logger.handlers:
+                if isinstance(handler, logging.FileHandler):
+                    handler.close()
+                    logger.removeHandler(handler)
+                    
+                    # Add new handler with organized path
+                    new_handler = logging.FileHandler(str(organized_log_path))
+                    file_formatter = logging.Formatter(
+                        '%(asctime)s - %(name)s - %(levelname)s - %(funcName)s:%(lineno)d - %(message)s',
+                        datefmt='%Y-%m-%d %H:%M:%S'
+                    )
+                    new_handler.setFormatter(file_formatter)
+                    new_handler.setLevel(logging.DEBUG)
+                    logger.addHandler(new_handler)
+                    break
+            
+            logger.debug(f"Log file relocated to organized directory: {organized_log_path}")
+            
+    except Exception as e:
+        logger.warning(f"Failed to relocate log file: {e}")
 
 # Initialize default logging
 logger = setup_logging(debug_mode=False, log_file='panDecay_debug.log')
@@ -1313,7 +1356,7 @@ class panDecayIndices:
             self.data_type = "dna"
 
         if threads == "auto":
-            total_cores = multiprocessing.cpu_count()
+            total_cores = os.cpu_count()
             if total_cores > MINIMUM_SYSTEM_CORES:
                 self.threads = total_cores - MINIMUM_SYSTEM_CORES # Leave cores for OS/other apps
             elif total_cores > SINGLE_CORE_FALLBACK:
@@ -1322,7 +1365,7 @@ class panDecayIndices:
                 self.threads = 1 # Use 1 core if only 1 is available
             logger.debug(f"Using 'auto' threads: PAUP* will be configured for {self.threads} thread(s) (leaving some for system).")
         elif str(threads).lower() == "all": # Add an explicit "all" option if you really want it
-            self.threads = multiprocessing.cpu_count()
+            self.threads = os.cpu_count()
             logger.warning(f"PAUP* configured to use ALL {self.threads} threads. System may become unresponsive.")
         else:
             try:
@@ -1330,9 +1373,9 @@ class panDecayIndices:
                 if self.threads < 1:
                     logger.warning(f"Thread count {self.threads} is invalid, defaulting to {THREAD_COUNT_MINIMUM}.")
                     self.threads = 1
-                elif self.threads > multiprocessing.cpu_count():
-                    logger.warning(f"Requested {self.threads} threads, but only {multiprocessing.cpu_count()} cores available. Using {multiprocessing.cpu_count()}.")
-                    self.threads = multiprocessing.cpu_count()
+                elif self.threads > os.cpu_count():
+                    logger.warning(f"Requested {self.threads} threads, but only {os.cpu_count()} cores available. Using {os.cpu_count()}.")
+                    self.threads = os.cpu_count()
             except ValueError:
                 logger.warning(f"Invalid thread count '{threads}', defaulting to {THREAD_COUNT_MINIMUM}.")
                 self.threads = 1
@@ -1515,6 +1558,8 @@ class panDecayIndices:
             elif base_model_name in ["JC", "JC69", "F81"]: cmd_parts.append(f"nst={NST_JC}")
             else:
                 logger.warning(f"Unknown DNA model: {base_model_name}, defaulting to GTR (nst={NST_GTR}).")
+                logger.warning("💡 Tip: Use --nst directly for clearer DNA model specification:")
+                logger.warning("   --nst 1 (equal rates), --nst 2 (ti/tv), --nst 6 (all rates)")
                 cmd_parts.append(f"nst={NST_GTR}")
 
             current_nst = next((p.split('=')[1] for p in cmd_parts if "nst=" in p), None)
@@ -1926,8 +1971,10 @@ class panDecayIndices:
             if self.debug:
                 logger.debug(f"MrBayes model debug - bayes_model: {self.bayes_model}, data_type: {self.data_type}")
             
-            # Determine nst parameter
-            if "GTR" in self.bayes_model.upper():
+            # Determine nst parameter (NST-first approach, consistent with PAUP*)
+            if self.nst_arg is not None:
+                nst_val = str(self.nst_arg)  # Direct NST override takes precedence
+            elif "GTR" in self.bayes_model.upper():
                 nst_val = "6"
             elif "HKY" in self.bayes_model.upper():
                 nst_val = "2"
@@ -3739,7 +3786,6 @@ class panDecayIndices:
         Returns:
             Dictionary of decay indices
         """
-        # Temporarily disable modular for testing
         if False and HAS_MODULAR_ARCHITECTURE and self.ml_engine is not None:
             return self._calculate_decay_indices_modular(perform_site_analysis)
         else:
@@ -5938,12 +5984,14 @@ class panDecayIndices:
             if has_ml:
                 f.write(" ΔlnL     │ AU p-val │ Support  │")
             if has_bayesian:
-                if self.normalize_ld and has_effect_size:
-                    f.write(" BD     │ LD/site │ LD%    │ ES     │")
-                elif self.normalize_ld:
-                    f.write(" BD     │ LD/site │ LD%    │")
-                else:
-                    f.write(" BD     │")
+                f.write(" BD     │")
+                if self.normalize_ld:
+                    if "per_site" in self.ld_normalization_methods:
+                        f.write(" LD/site │")
+                    if "relative" in self.ld_normalization_methods:
+                        f.write(" LD%    │")
+                    if has_effect_size:
+                        f.write(" ES     │")
             if has_parsimony:
                 f.write(" Decay │ Post.Prob     │" if has_posterior else " Decay                 │")
             f.write("\n")
@@ -5953,12 +6001,14 @@ class panDecayIndices:
             if has_ml:
                 f.write("──────────┼──────────┼──────────┼")
             if has_bayesian:
-                if self.normalize_ld and has_effect_size:
-                    f.write("────────┼────────┼────────┼────────┼")
-                elif self.normalize_ld:
-                    f.write("────────┼────────┼────────┼")
-                else:
-                    f.write("────────┼")
+                f.write("────────┼")
+                if self.normalize_ld:
+                    if "per_site" in self.ld_normalization_methods:
+                        f.write("────────┼")
+                    if "relative" in self.ld_normalization_methods:
+                        f.write("────────┼")
+                    if has_effect_size:
+                        f.write("────────┼")
             if has_parsimony:
                 f.write("───────┼───────────────┤" if has_posterior else "───────────────────────┤")
             f.write("\n")
@@ -5982,9 +6032,10 @@ class panDecayIndices:
             # === TABLE GENERATION DIAGNOSTIC ===
             logger.debug(f"Table data keys for {clade_id}: {list(data.keys()) if isinstance(data, dict) else 'NOT_DICT'}")
             ml_fields = {k: v for k, v in data.items() if k in ['lnl_diff', 'AU_pvalue', 'constrained_lnl', 'significant_AU']} if isinstance(data, dict) else {}
-            bayes_fields = {k: v for k, v in data.items() if k in ['bayes_decay', 'marginal_likelihood']} if isinstance(data, dict) else {}
+            bayes_fields = {k: v for k, v in data.items() if k in ['bayes_decay', 'marginal_likelihood', 'bd_per_site', 'bd_relative']} if isinstance(data, dict) else {}
             logger.debug(f"ML fields for {clade_id}: {ml_fields}")
             logger.debug(f"Bayesian fields for {clade_id}: {bayes_fields}")
+            logger.debug(f"All keys for {clade_id}: {list(data.keys()) if isinstance(data, dict) else 'NOT_DICT'}")
             
             taxa_list = sorted(data.get('taxa', []))
             num_taxa = len(taxa_list)
@@ -6016,18 +6067,35 @@ class panDecayIndices:
                 
                 # Add normalized metrics if enabled
                 if self.normalize_ld:
-                    bd_per_site = data.get('bd_per_site')
-                    bd_relative = data.get('bd_relative')
+                    # === NORMALIZATION DIAGNOSTIC ===
+                    logger.debug(f"TEXT OUTPUT DIAGNOSTIC for {clade_id}:")
+                    logger.debug(f"  Data keys: {list(data.keys()) if isinstance(data, dict) else 'NOT_DICT'}")
+                    logger.debug(f"  bd_per_site value: {data.get('bd_per_site')} (type: {type(data.get('bd_per_site'))})")
+                    logger.debug(f"  bd_relative value: {data.get('bd_relative')} (type: {type(data.get('bd_relative'))})")
+                    logger.debug(f"  bayes_decay value: {data.get('bayes_decay')} (type: {type(data.get('bayes_decay'))})")
+                    logger.debug(f"  alignment_length: {getattr(self, 'alignment_length', 'NOT_SET')}")
                     
-                    if bd_per_site is not None:
-                        row_values.append(f"{bd_per_site:.6f}")
-                    else:
-                        row_values.append("N/A")
-                        
-                    if bd_relative is not None:
-                        row_values.append(f"{bd_relative*100:.3f}")
-                    else:
-                        row_values.append("N/A")
+                    if "per_site" in self.ld_normalization_methods:
+                        bd_per_site = data.get('bd_per_site', None)
+                        logger.debug(f"  Retrieved bd_per_site: {bd_per_site}")
+                        if isinstance(bd_per_site, float):
+                            formatted_value = f"{bd_per_site:.6f}"
+                            logger.debug(f"  Formatted bd_per_site: {formatted_value}")
+                            row_values.append(formatted_value)
+                        else:
+                            logger.debug(f"  bd_per_site not float, using N/A")
+                            row_values.append("N/A")
+                    
+                    if "relative" in self.ld_normalization_methods:
+                        bd_relative = data.get('bd_relative', None)
+                        logger.debug(f"  Retrieved bd_relative: {bd_relative}")
+                        if isinstance(bd_relative, float):
+                            formatted_value = f"{bd_relative*100:.3f}"
+                            logger.debug(f"  Formatted bd_relative: {formatted_value}")
+                            row_values.append(formatted_value)
+                        else:
+                            logger.debug(f"  bd_relative not float, using N/A")
+                            row_values.append("N/A")
                     
                     # Add effect size if available
                     if has_effect_size:
@@ -6595,11 +6663,11 @@ class panDecayIndices:
                 lnl_d = data.get('lnl_diff', 'N/A')
                 if isinstance(lnl_d, float): lnl_d = f"{lnl_d:.4f}"
                 
-                au_p = data.get('AU_pvalue', 'N/A')
-                if isinstance(au_p, float): au_p = f"{au_p:.4f}"
+                au_p_raw = data.get('AU_pvalue', 'N/A')
+                au_p = f"{au_p_raw:.4f}" if isinstance(au_p_raw, float) else 'N/A'
                 
-                sig_au = data.get('significant_AU', 'N/A')
-                if isinstance(sig_au, bool): sig_au = "**Yes**" if sig_au else "No"
+                # Use * ** *** ns notation instead of Yes/No
+                sig_au = self._format_support_symbol(au_p_raw) if au_p_raw != 'N/A' else 'N/A'
                 
                 row_parts.append(f"| {c_lnl} | {lnl_d} | {au_p} | {sig_au} ")
             
@@ -7332,7 +7400,7 @@ class panDecayIndices:
         plt.savefig(str(plot_path), dpi=150, format=viz_format)
         plt.close(fig)
 
-        logger.info(f"Site-specific likelihood plot for {clade_id} saved to {plot_path}")
+        logger.info(f"Site-specific likelihood plot for {clade_id} saved to {self._get_display_path(plot_path)}")
 
     def _create_site_histogram(self, clade_id, deltas, output_dir, viz_format):
         """
@@ -7362,7 +7430,7 @@ class panDecayIndices:
         plt.savefig(str(hist_path), dpi=150, format=viz_format)
         plt.close()
 
-        logger.info(f"Site likelihood histogram for {clade_id} saved to {hist_path}")
+        logger.info(f"Site likelihood histogram for {clade_id} saved to {self._get_display_path(hist_path)}")
 
     def _cleanup_site_analysis_files(self, output_dir):
         """
@@ -7406,7 +7474,7 @@ class panDecayIndices:
 
             output_path.parent.mkdir(parents=True, exist_ok=True)
             plt.savefig(str(output_path), format=kwargs.get('format',"png"), dpi=300); plt.close()
-            logger.info(f"Support distribution plot saved to {output_path}")
+            logger.info(f"Support distribution plot saved to {self._get_display_path(output_path)}")
         except ImportError: logger.error("Matplotlib/Seaborn not found for visualization.")
         except Exception as e: logger.error(f"Failed support distribution plot: {e}")
 
@@ -7455,7 +7523,8 @@ class panDecayIndices:
                 output_dir=output_dir,
                 chunk_size=chunk_size,
                 layout=layout,
-                format=format
+                format=format,
+                file_tracker=getattr(self, 'file_tracker', None)
             )
             
             return success
@@ -8038,115 +8107,8 @@ def _process_constraints_section(config, args):
         logger.debug("No constraints section found in config file")
 
 
-def find_alignment_files(input_dir: str, file_pattern: str) -> List[Path]:
-    """Find alignment files matching the pattern in the input directory."""
-    input_path = Path(input_dir)
-    if not input_path.exists():
-        raise FileNotFoundError(f"Input directory not found: {input_dir}")
-    
-    # Use glob to find matching files
-    pattern_path = input_path / file_pattern
-    files = glob.glob(str(pattern_path))
-    
-    # Filter to only include files (not directories)
-    alignment_files = [Path(f) for f in files if Path(f).is_file()]
-    
-    if not alignment_files:
-        raise FileNotFoundError(f"No files found matching pattern '{file_pattern}' in {input_dir}")
-    
-    logger.info(f"Found {len(alignment_files)} alignment files for batch processing")
-    return sorted(alignment_files)
 
 
-def process_single_alignment(args_dict: Dict[str, Any]) -> Dict[str, Any]:
-    """Process a single alignment file. Used by multiprocessing pool."""
-    alignment_file, args, output_dir = args_dict
-    
-    # Create a copy of args with the specific alignment file
-    args_copy = argparse.Namespace(**vars(args))
-    args_copy.alignment = str(alignment_file)
-    
-    # Set output file based on alignment filename
-    alignment_name = alignment_file.stem
-    output_file = output_dir / f"{alignment_name}_decay_indices.txt"
-    args_copy.output = str(output_file)
-    
-    # Set tree output name
-    args_copy.tree = alignment_name + "_tree"
-    
-    try:
-        logger.info(f"Processing {alignment_file.name}...")
-        
-        # Create panDecayIndices instance and run analysis
-        decay_calc = create_decay_calc_from_args(args_copy)
-        
-        # Initialize file tracker for organized output
-        decay_calc.file_tracker = FileTracker(output_path=output_dir, base_name=alignment_name)
-        
-        # Run the analysis
-        decay_calc.build_ml_tree()
-        
-        if decay_calc.ml_tree and decay_calc.ml_likelihood is not None:
-            # Run bootstrap if requested
-            if args_copy.bootstrap:
-                decay_calc.run_bootstrap_analysis(num_replicates=args_copy.bootstrap_reps)
-            
-            # Site analysis is needed if explicitly requested or if effect size calculations are requested
-            needs_site_analysis = args_copy.site_analysis or (args_copy.normalize_ld and any(method.startswith('effect_size') for method in args_copy.ld_normalization_methods))
-            decay_calc.calculate_decay_indices(perform_site_analysis=needs_site_analysis)
-            
-            # Write results
-            decay_calc.write_formatted_results(Path(args_copy.output))
-            
-            # Generate report
-            report_path = Path(args_copy.output).with_suffix(".md")
-            decay_calc.generate_detailed_report(report_path)
-            
-            # Create annotated trees
-            tree_files = decay_calc.annotate_trees(output_dir, args_copy.tree)
-            
-            # Handle visualizations and site analysis
-            if args_copy.visualize:
-                try:
-                    import matplotlib, seaborn
-                    viz_out_dir = output_dir
-                    viz_base_name = alignment_name
-                    viz_kwargs = {'width': 10, 'height': 6, 'format': args_copy.viz_format}
-                    
-                    decay_calc.visualize_support_distribution(
-                        viz_out_dir / f"{viz_base_name}_dist_{args_copy.annotation}.{args_copy.viz_format}",
-                        value_type=args_copy.annotation, **viz_kwargs)
-                except ImportError:
-                    logger.warning(f"Matplotlib/Seaborn not available for {alignment_file.name}")
-            
-            if args_copy.site_analysis and hasattr(decay_calc, 'decay_indices') and decay_calc.decay_indices:
-                site_output_dir = output_dir / f"{alignment_name}_site_analysis"
-                decay_calc.write_site_analysis_results(site_output_dir)
-            
-            decay_calc.cleanup_intermediate_files()
-            
-            # Return summary statistics for batch report
-            return {
-                'file': alignment_file.name,
-                'status': 'success',
-                'num_branches': len(decay_calc.decay_indices) if hasattr(decay_calc, 'decay_indices') else 0,
-                'ml_likelihood': decay_calc.ml_likelihood,
-                'output_file': output_file.name
-            }
-        else:
-            return {
-                'file': alignment_file.name,
-                'status': 'failed',
-                'error': 'ML tree construction failed'
-            }
-            
-    except Exception as e:
-        logger.error(f"Error processing {alignment_file.name}: {e}")
-        return {
-            'file': alignment_file.name,
-            'status': 'failed',
-            'error': str(e)
-        }
 
 
 def create_decay_calc_from_args(args: Any) -> Any:
@@ -8232,189 +8194,8 @@ def create_decay_calc_from_args(args: Any) -> Any:
     )
 
 
-def run_batch_analysis(args: Any) -> None:
-    """Run batch analysis on multiple alignment files."""
-    logger.info("Starting batch processing mode...")
-    
-    # Validate batch arguments
-    if not args.input_dir:
-        logger.error("--input-dir is required for batch processing")
-        sys.exit(1)
-    
-    # Find alignment files
-    try:
-        alignment_files = find_alignment_files(args.input_dir, args.file_pattern)
-    except FileNotFoundError as e:
-        logger.error(str(e))
-        sys.exit(1)
-    
-    # Set up output directory
-    if args.batch_output_dir:
-        output_dir = Path(args.batch_output_dir)
-    else:
-        output_dir = Path.cwd()
-    
-    output_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Determine number of parallel jobs
-    max_jobs = min(args.batch_jobs, multiprocessing.cpu_count(), len(alignment_files))
-    logger.info(f"Running batch analysis with {max_jobs} parallel jobs")
-    
-    # Prepare arguments for each file
-    job_args = [(f, args, output_dir) for f in alignment_files]
-    
-    # Run parallel processing
-    start_time = time.time()
-    
-    if max_jobs == 1:
-        # Sequential processing
-        results = []
-        for job_arg in job_args:
-            result = process_single_alignment(job_arg)
-            results.append(result)
-    else:
-        # Parallel processing
-        with multiprocessing.Pool(processes=max_jobs) as pool:
-            results = pool.map(process_single_alignment, job_args)
-    
-    end_time = time.time()
-    
-    # Generate batch summary
-    write_batch_summary(results, output_dir / args.batch_summary, end_time - start_time)
-    
-    # Report results
-    successful = sum(1 for r in results if r['status'] == 'success')
-    failed = len(results) - successful
-    
-    logger.info(f"Batch processing completed:")
-    logger.info(f"  Successful: {successful}/{len(results)}")
-    logger.info(f"  Failed: {failed}/{len(results)}")
-    logger.info(f"  Total time: {end_time - start_time:.1f} seconds")
-    logger.info(f"  Summary: {output_dir / args.batch_summary}")
 
 
-def write_batch_summary(results: List[Dict[str, Any]], summary_file: Path, total_time: float) -> None:
-    """Write batch processing summary to file."""
-    with open(summary_file, 'w') as f:
-        f.write("# panDecay Batch Processing Summary\n")
-        f.write(f"# Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-        f.write(f"# Total processing time: {total_time:.1f} seconds\n\n")
-        
-        # Summary statistics
-        successful = [r for r in results if r['status'] == 'success']
-        failed = [r for r in results if r['status'] == 'failed']
-        
-        f.write(f"Files processed: {len(results)}\n")
-        f.write(f"Successful: {len(successful)}\n")
-        f.write(f"Failed: {len(failed)}\n\n")
-        
-        # Detailed results table
-        f.write("File\tStatus\tBranches\tML_Likelihood\tOutput_File\tError\n")
-        
-        for result in results:
-            file_name = result['file']
-            status = result['status']
-            branches = result.get('num_branches', 'N/A')
-            likelihood = result.get('ml_likelihood', 'N/A')
-            output_file = result.get('output_file', 'N/A')
-            error = result.get('error', '')
-            
-            f.write(f"{file_name}\t{status}\t{branches}\t{likelihood}\t{output_file}\t{error}\n")
-
-
-def run_smoke_tests() -> bool:
-    """
-    Quick smoke tests to validate effect size calculations work correctly.
-    These tests verify basic functionality without requiring external software.
-    """
-    logger.info("Running panDecay effect size smoke tests...")
-    
-    # Test 1: Basic effect size calculation
-    logger.info("Test 1: Basic effect size calculation")
-    try:
-        # Create a minimal instance for testing
-        test_instance = panDecayIndices.__new__(panDecayIndices)
-        test_instance.ld_normalization_methods = ['effect_size', 'effect_size_robust', 'per_site']
-        test_instance.alignment_length = 100
-        
-        # Test with valid site data
-        site_data = {
-            'signal_std': 2.0,
-            'signal_mad': 1.5,
-            'supporting_sites': 80,
-            'conflicting_sites': 20
-        }
-        
-        result = test_instance._calculate_normalized_ld_metrics(10.0, -1000.0, site_data, ml_decay=10.0)
-        
-        # Validate results
-        assert 'effect_size' in result, "effect_size not calculated"
-        assert 'effect_size_robust' in result, "effect_size_robust not calculated"
-        assert 'bd_per_site' in result, "bd_per_site not calculated"
-        
-        assert result['effect_size'] == 5.0, f"Expected effect_size=5.0, got {result['effect_size']}"
-        assert abs(result['effect_size_robust'] - 6.666666666666667) < 0.001, f"Expected effect_size_robust≈6.67, got {result['effect_size_robust']}"
-        assert result['bd_per_site'] == 0.1, f"Expected bd_per_site=0.1, got {result['bd_per_site']}"
-        
-        logger.info("✓ Basic calculations working correctly")
-        
-    except Exception as e:
-        logger.error(f"✗ Test 1 failed: {e}")
-        return False
-    
-    # Test 2: Zero variance handling
-    logger.info("Test 2: Zero variance handling")
-    try:
-        site_data_zero = {
-            'signal_std': 0.0,
-            'signal_mad': 0.0,
-        }
-        
-        result = test_instance._calculate_normalized_ld_metrics(10.0, -1000.0, site_data_zero, ml_decay=10.0)
-        
-        assert result['effect_size'] is None, f"Expected effect_size=None for zero std, got {result['effect_size']}"
-        assert result['effect_size_robust'] is None, f"Expected effect_size_robust=None for zero MAD, got {result['effect_size_robust']}"
-        
-        logger.info("✓ Zero variance handling working correctly")
-        
-    except Exception as e:
-        logger.error(f"✗ Test 2 failed: {e}")
-        return False
-    
-    # Test 3: No site data handling
-    logger.info("Test 3: No site data handling")
-    try:
-        result = test_instance._calculate_normalized_ld_metrics(10.0, -1000.0, None, ml_decay=10.0)
-        
-        assert result['effect_size'] is None, f"Expected effect_size=None for no site data, got {result['effect_size']}"
-        assert result['effect_size_robust'] is None, f"Expected effect_size_robust=None for no site data, got {result['effect_size_robust']}"
-        assert result['bd_per_site'] == 0.1, f"Expected bd_per_site=0.1 (doesn't need site data), got {result['bd_per_site']}"
-        
-        logger.info("✓ No site data handling working correctly")
-        
-    except Exception as e:
-        logger.error(f"✗ Test 3 failed: {e}")
-        return False
-    
-    # Test 4: Method selection
-    logger.info("Test 4: Method selection")
-    try:
-        test_instance.ld_normalization_methods = ['effect_size']  # Only one method
-        
-        result = test_instance._calculate_normalized_ld_metrics(10.0, -1000.0, site_data, ml_decay=10.0)
-        
-        assert 'effect_size' in result, "effect_size should be calculated"
-        assert 'effect_size_robust' not in result, "effect_size_robust should not be calculated"
-        assert 'bd_per_site' not in result, "bd_per_site should not be calculated"
-        
-        logger.info("✓ Method selection working correctly")
-        
-    except Exception as e:
-        logger.error(f"✗ Test 4 failed: {e}")
-        return False
-    
-    logger.info("\nAll smoke tests passed! Effect size calculations are working correctly.")
-    return True
 
 def _create_argument_parser():
     """Create and configure the command-line argument parser."""
@@ -8427,7 +8208,7 @@ def _create_argument_parser():
     parser.add_argument("--format", default=None, 
                        choices=["fasta", "phylip", "nexus", "clustal", "stockholm"],
                        help="Override auto-detected alignment format. Format is automatically detected from file extension and content by default.")
-    parser.add_argument("--model", default="GTR", help="Base substitution model (e.g., GTR, HKY, JC). Combine with --gamma and --invariable.")
+    parser.add_argument("--model", default="GTR", help="Base substitution model (e.g., GTR, HKY, JC). **DEPRECATED for DNA data** - use --nst instead. For protein/discrete data only.")
     parser.add_argument("--gamma", action="store_true", help="Add Gamma rate heterogeneity (+G) to model.")
     parser.add_argument("--invariable", action="store_true", help="Add invariable sites (+I) to model.")
 
@@ -8440,14 +8221,6 @@ def _create_argument_parser():
     parser.add_argument("--viz-layout", choices=["auto", "single", "separate"], default="auto", help="Layout strategy for visualization: auto (adaptive), single (all clades together), separate (individual clade files).")
     parser.add_argument("--data-type", default="dna", choices=["dna", "protein", "discrete"], help="Type of sequence data.")
     
-    # Batch processing options
-    batch_opts = parser.add_argument_group('Batch Processing Options')
-    batch_opts.add_argument("--batch", action="store_true", help="Enable batch processing mode for multiple alignment files.")
-    batch_opts.add_argument("--input-dir", help="Directory containing alignment files for batch processing (use with --batch).")
-    batch_opts.add_argument("--file-pattern", default="*", help="File pattern for batch processing (e.g., '*.fasta', '*.nex')")
-    batch_opts.add_argument("--batch-output-dir", help="Output directory for batch results (defaults to current directory).")
-    batch_opts.add_argument("--batch-jobs", type=int, default=1, help="Number of parallel batch jobs (max: number of CPU cores).")
-    batch_opts.add_argument("--batch-summary", default="batch_summary.txt", help="Summary file for batch analysis results.")
     
     # Model parameter overrides
     mparams = parser.add_argument_group('Model Parameter Overrides (optional)')
@@ -8456,7 +8229,7 @@ def _create_argument_parser():
     mparams.add_argument("--base-freq", choices=["equal", "estimate", "empirical"], help="Base/state frequencies (default: model-dependent). 'empirical' uses observed frequencies.")
     mparams.add_argument("--rates", choices=["equal", "gamma"], help="Site rate variation model (overrides --gamma flag if specified).")
     mparams.add_argument("--protein-model", help="Specific protein model (e.g., JTT, WAG; overrides base --model for protein data).")
-    mparams.add_argument("--nst", type=int, choices=[1, 2, 6], help="Number of substitution types (DNA; overrides model-based nst).")
+    mparams.add_argument("--nst", type=int, choices=[1, 2, 6], help="Number of substitution types for DNA data. Directly controls substitution complexity: 1=JC-like (equal rates), 2=HKY-like (ti/tv), 6=GTR-like (all rates). Overrides model-based NST for both PAUP* and MrBayes.")
     mparams.add_argument("--parsmodel", action=argparse.BooleanOptionalAction, default=None, help="Use parsimony-based branch lengths (discrete data; defaults to yes for discrete data). Use --no-parsmodel to disable.")
 
     run_ctrl = parser.add_argument_group('Runtime Control')
@@ -8546,9 +8319,8 @@ def _create_argument_parser():
     # Configuration file and constraint selection options
     config_opts = parser.add_argument_group('Configuration and Constraint Options')
     config_opts.add_argument("--config", help="Read parameters from configuration file (supports INI, YAML, TOML formats)")
-    config_opts.add_argument("--generate-ini-config", help="Generate a template configuration file at the specified path and exit (INI format)")
-    config_opts.add_argument("--generate-yaml-config", help="Generate a template YAML configuration file and exit (recommended)")
-    config_opts.add_argument("--generate-toml-config", help="Generate a template TOML configuration file and exit")
+    config_opts.add_argument("--generate-config", metavar='FILENAME', 
+                           help="Generate a template configuration file and exit. Format auto-detected from extension (.ini, .yaml/.yml, .toml)")
     config_opts.add_argument("--validate-config", metavar='CONFIG_FILE',
                            help="Validate configuration file and exit (checks syntax and required fields)")
     config_opts.add_argument("--constraint-mode", choices=["all", "specific", "exclude"], default="all",
@@ -8562,52 +8334,54 @@ def _create_argument_parser():
 
 
 def main() -> None:
-    # Check if we're running smoke tests
-    if len(sys.argv) == 2 and sys.argv[1] == '--smoke-test':
-        success = run_smoke_tests()
-        sys.exit(0 if success else 1)
-    
     parser = _create_argument_parser()
     args = parser.parse_args()
     
     
     # Handle configuration generation and migration first
-    if args.generate_ini_config:
-        generate_config_template(args.generate_ini_config)
-        sys.exit(0)
-    
-    if args.generate_yaml_config:
-        if HAS_ENHANCED_CONFIG:
-            from config_loader import create_example_yaml_config
-            try:
-                create_example_yaml_config(Path(args.generate_yaml_config))
-                logger.info(f"YAML configuration template generated: {args.generate_yaml_config}")
-                logger.info("Edit this file with your parameters and run:")
-                logger.info(f"  python panDecay.py --config {args.generate_yaml_config}")
-            except Exception as e:
-                logger.error(f"Failed to generate YAML config template: {e}")
-                sys.exit(1)
+    if args.generate_config:
+        filename = args.generate_config
+        _, ext = os.path.splitext(filename.lower())
+        
+        if ext in ['.yaml', '.yml']:
+            if HAS_ENHANCED_CONFIG:
+                from config_loader import create_example_yaml_config
+                try:
+                    create_example_yaml_config(Path(filename))
+                    logger.info(f"YAML configuration template generated: {filename}")
+                    logger.info("Edit this file with your parameters and run:")
+                    logger.info(f"  python panDecay.py --config {filename}")
+                except Exception as e:
+                    logger.error(f"Failed to generate YAML config template: {e}")
+                    sys.exit(1)
+            else:
+                logger.error("YAML configuration support not available. Install pydantic and pyyaml.")
+                logger.info("Falling back to INI template generation...")
+                ini_filename = filename.replace('.yaml', '.ini').replace('.yml', '.ini')
+                generate_config_template(ini_filename)
+        elif ext == '.toml':
+            if HAS_ENHANCED_CONFIG:
+                from config_loader import create_example_toml_config
+                try:
+                    create_example_toml_config(Path(filename))
+                    logger.info(f"TOML configuration template generated: {filename}")
+                    logger.info("Edit this file with your parameters and run:")
+                    logger.info(f"  python panDecay.py --config {filename}")
+                except Exception as e:
+                    logger.error(f"Failed to generate TOML config template: {e}")
+                    sys.exit(1)
+            else:
+                logger.error("TOML configuration support not available. Install pydantic and toml.")
+                logger.info("Falling back to INI template generation...")
+                ini_filename = filename.replace('.toml', '.ini')
+                generate_config_template(ini_filename)
+        elif ext == '.ini':
+            generate_config_template(filename)
         else:
-            logger.error("YAML configuration support not available. Install pydantic and pyyaml.")
-            logger.info("Falling back to INI template generation...")
-            generate_config_template(args.generate_yaml_config.replace('.yaml', '.ini').replace('.yml', '.ini'))
-        sys.exit(0)
-    
-    if args.generate_toml_config:
-        if HAS_ENHANCED_CONFIG:
-            from config_loader import create_example_toml_config
-            try:
-                create_example_toml_config(Path(args.generate_toml_config))
-                logger.info(f"TOML configuration template generated: {args.generate_toml_config}")
-                logger.info("Edit this file with your parameters and run:")
-                logger.info(f"  python panDecay.py --config {args.generate_toml_config}")
-            except Exception as e:
-                logger.error(f"Failed to generate TOML config template: {e}")
-                sys.exit(1)
-        else:
-            logger.error("TOML configuration support not available. Install pydantic and toml.")
-            logger.info("Falling back to INI template generation...")
-            generate_config_template(args.generate_toml_config.replace('.toml', '.ini'))
+            logger.error(f"Unsupported config format: {ext}")
+            logger.info("Supported formats: .ini, .yaml/.yml, .toml")
+            logger.info("Example: --generate-config example.yaml")
+            sys.exit(1)
         sys.exit(0)
     
     # Handle --validate-config command
@@ -8653,23 +8427,7 @@ def main() -> None:
             # Fall back to legacy INI parsing
             parse_config(args.config, args)
     
-    # Handle batch processing mode
-    if args.batch:
-        # For batch mode, alignment file is not required as individual arguments
-        # but input_dir is required
-        if not args.input_dir:
-            parser.error("--input-dir is required when using --batch mode")
-        
-        # Validate batch job count
-        if args.batch_jobs > multiprocessing.cpu_count():
-            logger.warning(f"Requested {args.batch_jobs} jobs, but only {multiprocessing.cpu_count()} CPU cores available. Using {multiprocessing.cpu_count()} jobs.")
-            args.batch_jobs = multiprocessing.cpu_count()
-        
-        # Run batch processing and exit
-        run_batch_analysis(args)
-        return
-    
-    # Validate that alignment is provided (either via command line or config) for single file mode
+    # Validate that alignment is provided (either via command line or config)
     if not args.alignment:
         parser.error("Alignment file must be specified either as a command-line argument or in the config file")
     
@@ -8702,6 +8460,34 @@ def main() -> None:
     effective_model_str = args.model
     if args.gamma: effective_model_str += "+G"
     if args.invariable: effective_model_str += "+I"
+    
+    # Issue deprecation warning for DNA data using --model instead of --nst
+    if args.data_type == "dna" and not args.paup_block:
+        base_model = args.model.split("+")[0].upper()
+        if base_model in ["GTR", "HKY", "K2P", "K80", "TN93", "JC", "JC69", "F81"]:
+            nst_equivalent = {"GTR": 6, "HKY": 2, "K2P": 2, "K80": 2, "TN93": 2, "JC": 1, "JC69": 1, "F81": 1}
+            suggested_nst = nst_equivalent.get(base_model, 6)
+            
+            if args.nst is None:  # Only warn if user didn't already specify NST
+                logger.warning("⚠️  DEPRECATION WARNING: Using --model with DNA data is deprecated.")
+                logger.warning(f"   Please use --nst {suggested_nst} instead of --model {base_model}")
+                logger.warning(f"   Example: --nst {suggested_nst} --base-freq estimate" + (" --gamma" if args.gamma else "") + (" --invariable" if args.invariable else ""))
+                logger.warning("   This provides clearer control over substitution complexity.")
+    
+    # Provide helpful NST guidance for DNA analysis
+    if args.data_type == "dna" and args.nst is not None and not args.paup_block:
+        nst_descriptions = {1: "equal substitution rates", 2: "transition/transversion distinction", 6: "all substitution rates vary"}
+        logger.info(f"💡 Using NST={args.nst} ({nst_descriptions.get(args.nst, 'custom complexity')}) for DNA analysis")
+        logger.info("   NST provides software-agnostic control over substitution complexity")
+    
+    # Validate NST usage with non-DNA data
+    if args.nst is not None and args.data_type != "dna":
+        logger.error(f"⚠️  NST parameter (--nst {args.nst}) is only valid for DNA data.")
+        logger.error(f"   Current data type: {args.data_type}")
+        logger.error("   For protein data: use --protein-model (e.g., WAG, JTT, LG)")
+        logger.error("   For discrete data: use --model Mk")
+        sys.exit(1)
+    
     # Adjust for protein/discrete if base model is not specific enough
     if args.data_type == "protein" and not args.protein_model and not any(pm in args.model.upper() for pm in ["JTT", "WAG", "LG", "DAYHOFF"]):
         logger.info(f"Protein data with generic model '{args.model}'. Effective model might default to JTT within PAUP* settings.")
@@ -8729,6 +8515,9 @@ def main() -> None:
         alignment_name = alignment_path.stem
         output_dir = Path(args.output).resolve().parent
         decay_calc.file_tracker = FileTracker(output_path=output_dir, base_name=alignment_name)
+
+        # Relocate log file to organized directory
+        relocate_log_file_to_organized_dir(decay_calc.file_tracker)
 
         decay_calc.build_ml_tree() # Can raise exceptions
 
@@ -8761,12 +8550,9 @@ def main() -> None:
                 logger.warning("Failed to create annotated trees.")
 
             if args.visualize:
-                viz_out_dir = output_main_path.resolve().parent # Ensure absolute path for parent
+                # Use FileTracker organized directory for visualizations
                 viz_base_name = output_main_path.stem
-                
-                # Handle format for backward compatibility 
                 file_format = args.viz_format
-                    
                 viz_kwargs = {'width': 10, 'height': 6, 'format': file_format}
 
                 # Check for viz library availability early
@@ -8776,8 +8562,12 @@ def main() -> None:
                     args.visualize = False # Disable further attempts
 
                 if args.visualize:
+                    viz_file_name = f"{viz_base_name}_dist_{args.annotation}.{file_format}"
+                    viz_output_path = decay_calc.file_tracker.get_organized_path('visualizations', viz_file_name)
+                    decay_calc.file_tracker.track_file('visualizations', viz_output_path, f'Support distribution plot ({args.annotation})')
+                    
                     decay_calc.visualize_support_distribution(
-                        viz_out_dir / f"{viz_base_name}_dist_{args.annotation}.{file_format}",
+                        viz_output_path,
                         value_type=args.annotation, **viz_kwargs)
 
                 if args.site_analysis:
@@ -8785,7 +8575,8 @@ def main() -> None:
                     if args.visualize:
                         decay_calc.viz_format = args.viz_format
 
-                    site_output_dir = output_main_path.parent / f"{output_main_path.stem}_site_analysis"
+                    # Use FileTracker organized directory structure  
+                    site_output_dir = decay_calc.file_tracker.get_organized_path('site_analysis', '')
                     decay_calc.write_site_analysis_results(site_output_dir)
                     logger.info(f"Site-specific analysis results written to {get_display_path(site_output_dir)}")
                     
@@ -8793,14 +8584,16 @@ def main() -> None:
                     if args.create_alignment_viz:
                         logger.info("Creating alignment visualization with site-specific support overlays...")
                         try:
+                            # Use FileTracker organized directory structure
+                            organized_viz_dir = decay_calc.file_tracker.base_path / 'visualizations'
                             success = decay_calc.create_alignment_visualization(
-                                output_dir=output_main_path.parent,
+                                output_dir=organized_viz_dir,
                                 chunk_size=args.viz_chunk_size,
                                 layout=args.viz_layout,
                                 format=args.viz_format
                             )
                             if success:
-                                viz_dir = output_main_path.parent / "alignment_visualization"
+                                viz_dir = organized_viz_dir / "alignment_visualization"
                                 logger.info(f"Alignment visualizations created in {get_display_path(viz_dir)}")
                             else:
                                 logger.error("Failed to create alignment visualizations")

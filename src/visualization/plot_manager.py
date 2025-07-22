@@ -373,7 +373,8 @@ class PlotManager:
     
     def create_alignment_visualization(self, alignment, site_data_by_clade: Dict[str, Dict[int, Dict[str, Any]]], 
                                      output_dir: Path, chunk_size: int = 2000, 
-                                     layout: str = "auto", format: str = "png") -> bool:
+                                     layout: str = "auto", format: str = "png", 
+                                     file_tracker=None) -> bool:
         """
         Create combined alignment and site-specific support visualizations.
         Each clade gets one image with alignment on top and support bars below.
@@ -419,11 +420,25 @@ class PlotManager:
                         chunk_start, chunk_end, output_path, format
                     )
                     
+                    # Track file with FileTracker if available
+                    if clade_success and file_tracker:
+                        try:
+                            file_tracker.track_file('visualizations', output_path, f'Alignment visualization with support for {clade_id}')
+                        except Exception as e:
+                            logger.debug(f"Could not track alignment visualization file: {e}")
+                    
                     if not clade_success:
                         success = False
             
             # Create summary file
-            self._create_visualization_summary(viz_dir, num_sites, num_clades, len(chunks), "combined")
+            summary_path = self._create_visualization_summary(viz_dir, num_sites, num_clades, len(chunks), "combined")
+            
+            # Track summary file with FileTracker if available
+            if summary_path and file_tracker:
+                try:
+                    file_tracker.track_file('visualizations', summary_path, 'Alignment visualization summary')
+                except Exception as e:
+                    logger.debug(f"Could not track alignment visualization summary: {e}")
             
             if success:
                 logger.info(f"Created alignment visualizations in {viz_dir}")
@@ -854,7 +869,7 @@ class PlotManager:
         return matrix
     
     def _create_visualization_summary(self, viz_dir: Path, num_sites: int, 
-                                    num_clades: int, num_chunks: int, layout: str):
+                                    num_clades: int, num_chunks: int, layout: str) -> Path:
         """
         Create summary file describing the visualization outputs.
         
@@ -864,6 +879,9 @@ class PlotManager:
             num_clades: Number of clades
             num_chunks: Number of chunks created
             layout: Layout strategy used
+            
+        Returns:
+            Path to created summary file
         """
         summary_path = viz_dir / "visualization_summary.txt"
         
@@ -899,6 +917,8 @@ class PlotManager:
             f.write("• Red bars: Sites conflicting with the branch (positive ΔlnL)\n")
             f.write("  (Constrained tree has better likelihood than ML tree)\n")
             f.write("• Bar height: Proportional to |ΔlnL| magnitude\n")
+        
+        return summary_path
 
     def check_matplotlib_availability(self) -> bool:
         """

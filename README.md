@@ -2,17 +2,35 @@
 
 # panDecay: Phylogenetic Analysis using Decay Indices
 
-panDecay is a Python command-line tool for calculating phylogenetic decay indices across multiple analysis frameworks. Version 1.1 introduces major enhancements including **async processing**, **dual visualization**, **YAML configuration**, and **Docker containerization**.
+panDecay is a Python command-line tool for calculating phylogenetic decay indices across multiple analysis frameworks. Version 1.1 introduces major enhancements including **async processing**, **organized output structure**, **YAML configuration**, and **Docker containerization**.
 
 ## What's New in v1.1
 
 - **50-80% faster** with async constraint processing
-- **Dual visualization** - static (matplotlib) + interactive (Plotly) plots  
+- **Organized output structure** - timestamp-based directories with categorized files
 - **Modern YAML/TOML configuration** with Pydantic validation
 - **Docker containers** with PAUP* and MrBayes pre-installed
 - **Enhanced documentation** with comprehensive guides
 
 [**v1.1 Feature Guide**](docs/MIGRATION_GUIDE.md) | [**Docker Guide**](docs/DOCKER_GUIDE.md) | [**Configuration Guide**](docs/CONFIGURATION_GUIDE.md)
+
+## Key Features
+
+### Organized Output Structure
+All analysis results are automatically organized into timestamped directories (`YYYYMMDD_HHMMSS_panDecay_<basename>/`) with categorized subdirectories:
+- `results/` - Main results tables and summary files  
+- `trees/` - Annotated phylogenetic trees
+- `reports/` - Detailed markdown reports
+- `visualizations/` - Distribution plots and figures
+- `site_analysis/` - Site-specific likelihood analysis (when enabled)
+- `logs/` - Debug and analysis log files
+
+### Async Constraint Processing
+Enable parallel constraint analysis with `--async-constraints` for significant performance improvements:
+- **50-80% faster** analysis for datasets with multiple constraints
+- Configurable worker processes and timeouts
+- Robust error handling and progress tracking
+- Recommended for all multi-constraint analyses
 
 ## Documentation
 
@@ -36,7 +54,7 @@ panDecay is a Python command-line tool for calculating phylogenetic decay indice
 ./docker/docker-deploy.sh build
 
 # Run analysis 
-./docker/docker-deploy.sh run examples/data/alignment.fas --analysis ml --viz-format both
+./docker/docker-deploy.sh run examples/data/alignment.fas --analysis ml --visualize
 ```
 
 ### Traditional Installation
@@ -219,7 +237,7 @@ This approach provides honest, statistically sound relative rankings without the
 
 ### Core Capabilities
 *   **Async Constraint Processing**: Parallel execution of constraints for 50-80% performance improvement
-*   **Dual Visualization System**: Both static (matplotlib) and interactive (Plotly) visualizations
+*   **Organized Output Structure**: Timestamp-based directories with categorized file organization
 *   **Modern Configuration**: YAML/TOML configuration with Pydantic validation and format detection
 *   **Docker Support**: Production-ready containers with PAUP* and MrBayes pre-installed
 *   Performs the Approximately Unbiased (AU) test for statistical assessment of ML branch support
@@ -253,12 +271,11 @@ This approach provides honest, statistically sound relative rankings without the
 *   Multiple Newick trees annotated with different support values
 *   Detailed Markdown report summarizing the analysis and results
 *   Comprehensive trees combining all support metrics when multiple analyses are performed
-*   **Enhanced Visualization System**:
+*   **Organized File Structure**: Timestamp-based directories with categorized subdirectories (results/, trees/, reports/, visualizations/, site_analysis/, logs/)
+*   **Visualization System**:
     *   **Static plots** (matplotlib): PNG/PDF publication-ready figures
-    *   **Interactive plots** (Plotly): HTML dashboards with zoom, pan, hover
     *   Distribution of support values with statistical summaries
-    *   Site-specific support visualizations
-    *   Combined decay metric comparisons
+    *   Site-specific support visualizations when `--site-analysis` is enabled
 
 ### Technical Features
 *   **Async constraint processing** with configurable parallelism and timeouts
@@ -294,7 +311,7 @@ panDecay requires Python 3.8 or higher and has several dependencies that can be 
    pip install -r requirements.txt
    ```
 
-   This will install all required packages including BioPython, NumPy, Pydantic, PyYAML, Plotly, and the visualization packages Matplotlib and Seaborn.
+   This will install all required packages including BioPython, NumPy, Pydantic, PyYAML, and the visualization packages Matplotlib and Seaborn.
 
 ### Docker Installation
 
@@ -355,7 +372,10 @@ See the [**Docker Guide**](DOCKER_GUIDE.md) for comprehensive Docker usage instr
 ### Basic Command
 
 ```bash
-# Traditional command-line usage
+# Modern NST-based usage (recommended for DNA data)
+python3 panDecay.py <alignment_file> --nst <1|2|6> [options...]
+
+# Legacy model-based usage (deprecated for DNA, use for protein/discrete only)
 python3 panDecay.py <alignment_file> --model <model_name> [options...]
 
 # With async processing (recommended for multiple constraints)
@@ -432,12 +452,12 @@ positional arguments:
 options:
   -h, --help            show this help message and exit
   --format FORMAT       Alignment format. (default: fasta)
-  --model MODEL         Base substitution model (e.g., GTR, HKY, JC). Combine with --gamma and --invariable. (default: GTR)
+  --model MODEL         Base substitution model (e.g., GTR, HKY, JC). **DEPRECATED for DNA data** - use --nst instead. For protein/discrete data only. (default: GTR)
   --gamma               Add Gamma rate heterogeneity (+G) to model. (default: False)
   --invariable          Add invariable sites (+I) to model. (default: False)
   --paup PAUP           Path to PAUP* executable. (default: paup)
-  --output OUTPUT       Output file for summary results. (default: pan_decay_indices.txt)
-  --tree TREE           Base name for annotated tree files. Three trees will be generated with suffixes: _au.nwk (AU p-values), 
+  --output OUTPUT       Output filename for summary results (saved to organized results/ directory). (default: pan_decay_indices.txt)
+  --tree TREE           Base name for annotated tree files (saved to organized trees/ directory). Three trees will be generated with suffixes: _au.nwk (AU p-values), 
                         _delta_lnl.nwk (likelihood differences), and _combined.nwk (both values). (default: annotated_tree)
   --data-type {dna,protein,discrete}
                         Type of sequence data. (default: dna)
@@ -455,7 +475,7 @@ Model Parameter Overrides (optional):
                         Site rate variation model (overrides --gamma flag if specified).
   --protein-model PROTEIN_MODEL
                         Specific protein model (e.g., JTT, WAG; overrides base --model for protein data).
-  --nst {1,2,6}         Number of substitution types (DNA; overrides model-based nst).
+  --nst {1,2,6}         Number of substitution types for DNA data. Directly controls substitution complexity: 1=JC-like (equal rates), 2=HKY-like (ti/tv), 6=GTR-like (all rates). Overrides model-based NST for both PAUP* and MrBayes.
   --parsmodel, --no-parsmodel
                         Use parsimony-based branch lengths (discrete data; default: yes for discrete). Use --no-parsmodel to disable. (default: None)
 
@@ -528,13 +548,9 @@ Bootstrap Analysis (optional):
                         Number of bootstrap replicates (default: 100)
 
 Visualization Output (optional):
-  --visualize           Generate visualization plots (requires matplotlib and/or plotly). (default: False)
-  --viz-format {static,interactive,both}
-                        Visualization system: static (matplotlib only), interactive (Plotly only), both (default: both)
-  --static-formats FORMAT1,FORMAT2
-                        Static plot file formats as comma-separated list: png,pdf,svg (default: png,pdf)
-  --interactive-format {html}
-                        Interactive plot file format (default: html)
+  --visualize           Generate visualization plots using matplotlib. (default: False)
+  --viz-format {png,pdf,svg}
+                        Visualization file format (default: png)
   --annotation {au,lnl} Type of support values to visualize in distribution plots (au=AU p-values, lnl=likelihood differences). (default: lnl)
   --output-style {unicode,ascii,minimal}
                         Output formatting style: unicode (modern), ascii (compatible), minimal (basic). (default: unicode)
@@ -560,6 +576,60 @@ Configuration and Constraint Options:
                         '1,3,5' for branch IDs, or '@file.txt' to read from file
   --constraint-file CONSTRAINT_FILE
                         File containing constraint definitions (one per line)
+```
+
+## Model and NST Specification
+
+**⚠️ Important: For DNA data, use `--nst` (preferred) instead of deprecated `--model` names.**
+
+panDecay uses NST (Number of Substitution Types) for direct control over substitution complexity. This provides clearer, software-agnostic model specification.
+
+### Preferred NST-Based Approach (DNA Data)
+
+- **NST=1**: Equal substitution rates (JC-like complexity)
+- **NST=2**: Transition/transversion ratio (HKY-like complexity)  
+- **NST=6**: All substitution rates estimated (GTR-like complexity)
+
+### Example Usage (DNA Data)
+
+```bash
+# Recommended NST-based approach
+python3 panDecay.py alignment.fas --nst 6 --base-freq estimate --gamma  # GTR+G equivalent
+python3 panDecay.py alignment.fas --nst 2 --base-freq estimate --gamma  # HKY+G equivalent  
+python3 panDecay.py alignment.fas --nst 1 --base-freq equal             # JC equivalent
+
+# Advanced parameter combinations (mix complexity levels)
+python3 panDecay.py alignment.fas --nst 6 --base-freq equal --gamma     # All rates vary, equal base freqs
+python3 panDecay.py alignment.fas --nst 2 --base-freq empirical         # Ti/Tv ratio, observed base freqs
+
+# Cross-software consistency
+python3 panDecay.py alignment.fas --analysis ml+bayesian --nst 6 --gamma  # Both PAUP* and MrBayes use NST=6
+```
+
+### Legacy Model-Based Approach (Deprecated for DNA)
+
+```bash
+# DEPRECATED: Old model names (still works but issues warnings)
+python3 panDecay.py alignment.fas --model GTR --gamma  # ⚠️ Warns: use --nst 6 instead
+python3 panDecay.py alignment.fas --model HKY --gamma  # ⚠️ Warns: use --nst 2 instead
+```
+
+### Benefits of NST-Based Approach
+
+- **Software agnostic**: NST works identically across PAUP*, MrBayes, IQ-TREE, etc.
+- **Clear semantics**: NST=6 directly means "6 substitution types", no ambiguity
+- **Parameter independence**: Control substitution complexity separately from base frequencies
+- **Educational value**: Learn fundamental substitution theory rather than software-specific names
+- **Future-proof**: Not tied to historical model naming conventions
+
+### Non-DNA Data Types (Still Use --model)
+
+```bash
+# Protein data (model names still relevant)
+python3 panDecay.py proteins.fas --data-type protein --model WAG --gamma
+
+# Discrete morphological data  
+python3 panDecay.py morpho.nex --data-type discrete --model Mk --gamma
 ```
 
 ## Input Files
@@ -623,7 +693,37 @@ A text file specified with `--constraint-file <path>` or `--test-branches @<path
 
 ## Output Files
 
-Unless specified with `--output`, `--tree`, etc., output files are created in the current working directory.
+### Organized Directory Structure
+
+panDecay v1.1 automatically creates a timestamped directory structure to organize all output files. This prevents file conflicts and makes it easy to manage multiple analyses:
+
+```
+20250721_193047_panDecay_MyAlignment/
+├── results/
+│   └── pan_decay_indices.txt          # Main results table
+├── reports/
+│   └── pan_decay_indices.md           # Detailed markdown report  
+├── trees/
+│   ├── annotated_tree_au.nwk          # Tree with AU p-values
+│   ├── annotated_tree_delta_lnl.nwk   # Tree with likelihood differences
+│   ├── annotated_tree_combined.nwk    # Tree with combined annotations
+│   └── annotated_tree_bayes_decay.nwk # Tree with Bayesian decay values
+├── visualizations/                     # Generated when --visualize is used
+│   ├── pan_decay_indices_dist_lnl.png # Support distribution plot
+│   └── site_plot_Clade_X.png          # Site analysis plots (if --site-analysis)
+├── site_analysis/                      # Generated when --site-analysis is used
+│   ├── site_analysis_summary.txt      # Summary of site support
+│   └── site_data_Clade_X.txt          # Detailed site data per clade
+└── logs/
+    └── panDecay_debug.log              # Debug and processing log
+```
+
+**Directory naming**: `YYYYMMDD_HHMMSS_panDecay_<alignment_basename>`
+- Timestamp ensures unique directory names for each run
+- Alignment basename identifies which dataset was analyzed
+- All output files are organized within this single directory
+
+**Note**: The organized directory structure is automatically created regardless of command-line options, ensuring all related analysis files are kept together.
 
 ### Main Results File (`pan_decay_indices.txt` by default)
 A tab-delimited text file containing:
@@ -706,15 +806,12 @@ If `--site-analysis` is used, additional output files are generated in a directo
 This feature allows you to identify which alignment positions support or conflict with each branch in the tree.
 
 ### Visualizations (Optional)
-If `--visualize` is used, plots are generated based on the `--viz-format` setting:
+If `--visualize` is used, publication-ready static plots are generated:
 
 **Static plots** (requires `matplotlib` and `seaborn`):
-*   **Support Distribution Plot** (`<output_stem>_dist_au.<viz_format>` and `<output_stem>_dist_delta_lnl.<viz_format>`): Histograms showing the distribution of AU p-values and ΔlnL values across all tested branches.
-
-**Interactive plots** (requires `plotly`):
-*   **Note**: Interactive Plotly visualizations are only generated during site-specific analysis with the `--site-analysis` flag
-*   Without `--site-analysis`, only static matplotlib plots are created even with `--viz-format interactive` or `--viz-format both`
-*   To generate interactive visualizations, use: `--site-analysis --visualize --viz-format interactive` (or `both`)
+*   **Support Distribution Plot**: Histograms showing the distribution of AU p-values and ΔlnL values across all tested branches
+*   **Site Analysis Plots** (when `--site-analysis` is enabled): Site-specific support and conflict visualizations
+*   All plots are organized in the `visualizations/` subdirectory of the timestamped output folder
 
 # Understanding the Site Analysis Plots in panDecay
 
@@ -795,14 +892,14 @@ panDecay provides a simplified interface for likelihood decay normalization:
 
 ### Basic Normalization (Always Enabled)
 ```bash
-python3 panDecay.py alignment.fas --model GTR
+python3 panDecay.py alignment.fas --nst 6 --base-freq estimate
 ```
 - Automatically calculates **per-site** (LD/alignment_length) and **relative** (LD/ML_likelihood) metrics
 - Provides basic scaling for alignment length and likelihood magnitude differences
 
 ### Dataset-Relative Normalization (Optional)
 ```bash  
-python3 panDecay.py alignment.fas --model GTR --dataset-relative
+python3 panDecay.py alignment.fas --nst 6 --base-freq estimate --dataset-relative
 ```
 - Adds **dataset-relative scaling** (0-1 within dataset)
 - Adds **percentile ranking** (1-100% among dataset branches)
@@ -812,13 +909,13 @@ python3 panDecay.py alignment.fas --model GTR --dataset-relative
 ### Normalization Control
 ```bash
 # Disable all normalization
-python3 panDecay.py alignment.fas --model GTR --no-normalize-ld
+python3 panDecay.py alignment.fas --nst 6 --base-freq estimate --no-normalize-ld
 
 # Basic normalization only (default)
-python3 panDecay.py alignment.fas --model GTR --normalize-ld
+python3 panDecay.py alignment.fas --nst 6 --base-freq estimate --normalize-ld
 
 # Full normalization with relative rankings
-python3 panDecay.py alignment.fas --model GTR --dataset-relative
+python3 panDecay.py alignment.fas --nst 6 --base-freq estimate --dataset-relative
 ```
 
 **Key Benefits:**
@@ -832,12 +929,17 @@ python3 panDecay.py alignment.fas --model GTR --dataset-relative
 Let [alignment.fas](./alignment.fas) be a FASTA DNA alignment, [proteins.phy](./proteins.phy) be a PHYLIP protein alignment and [morpho.nex](./morpho.nex) be a morphological dataset.
 
 ### Example 1: Basic DNA Analysis
-Analyze a DNA alignment with GTR+G+I model, automatically estimating parameters.
+Analyze a DNA alignment with NST=6 (GTR-like) complexity, gamma heterogeneity, and invariable sites.
 
 ```bash
-python3 panDecay.py alignment.fas --model GTR --gamma --invariable --data-type dna \
+python3 panDecay.py alignment.fas --nst 6 --base-freq estimate --gamma --invariable \
     --output dna_decay.txt --tree dna_annotated
 ```
+
+This will create a timestamped directory like `20241015_143022_panDecay_alignment/` containing:
+- `results/dna_decay.txt` - Your main results 
+- `trees/dna_annotated_*.nwk` - Annotated tree files
+- `reports/dna_decay.md` - Detailed markdown report
 
 ### Example 2: Parsimony Analysis (Traditional Bremer Support)
 Calculate traditional Bremer support values using parsimony analysis.
@@ -927,15 +1029,15 @@ python3 panDecay.py alignment.fas --analysis bayesian --bayesian-software mrbaye
 Run both ML and Bayesian analyses:
 
 ```bash
-python3 panDecay.py alignment.fas --model GTR --gamma --analysis ml+bayesian --bayesian-software mrbayes \
-    --bayes-ngen 1000000 --output combined_analysis.txt
+python3 panDecay.py alignment.fas --nst 6 --base-freq estimate --gamma --analysis ml+bayesian \
+    --bayesian-software mrbayes --bayes-ngen 1000000 --output combined_analysis.txt
 ```
 
 ### Example 11: Combined ML and Parsimony Analysis
 Run both ML and parsimony analyses to compare modern and traditional support values:
 
 ```bash
-python3 panDecay.py alignment.fas --model GTR --gamma --analysis ml+parsimony \
+python3 panDecay.py alignment.fas --nst 6 --base-freq estimate --gamma --analysis ml+parsimony \
     --output ml_parsimony_analysis.txt
 ```
 
@@ -943,7 +1045,7 @@ python3 panDecay.py alignment.fas --model GTR --gamma --analysis ml+parsimony \
 Run ML, Bayesian, and parsimony analyses in a single run:
 
 ```bash
-python3 panDecay.py alignment.fas --model GTR --gamma --analysis all \
+python3 panDecay.py alignment.fas --nst 6 --base-freq estimate --gamma --analysis all \
     --bayesian-software mrbayes --bayes-ngen 1000000 --output complete_analysis.txt
 ```
 
@@ -1072,11 +1174,11 @@ Calculate dataset-relative rankings for within-dataset interpretation:
 
 ```bash
 # Basic dataset-relative analysis
-python3 panDecay.py alignment.fas --analysis ml+bayesian --model GTR --gamma \
+python3 panDecay.py alignment.fas --analysis ml+bayesian --nst 6 --base-freq estimate --gamma \
     --dataset-relative --output dataset_relative_analysis.txt
 
 # Just normalized metrics without dataset-relative ranking
-python3 panDecay.py alignment.fas --analysis ml+bayesian --model GTR --gamma \
+python3 panDecay.py alignment.fas --analysis ml+bayesian --nst 6 --base-freq estimate --gamma \
     --output basic_normalization.txt
 ```
 
@@ -1084,7 +1186,7 @@ python3 panDecay.py alignment.fas --analysis ml+bayesian --model GTR --gamma \
 Combine dataset-relative normalization with site-specific analysis:
 
 ```bash
-python3 panDecay.py alignment.fas --analysis ml+bayesian --model GTR --gamma \
+python3 panDecay.py alignment.fas --analysis ml+bayesian --nst 6 --base-freq estimate --gamma \
     --dataset-relative --site-analysis --visualize \
     --output relative_support_with_sites.txt
 ```
@@ -1094,15 +1196,15 @@ Compare support across multiple datasets using dataset-relative metrics:
 
 ```bash
 # Study 1: Primate phylogeny
-python3 panDecay.py primates.fas --analysis ml+bayesian --model GTR --gamma \
+python3 panDecay.py primates.fas --analysis ml+bayesian --nst 6 --base-freq estimate --gamma \
     --dataset-relative --output primates_relative.txt
 
 # Study 2: Mammalian phylogeny  
-python3 panDecay.py mammals.fas --analysis ml+bayesian --model GTR --gamma \
+python3 panDecay.py mammals.fas --analysis ml+bayesian --nst 6 --base-freq estimate --gamma \
     --dataset-relative --output mammals_relative.txt
 
 # Study 3: Vertebrate phylogeny
-python3 panDecay.py vertebrates.fas --analysis ml+bayesian --model GTR --gamma \
+python3 panDecay.py vertebrates.fas --analysis ml+bayesian --nst 6 --base-freq estimate --gamma \
     --dataset-relative --output vertebrates_relative.txt
 
 # Dataset-relative metrics provide meaningful within-dataset rankings
@@ -1114,7 +1216,7 @@ Generate dataset-relative metrics suitable for phylogenetic meta-analysis:
 
 ```bash
 # Calculate relative metrics with comprehensive normalization
-python3 panDecay.py alignment.fas --analysis all --model GTR --gamma \
+python3 panDecay.py alignment.fas --analysis all --nst 6 --base-freq estimate --gamma \
     --dataset-relative --bootstrap --bootstrap-reps 1000 --output meta_analysis_ready.txt
 
 # Dataset-relative metrics provide honest relative rankings within datasets:

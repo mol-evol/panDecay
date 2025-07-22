@@ -211,6 +211,7 @@ class FileTracker:
             "reports": [],
             "visualizations": [],
             "site_analysis": [],
+            "logs": [],
         }
         
     def get_organized_path(self, category: str, filename: str) -> Path:
@@ -229,7 +230,8 @@ class FileTracker:
             "trees": "trees",
             "reports": "reports",
             "visualizations": "visualizations", 
-            "site_analysis": "site_analysis"
+            "site_analysis": "site_analysis",
+            "logs": "logs"
         }
         
         subdir = category_dirs.get(category, "misc")

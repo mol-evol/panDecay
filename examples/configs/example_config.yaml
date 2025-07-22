@@ -96,14 +96,6 @@ visualization:
     font_size: 12                          # Font size for labels and titles
     color_palette: "viridis"               # Color palette for plots
   
-  # Interactive Plot Configuration (Exploratory)
-  interactive:
-    theme: "plotly_white"                  # Plotly theme: plotly_white, plotly_dark, etc.
-    export_html: true                      # Export interactive plots as HTML
-    include_controls: true                 # Include zoom, pan, hover controls
-    width: 1200                            # Plot width in pixels
-    height: 800                            # Plot height in pixels
-    color_scale: "viridis"                 # Color scale for interactive plots
 
 # Constraint Analysis Settings
 constraints:

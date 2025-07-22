@@ -131,15 +131,15 @@ panDecay/
 ### 5. `src/dual_visualization.py` - Visualization Systems
 
 **Primary Classes:**
-- `DualVisualizationSystem`: Unified visualization interface
-- `StaticPlotter`: Matplotlib-based static plots
-- `InteractivePlotter`: Plotly-based interactive plots
+- `PlotManager`: Matplotlib-based visualization system
+- `AlignmentVisualizer`: Site-specific alignment visualization
+- `FileTracker`: Organized output directory management
 
 **Features:**
-- Dual output support (static + interactive)
-- Publication-ready static plots (PNG, PDF, SVG)
-- Interactive dashboards with zoom, pan, hover
-- Consistent styling and theming across both systems
+- Static publication-ready plots (PNG format)
+- Organized timestamp-based directory structure
+- Site-specific alignment visualization
+- Progress tracking with clean console output
 
 ## Key Classes and Components
 
@@ -280,7 +280,7 @@ class ExternalToolsConfig(BaseModel):
 def create_new_plot_type(self, data, config):
     """Create new visualization type."""
     # Static version (matplotlib)
-    # Interactive version (plotly)
+    # Static matplotlib visualization
 ```
 
 2. **Update configuration:**

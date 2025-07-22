@@ -158,9 +158,10 @@ COMPLETED: All constraint analyses completed
 Performing AU test for statistical significance...
 COMPLETED: AU test completed
 
-Writing results to: pan_decay_indices.txt
-Writing annotated trees to: annotated_tree_*.nwk
-Writing detailed report to: pan_decay_indices_detailed.md
+Creating organized output directory: 20241015_143022_panDecay_alignment/
+Writing results to: 20241015_143022_panDecay_alignment/results/pan_decay_indices.txt
+Writing annotated trees to: 20241015_143022_panDecay_alignment/trees/annotated_tree_*.nwk
+Writing detailed report to: 20241015_143022_panDecay_alignment/reports/pan_decay_indices.md
 
 Analysis completed successfully!
 ```
@@ -169,14 +170,28 @@ Analysis completed successfully!
 
 ### Step 4: Find Your Results
 
-Look for these new files in your directory:
-- `pan_decay_indices.txt` - Main results table
-- `annotated_tree_ml.nwk` - Tree with support values
-- `pan_decay_indices_detailed.md` - Human-readable report
+Look for the new organized directory structure:
+```
+20241015_143022_panDecay_alignment/
+├── results/
+│   └── pan_decay_indices.txt         # Main results table
+├── trees/ 
+│   ├── annotated_tree_au.nwk         # Tree with AU p-values
+│   ├── annotated_tree_delta_lnl.nwk  # Tree with likelihood differences
+│   └── annotated_tree_combined.nwk   # Tree with combined annotations
+├── reports/
+│   └── pan_decay_indices.md          # Human-readable report
+└── logs/
+    └── panDecay_debug.log            # Analysis log
+```
 
 ## Understanding Your Results
 
-Let's decode what panDecay found. Open the `pan_decay_indices.txt` file:
+Let's decode what panDecay found. Navigate to the results directory and open the `pan_decay_indices.txt` file:
+
+```bash
+cd 20241015_143022_panDecay_alignment/results/
+```
 
 ### Main Results Table
 
@@ -218,7 +233,14 @@ For `Clade_1` above:
 
 ### The Detailed Report
 
-Open `pan_decay_indices_detailed.md` for a more complete explanation:
+Navigate to the reports directory and open the detailed report:
+
+```bash
+cd ../reports/
+open pan_decay_indices.md
+```
+
+This file contains a more complete explanation:
 
 ```markdown
 # panDecay ML Branch Support Analysis Report
@@ -338,21 +360,22 @@ python3 panDecay.py examples/data/Primate.nex --analysis ml
 - Reading results
 - Understanding decay indices
 
-### Example 2: Add Visualization
+### Example 2: Add Site-Specific Visualization
 
 ```bash
-python3 panDecay.py examples/data/Primate.nex --analysis ml --viz-format both
+python3 panDecay.py examples/data/Primate.nex --analysis ml --site-analysis --create-alignment-viz
 ```
 
 **New concepts:**
-- `--viz-format both` creates both static and interactive plots
-- Visual representation of support values
-- Data exploration through plots
+- `--site-analysis` performs site-specific likelihood analysis
+- `--create-alignment-viz` creates alignment visualization with support overlays
+- Visual representation of supporting/conflicting sites for each branch
 
 **Check your results:**
-- Look for `.png` files (static plots)  
-- Look for `.html` files (interactive plots)
-- Open HTML files in your browser for interactive exploration
+- Navigate to your timestamped results directory
+- Look in `visualizations/` for `.png` distribution plots
+- Look in `site_analysis/` for site-specific plots and histograms
+- All plots are publication-ready static images
 
 ### Example 3: Protein Data with Model Selection
 

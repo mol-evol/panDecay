@@ -8,7 +8,7 @@ This guide helps you upgrade from panDecay v1.0 to v1.1, which introduces signif
 
 - **YAML/TOML Configuration**: Modern configuration format with validation
 - **Async Constraint Processing**: Parallel constraint analysis for 50-80% performance improvement
-- **Dual Visualization System**: Both static (matplotlib) and interactive (Plotly) visualizations
+- **Organized Output Structure**: Timestamp-based directory organization for better file management
 - **Docker Containerization**: Production-ready containers with PAUP* and MrBayes
 - **Enhanced Error Handling**: Improved diagnostics and graceful degradation
 
@@ -74,8 +74,8 @@ Choose between static plots (publications) and interactive plots (exploration):
 # Static plots only (matplotlib) - good for publications
 python3 panDecay.py alignment.fas --viz-format static
 
-# Interactive plots only (Plotly) - good for exploration
-python3 panDecay.py alignment.fas --viz-format interactive  
+# All visualization is now matplotlib-based static plots
+# Output is organized in timestamped directories
 
 # Both formats (default) - maximum flexibility
 python3 panDecay.py alignment.fas --viz-format both
@@ -190,7 +190,7 @@ python3 panDecay.py alignment.fas --analysis bayesian --debug
 #### 1. Missing Dependencies
 ```bash
 # Install new dependencies
-pip3 install pydantic pyyaml plotly toml
+pip3 install pydantic pyyaml toml
 
 # Or from requirements
 pip3 install -r requirements.txt

@@ -177,14 +177,11 @@ bayesian:
 
 ```yaml
 visualization:
-  # Output format: static, interactive, both
-  format: "both"
+  # Output format: static (only supported format)
+  format: "static"
   
   # Static plot formats
-  static_formats: ["png", "pdf"]
-  
-  # Interactive plot format
-  interactive_format: "html"
+  static_formats: ["png"]
   
   # Plot resolution (DPI)
   dpi: 300

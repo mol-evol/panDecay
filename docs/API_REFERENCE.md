@@ -317,22 +317,22 @@ class ConstraintResult:
 
 ## Visualization Systems
 
-### DualVisualizationSystem
+### PlotManager
 
-Unified interface for static and interactive visualizations.
+Static matplotlib-based visualization system for phylogenetic analysis results.
 
 #### Constructor
 ```python
-DualVisualizationSystem(
-    config: VisualizationConfig,
-    output_dir: Path
+PlotManager(
+    output_dir: Path,
+    file_tracker: Optional[FileTracker] = None
 )
 ```
 
 #### Key Methods
 
-##### `create_visualizations(data: Dict[str, Any], analysis_type: str) -> Dict[str, List[Path]]`
-Creates both static and interactive visualizations based on configuration.
+##### `create_distribution_plot(data: Dict[str, Any], analysis_type: str) -> Path`
+Creates publication-ready static distribution plots of support values.
 
 **Parameters:**
 - `data`: Analysis results data
@@ -514,22 +514,25 @@ print(f"Successful: {len(successful)}, Failed: {len(failed)}")
 ### Custom Visualization Example
 
 ```python
-from src.dual_visualization import DualVisualizationSystem
-from src.config_models import VisualizationConfig
+from src.visualization.plot_manager import PlotManager
+from pathlib import Path
 
-# Configure visualization
-viz_config = VisualizationConfig(
-    format="both",
-    static_formats=["png", "svg"],
-    interactive_format="html",
-    dpi=300
-)
+# Create plot manager with organized output directory
+output_dir = Path("20241015_143022_panDecay_alignment/visualizations/")
+plot_manager = PlotManager(output_dir)
 
-# Create visualizations
-viz_system = DualVisualizationSystem(viz_config, Path("output"))
-plots = viz_system.create_visualizations(results, "ml")
+# Create static distribution plot
+distribution_plot = plot_manager.create_distribution_plot(results, "ml")
 
-print(f"Created {len(plots['static'])} static and {len(plots['interactive'])} interactive plots")
+print(f"Created distribution plot: {distribution_plot}")
+
+# Create site-specific alignment visualizations (if site analysis performed)
+if site_analysis_data:
+    alignment_plots = plot_manager.create_alignment_visualizations(
+        site_analysis_data, 
+        alignment_data
+    )
+    print(f"Created {len(alignment_plots)} site-specific plots")
 ```
 
 ---

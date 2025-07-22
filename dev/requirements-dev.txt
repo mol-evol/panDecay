@@ -4,9 +4,12 @@
 # Core dependencies (also in requirements.txt)
 biopython>=1.79
 numpy>=1.20.0
+ete3>=3.1.0
 matplotlib>=3.3.0
 seaborn>=0.11.0
-ete3>=3.1.0
+pyyaml>=5.4.0
+toml>=0.10.0
+pydantic>=1.8.0
 
 # Testing framework
 pytest>=6.0.0
