@@ -8197,6 +8197,23 @@ def create_decay_calc_from_args(args: Any) -> Any:
 
 
 
+def case_insensitive_choice(choices):
+    """Create a type function for case-insensitive argument choices.
+    
+    Args:
+        choices: List of valid lowercase choice values
+        
+    Returns:
+        Type function that accepts case-insensitive input and returns lowercase value
+    """
+    def _type_func(value):
+        lower_value = value.lower()
+        if lower_value in choices:
+            return lower_value
+        raise argparse.ArgumentTypeError(f"invalid choice: '{value}' (choose from {choices})")
+    return _type_func
+
+
 def _create_argument_parser():
     """Create and configure the command-line argument parser."""
     parser = argparse.ArgumentParser(
@@ -8206,7 +8223,7 @@ def _create_argument_parser():
     # Arguments (similar to original, ensure help messages are clear)
     parser.add_argument("alignment", nargs='?', help="Input alignment file path (can be specified in config file).")
     parser.add_argument("--format", default=None, 
-                       choices=["fasta", "phylip", "nexus", "clustal", "stockholm"],
+                       type=case_insensitive_choice(["fasta", "phylip", "nexus", "clustal", "stockholm"]),
                        help="Override auto-detected alignment format. Format is automatically detected from file extension and content by default.")
     parser.add_argument("--model", default="GTR", help="Base substitution model (e.g., GTR, HKY, JC). **DEPRECATED for DNA data** - use --nst instead. For protein/discrete data only.")
     parser.add_argument("--gamma", action="store_true", help="Add Gamma rate heterogeneity (+G) to model.")
@@ -8219,15 +8236,15 @@ def _create_argument_parser():
     parser.add_argument("--create-alignment-viz", action="store_true", help="Create alignment visualization with site-specific support overlays (requires --site-analysis).")
     parser.add_argument("--viz-chunk-size", type=int, default=2000, help="Maximum sites per alignment visualization chunk (default: 2000).")
     parser.add_argument("--viz-layout", choices=["auto", "single", "separate"], default="auto", help="Layout strategy for visualization: auto (adaptive), single (all clades together), separate (individual clade files).")
-    parser.add_argument("--data-type", default="dna", choices=["dna", "protein", "discrete"], help="Type of sequence data.")
+    parser.add_argument("--data-type", default="dna", type=case_insensitive_choice(["dna", "protein", "discrete"]), help="Type of sequence data.")
     
     
     # Model parameter overrides
     mparams = parser.add_argument_group('Model Parameter Overrides (optional)')
     mparams.add_argument("--gamma-shape", type=float, help="Fixed Gamma shape value (default: estimate if +G).")
     mparams.add_argument("--prop-invar", type=float, help="Fixed proportion of invariable sites (default: estimate if +I).")
-    mparams.add_argument("--base-freq", choices=["equal", "estimate", "empirical"], help="Base/state frequencies (default: model-dependent). 'empirical' uses observed frequencies.")
-    mparams.add_argument("--rates", choices=["equal", "gamma"], help="Site rate variation model (overrides --gamma flag if specified).")
+    mparams.add_argument("--base-freq", type=case_insensitive_choice(["equal", "estimate", "empirical"]), help="Base/state frequencies (default: model-dependent). 'empirical' uses observed frequencies.")
+    mparams.add_argument("--rates", type=case_insensitive_choice(["equal", "gamma"]), help="Site rate variation model (overrides --gamma flag if specified).")
     mparams.add_argument("--protein-model", help="Specific protein model (e.g., JTT, WAG; overrides base --model for protein data).")
     mparams.add_argument("--nst", type=int, choices=[1, 2, 6], help="Number of substitution types for DNA data. Directly controls substitution complexity: 1=JC-like (equal rates), 2=HKY-like (ti/tv), 6=GTR-like (all rates). Overrides model-based NST for both PAUP* and MrBayes.")
     mparams.add_argument("--parsmodel", action=argparse.BooleanOptionalAction, default=None, help="Use parsimony-based branch lengths (discrete data; defaults to yes for discrete data). Use --no-parsmodel to disable.")
@@ -8246,7 +8263,7 @@ def _create_argument_parser():
     # Analysis mode selection
     analysis_mode = parser.add_argument_group('Analysis Mode')
     analysis_mode.add_argument("--analysis", 
-                              choices=["ml", "bayesian", "parsimony", "ml+parsimony", "bayesian+parsimony", "ml+bayesian", "all"], 
+                              type=case_insensitive_choice(["ml", "bayesian", "parsimony", "ml+parsimony", "bayesian+parsimony", "ml+bayesian", "all"]), 
                               default="ml",
                               help="Type of decay analysis to perform. "
                                    "Options: ml, bayesian, parsimony, ml+parsimony, bayesian+parsimony, ml+bayesian, all")
@@ -8266,7 +8283,7 @@ def _create_argument_parser():
     bayesian_opts.add_argument("--bayes-burnin", type=float, default=0.25, help="Burnin fraction (0-1)")
     bayesian_opts.add_argument("--bayes-chains", type=int, default=4, help="Number of MCMC chains")
     bayesian_opts.add_argument("--bayes-sample-freq", type=int, default=1000, help="Sample frequency for MCMC")
-    bayesian_opts.add_argument("--marginal-likelihood", choices=["ss", "ps", "hm"], default="ss",
+    bayesian_opts.add_argument("--marginal-likelihood", type=case_insensitive_choice(["ss", "ps", "hm"]), default="ss",
                               help="Marginal likelihood estimation method: ss=stepping-stone, ps=path sampling, hm=harmonic mean")
     bayesian_opts.add_argument("--ss-alpha", type=float, default=0.4, help="Alpha parameter for stepping-stone sampling")
     bayesian_opts.add_argument("--ss-nsteps", type=int, default=50, help="Number of steps for stepping-stone sampling")
@@ -8275,7 +8292,7 @@ def _create_argument_parser():
     normalization_opts = parser.add_argument_group('Likelihood Decay Normalization Options')
     
     # Unified normalization option
-    normalization_opts.add_argument("--normalization", choices=["none", "basic", "full"], default="basic",
+    normalization_opts.add_argument("--normalization", type=case_insensitive_choice(["none", "basic", "full"]), default="basic",
                                    help="Normalization level: none (no normalization), basic (per-site and relative metrics), full (includes dataset-relative rankings and z-scores for cross-branch comparison)")
     
     
@@ -8285,11 +8302,11 @@ def _create_argument_parser():
     parallel_opts.add_argument("--mpi-processors", type=int, help="Number of MPI processors (default: number of chains)")
     parallel_opts.add_argument("--mpirun-path", default="mpirun", help="Path to mpirun executable")
     parallel_opts.add_argument("--use-beagle", action="store_true", help="Enable BEAGLE library for GPU/CPU acceleration")
-    parallel_opts.add_argument("--beagle-device", choices=["cpu", "gpu", "auto"], default="auto", 
+    parallel_opts.add_argument("--beagle-device", type=case_insensitive_choice(["cpu", "gpu", "auto"]), default="auto", 
                              help="BEAGLE device preference")
-    parallel_opts.add_argument("--beagle-precision", choices=["single", "double"], default="double",
+    parallel_opts.add_argument("--beagle-precision", type=case_insensitive_choice(["single", "double"]), default="double",
                              help="BEAGLE precision mode")
-    parallel_opts.add_argument("--beagle-scaling", choices=["none", "dynamic", "always"], default="dynamic",
+    parallel_opts.add_argument("--beagle-scaling", type=case_insensitive_choice(["none", "dynamic", "always"]), default="dynamic",
                              help="BEAGLE scaling frequency")
     
     # Convergence checking options
@@ -8310,10 +8327,10 @@ def _create_argument_parser():
     viz_opts = parser.add_argument_group('Visualization Output (optional)')
     viz_opts.add_argument("--visualize", action="store_true", help="Generate visualization plots using matplotlib.")
     viz_opts.add_argument("--viz-format", default="png", 
-                         choices=["png", "pdf", "svg"], 
+                         type=case_insensitive_choice(["png", "pdf", "svg"]), 
                          help="Visualization file format")
-    viz_opts.add_argument("--annotation", default="lnl", choices=["au", "lnl"], help="Type of support values to visualize in distribution plots (au=AU p-values, lnl=likelihood differences).")
-    viz_opts.add_argument("--output-style", choices=["unicode", "ascii", "minimal"], default="unicode",
+    viz_opts.add_argument("--annotation", default="lnl", type=case_insensitive_choice(["au", "lnl"]), help="Type of support values to visualize in distribution plots (au=AU p-values, lnl=likelihood differences).")
+    viz_opts.add_argument("--output-style", type=case_insensitive_choice(["unicode", "ascii", "minimal"]), default="unicode",
                          help="Output formatting style: unicode (modern), ascii (compatible), minimal (basic)")
     
     # Configuration file and constraint selection options
@@ -8323,7 +8340,7 @@ def _create_argument_parser():
                            help="Generate a template configuration file and exit. Format auto-detected from extension (.ini, .yaml/.yml, .toml)")
     config_opts.add_argument("--validate-config", metavar='CONFIG_FILE',
                            help="Validate configuration file and exit (checks syntax and required fields)")
-    config_opts.add_argument("--constraint-mode", choices=["all", "specific", "exclude"], default="all",
+    config_opts.add_argument("--constraint-mode", type=case_insensitive_choice(["all", "specific", "exclude"]), default="all",
                            help="Branch selection mode: all (test all branches), specific (test only specified), exclude (test all except specified)")
     config_opts.add_argument("--test-branches", 
                            help="Specify branches to test. Format: 'taxon1,taxon2,taxon3;taxon4,taxon5' for clades, '1,3,5' for branch IDs, or '@file.txt' to read from file")
@@ -8431,8 +8448,7 @@ def main() -> None:
     if not args.alignment:
         parser.error("Alignment file must be specified either as a command-line argument or in the config file")
     
-    # Convert data_type to lowercase to handle case-insensitive input
-    args.data_type = args.data_type.lower()
+    # Note: data_type is already lowercase from case_insensitive_choice() type function
     
     # Validate alignment visualization arguments
     if args.create_alignment_viz and not args.site_analysis:
