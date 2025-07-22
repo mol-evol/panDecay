@@ -1242,12 +1242,12 @@ class panDecayIndices:
     Refactored architecture uses modular analysis engines and I/O components.
     """
 
-    def __init__(self, alignment_file: Union[str, Path], alignment_format: str = "fasta", model: str = "GTR+G",
+    def __init__(self, alignment_file: Union[str, Path], alignment_format: str = "fasta",
                  temp_dir: Optional[Path] = None, paup_path: str = "paup", threads: Union[str, int] = "auto",
                  starting_tree: Optional[Path] = None, data_type: str = "dna",
                  debug: bool = False, keep_files: bool = False, gamma_shape: Optional[float] = None, 
                  prop_invar: Optional[float] = None, base_freq: Optional[str] = None, rates: Optional[str] = None, 
-                 protein_model: Optional[str] = None, nst: Optional[int] = None,
+                 protein_model: Optional[str] = None, discrete_model: Optional[str] = None, nst: Optional[int] = None,
                  parsmodel: Optional[bool] = None, paup_block: Optional[str] = None, analysis_mode: str = "ml",
                  bayesian_software: Optional[str] = None, mrbayes_path: str = "mb",
                  bayes_model: Optional[str] = None, bayes_ngen: int = 1000000, bayes_burnin: float = BURNIN_FRACTION,
@@ -1267,7 +1267,6 @@ class panDecayIndices:
 
         self.alignment_file = Path(alignment_file)
         self.alignment_format = alignment_format
-        self.model_str = model # Keep original model string for reference
         self.paup_path = paup_path
         self.starting_tree = starting_tree # Already a Path or None from main
         self.debug = debug
@@ -1277,6 +1276,7 @@ class panDecayIndices:
         self.base_freq_arg = base_freq
         self.rates_arg = rates
         self.protein_model_arg = protein_model
+        self.discrete_model_arg = discrete_model
         self.nst_arg = nst
         self.parsmodel_arg = parsmodel # For discrete data, used in _convert_model_to_paup
         self.user_paup_block = paup_block # Raw user block content
@@ -1444,9 +1444,9 @@ class panDecayIndices:
         self.parsmodel = False # Default, will be set by _convert_model_to_paup if discrete
         if self.user_paup_block is None:
             self.paup_model_cmds = self._convert_model_to_paup(
-                self.model_str, gamma_shape=self.gamma_shape_arg, prop_invar=self.prop_invar_arg,
+                gamma_shape=self.gamma_shape_arg, prop_invar=self.prop_invar_arg,
                 base_freq=self.base_freq_arg, rates=self.rates_arg,
-                protein_model=self.protein_model_arg, nst=self.nst_arg,
+                protein_model=self.protein_model_arg, discrete_model=self.discrete_model_arg, nst=self.nst_arg,
                 parsmodel_user_intent=self.parsmodel_arg # Pass user intent
             )
         else:
@@ -1541,52 +1541,58 @@ class panDecayIndices:
         elif hasattr(self, 'temp_path') and self.keep_files:
             logger.info(f"Keeping temporary directory: {self.temp_path}")
 
-    def _convert_model_to_paup(self, model_str, gamma_shape, prop_invar, base_freq, rates, protein_model, nst, parsmodel_user_intent):
-        """Converts model string and params to PAUP* 'lset' command part (without 'lset' itself)."""
+    def _convert_model_to_paup(self, gamma_shape, prop_invar, base_freq, rates, protein_model, discrete_model, nst, parsmodel_user_intent):
+        """Converts model parameters to PAUP* 'lset' command part (without 'lset' itself)."""
         cmd_parts = []
-        has_gamma = "+G" in model_str.upper()
-        has_invar = "+I" in model_str.upper()
-        base_model_name = model_str.split("+")[0].upper()
         
         if self.debug:
-            logger.debug(f"Model conversion debug - model_str: {model_str}, base_model_name: {base_model_name}, data_type: {self.data_type}")
+            logger.debug(f"Model conversion debug - data_type: {self.data_type}, nst: {nst}, protein_model: {protein_model}, discrete_model: {discrete_model}")
 
         if self.data_type == "dna":
-            if nst is not None: cmd_parts.append(f"nst={nst}")
-            elif base_model_name == "GTR": cmd_parts.append(f"nst={NST_GTR}")
-            elif base_model_name in ["HKY", "K2P", "K80", "TN93"]: cmd_parts.append(f"nst={NST_HKY}")
-            elif base_model_name in ["JC", "JC69", "F81"]: cmd_parts.append(f"nst={NST_JC}")
-            else:
-                logger.warning(f"Unknown DNA model: {base_model_name}, defaulting to GTR (nst={NST_GTR}).")
-                logger.warning("💡 Tip: Use --nst directly for clearer DNA model specification:")
-                logger.warning("   --nst 1 (equal rates), --nst 2 (ti/tv), --nst 6 (all rates)")
-                cmd_parts.append(f"nst={NST_GTR}")
-
-            current_nst = next((p.split('=')[1] for p in cmd_parts if "nst=" in p), None)
-            if current_nst == '6' or (base_model_name == "GTR" and nst is None):
+            # For DNA: NST directly controls substitution complexity
+            cmd_parts.append(f"nst={nst}")
+            
+            # Add appropriate substitution parameters based on NST
+            if nst == 6:
                 cmd_parts.append("rmatrix=estimate")
-            elif current_nst == '2' or (base_model_name in ["HKY", "K2P"] and nst is None):
+            elif nst == 2:
                 cmd_parts.append("tratio=estimate")
-
-            if base_freq: cmd_parts.append(f"basefreq={base_freq}")
-            elif base_model_name in ["JC", "K2P", "JC69", "K80"] : cmd_parts.append("basefreq=equal")
-            else: cmd_parts.append("basefreq=estimate") # GTR, HKY, F81, TN93 default to estimate
+            # NST=1 needs no additional substitution parameters
+            
+            # Base frequencies
+            if base_freq:
+                cmd_parts.append(f"basefreq={base_freq}")
+            else:
+                # Default base frequency handling
+                if nst == 1:
+                    cmd_parts.append("basefreq=equal")
+                else:
+                    cmd_parts.append("basefreq=estimate")
 
         elif self.data_type == "protein":
+            # For protein: use the specified protein model
             valid_protein_models = ["JTT", "WAG", "LG", "DAYHOFF", "MTREV", "CPREV", "BLOSUM62", "HIVB", "HIVW"]
-            if protein_model: cmd_parts.append(f"protein={protein_model.lower()}")
-            elif base_model_name.upper() in valid_protein_models: cmd_parts.append(f"protein={base_model_name.lower()}")
+            if protein_model.upper() in valid_protein_models:
+                cmd_parts.append(f"protein={protein_model.lower()}")
             else:
-                logger.warning(f"Unknown protein model: {base_model_name}, defaulting to JTT.")
-                cmd_parts.append("protein=jtt")
+                logger.warning(f"Unknown protein model: {protein_model}, defaulting to WAG.")
+                cmd_parts.append("protein=wag")
 
-        elif self.data_type == "discrete": # Typically Mk model
-            cmd_parts.append(f"nst={NST_MK}") # For standard Mk
-            if base_freq: cmd_parts.append(f"basefreq={base_freq}")
-            else: cmd_parts.append("basefreq=equal") # Default for Mk
+        elif self.data_type == "discrete":
+            # For discrete/morphological data
+            if discrete_model.upper() == "MK":
+                cmd_parts.append(f"nst={NST_MK}")
+            else:
+                logger.warning(f"Unknown discrete model: {discrete_model}, defaulting to Mk.")
+                cmd_parts.append(f"nst={NST_MK}")
+                
+            if base_freq:
+                cmd_parts.append(f"basefreq={base_freq}")
+            else:
+                cmd_parts.append("basefreq=equal")  # Default for discrete
 
-            if parsmodel_user_intent is None: # If user didn't specify, default to True for discrete
-                self.parsmodel = True
+            if parsmodel_user_intent is None:
+                self.parsmodel = True  # Default to parsimony model for discrete
             else:
                 self.parsmodel = bool(parsmodel_user_intent)
 
@@ -8120,8 +8126,16 @@ def get_rates_suffix(rates: str) -> str:
 
 def create_decay_calc_from_args(args: Any) -> Any:
     """Create panDecayIndices instance from argument namespace."""
-    # Convert effective model string
-    effective_model_str = args.model + get_rates_suffix(args.rates)
+    # Build data-type-specific model specification
+    if args.data_type == "dna":
+        # For DNA: NST + rates define the model completely
+        effective_model_str = f"NST{args.nst}" + get_rates_suffix(args.rates)
+    elif args.data_type == "protein":
+        effective_model_str = args.protein_model + get_rates_suffix(args.rates)
+    elif args.data_type == "discrete":
+        effective_model_str = args.discrete_model + get_rates_suffix(args.rates)
+    else:
+        effective_model_str = "Unknown" + get_rates_suffix(args.rates)
     
     # Handle PAUP block if specified
     paup_block_content = None
@@ -8160,7 +8174,7 @@ def create_decay_calc_from_args(args: Any) -> Any:
         keep_files=args.keep_files,
         gamma_shape=args.gamma_shape, prop_invar=args.prop_invar,
         base_freq=args.base_freq, rates=args.rates,
-        protein_model=args.protein_model, nst=args.nst,
+        protein_model=args.protein_model, discrete_model=args.discrete_model, nst=args.nst,
         parsmodel=args.parsmodel,
         paup_block=paup_block_content,
         analysis_mode=args.analysis,
@@ -8230,7 +8244,7 @@ def _create_argument_parser():
     parser.add_argument("--format", default=None, 
                        type=case_insensitive_choice(["fasta", "phylip", "nexus", "clustal", "stockholm"]),
                        help="Override auto-detected alignment format. Format is automatically detected from file extension and content by default.")
-    parser.add_argument("--model", default="GTR", help="Base substitution model (e.g., GTR, HKY, JC). **DEPRECATED for DNA data** - use --nst instead. For protein/discrete data only.")
+    # --model flag removed - use data-type-specific flags instead
 
     parser.add_argument("--paup", default="paup", help="Path to PAUP* executable.")
     parser.add_argument("--output", default="pan_decay_indices.txt", help="Output file for summary results.")
@@ -8249,8 +8263,9 @@ def _create_argument_parser():
     mparams.add_argument("--base-freq", type=case_insensitive_choice(["equal", "estimate", "empirical"]), help="Base/state frequencies (default: model-dependent). 'empirical' uses observed frequencies.")
     mparams.add_argument("--rates", type=case_insensitive_choice(["equal", "gamma", "propinv", "invgamma"]), default="equal",
                         help="Site rate variation model: equal (no variation), gamma (+G), propinv (+I), invgamma (+I+G).")
-    mparams.add_argument("--protein-model", help="Specific protein model (e.g., JTT, WAG; overrides base --model for protein data).")
-    mparams.add_argument("--nst", type=int, choices=[1, 2, 6], help="Number of substitution types for DNA data. Directly controls substitution complexity: 1=JC-like (equal rates), 2=HKY-like (ti/tv), 6=GTR-like (all rates). Overrides model-based NST for both PAUP* and MrBayes.")
+    mparams.add_argument("--protein-model", default="WAG", help="Protein substitution model (e.g., JTT, WAG, LG, Dayhoff).")
+    mparams.add_argument("--discrete-model", default="Mk", help="Discrete/morphological character model (default: Mk).")
+    mparams.add_argument("--nst", type=int, choices=[1, 2, 6], default=2, help="Number of substitution types for DNA data. Directly controls substitution complexity: 1=JC-like (equal rates), 2=HKY-like (ti/tv), 6=GTR-like (all rates). Default: 2 (PAUP*'s default).")
     mparams.add_argument("--parsmodel", action=argparse.BooleanOptionalAction, default=None, help="Use parsimony-based branch lengths (discrete data; defaults to yes for discrete data). Use --no-parsmodel to disable.")
 
     run_ctrl = parser.add_argument_group('Runtime Control')
@@ -8477,26 +8492,20 @@ def main() -> None:
         args.keep_files = True # Debug implies keeping files
 
     # Construct full model string for display and internal use if not using paup_block
-    effective_model_str = args.model + get_rates_suffix(args.rates)
+    if args.data_type == "dna":
+        # For DNA: NST + rates define the model completely
+        effective_model_str = f"NST{args.nst}" + get_rates_suffix(args.rates)
+    elif args.data_type == "protein":
+        effective_model_str = args.protein_model + get_rates_suffix(args.rates)
+    elif args.data_type == "discrete":
+        effective_model_str = args.discrete_model + get_rates_suffix(args.rates)
+    else:
+        effective_model_str = "Unknown" + get_rates_suffix(args.rates)
     
-    # Issue deprecation warning for DNA data using --model instead of --nst
+    # Provide helpful information for DNA analysis
     if args.data_type == "dna" and not args.paup_block:
-        base_model = args.model.split("+")[0].upper()
-        if base_model in ["GTR", "HKY", "K2P", "K80", "TN93", "JC", "JC69", "F81"]:
-            nst_equivalent = {"GTR": 6, "HKY": 2, "K2P": 2, "K80": 2, "TN93": 2, "JC": 1, "JC69": 1, "F81": 1}
-            suggested_nst = nst_equivalent.get(base_model, 6)
-            
-            if args.nst is None:  # Only warn if user didn't already specify NST
-                logger.warning("⚠️  DEPRECATION WARNING: Using --model with DNA data is deprecated.")
-                logger.warning(f"   Please use --nst {suggested_nst} instead of --model {base_model}")
-                logger.warning(f"   Example: --nst {suggested_nst} --base-freq estimate --rates {args.rates}")
-                logger.warning("   This provides clearer control over substitution complexity.")
-    
-    # Provide helpful NST guidance for DNA analysis
-    if args.data_type == "dna" and args.nst is not None and not args.paup_block:
         nst_descriptions = {1: "equal substitution rates", 2: "transition/transversion distinction", 6: "all substitution rates vary"}
         logger.info(f"💡 Using NST={args.nst} ({nst_descriptions.get(args.nst, 'custom complexity')}) for DNA analysis")
-        logger.info("   NST provides software-agnostic control over substitution complexity")
     
     # Validate NST usage with non-DNA data
     if args.nst is not None and args.data_type != "dna":
@@ -8506,12 +8515,11 @@ def main() -> None:
         logger.error("   For discrete data: use --model Mk")
         sys.exit(1)
     
-    # Adjust for protein/discrete if base model is not specific enough
-    if args.data_type == "protein" and not args.protein_model and not any(pm in args.model.upper() for pm in ["JTT", "WAG", "LG", "DAYHOFF"]):
-        logger.info(f"Protein data with generic model '{args.model}'. Effective model might default to JTT within PAUP* settings.")
-        # effective_model_str might be JTT+G+I if G/I are on
-    elif args.data_type == "discrete" and "MK" not in args.model.upper():
-        logger.info(f"Discrete data with non-Mk model '{args.model}'. Effective model might default to Mk within PAUP* settings.")
+    # Log the selected model for different data types
+    if args.data_type == "protein":
+        logger.info(f"💡 Using protein model: {args.protein_model}")
+    elif args.data_type == "discrete":
+        logger.info(f"💡 Using discrete model: {args.discrete_model}")
 
     paup_block_content = None
     if args.paup_block:
