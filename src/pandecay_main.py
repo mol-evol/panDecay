@@ -8258,14 +8258,14 @@ def _create_argument_parser():
     
     # Model parameter overrides
     mparams = parser.add_argument_group('Model Parameter Overrides (optional)')
-    mparams.add_argument("--gamma-shape", type=float, help="Fixed Gamma shape value (default: estimate if +G).")
-    mparams.add_argument("--prop-invar", type=float, help="Fixed proportion of invariable sites (default: estimate if +I).")
-    mparams.add_argument("--base-freq", type=case_insensitive_choice(["equal", "estimate", "empirical"]), help="Base/state frequencies (default: model-dependent). 'empirical' uses observed frequencies.")
+    mparams.add_argument("--gamma-shape", type=float, help="Gamma distribution shape parameter (default: estimate).")
+    mparams.add_argument("--prop-invar", type=float, help="Proportion of invariable sites (default: estimate).")
+    mparams.add_argument("--base-freq", type=case_insensitive_choice(["equal", "estimate", "empirical"]), help="Base/state frequencies: equal, estimate, or empirical (default: auto).")
     mparams.add_argument("--rates", type=case_insensitive_choice(["equal", "gamma", "propinv", "invgamma"]), default="equal",
-                        help="Site rate variation model: equal (no variation), gamma (+G), propinv (+I), invgamma (+I+G).")
-    mparams.add_argument("--protein-model", default="WAG", help="Protein substitution model (e.g., JTT, WAG, LG, Dayhoff).")
-    mparams.add_argument("--discrete-model", default="Mk", help="Discrete/morphological character model (default: Mk).")
-    mparams.add_argument("--nst", type=int, choices=[1, 2, 6], default=2, help="Number of substitution types for DNA data. Directly controls substitution complexity: 1=JC-like (equal rates), 2=HKY-like (ti/tv), 6=GTR-like (all rates). Default: 2 (PAUP*'s default).")
+                        help="Rate variation across sites: equal, gamma, propinv, invgamma (default: equal).")
+    mparams.add_argument("--protein-model", default="WAG", help="Amino acid substitution model (default: WAG).")
+    mparams.add_argument("--discrete-model", default="Mk", help="Morphological character model (default: Mk).")
+    mparams.add_argument("--nst", type=int, choices=[1, 2, 6], default=2, help="DNA substitution complexity: 1=equal rates, 2=ti/tv rates, 6=all rates differ (default: 2).")
     mparams.add_argument("--parsmodel", action=argparse.BooleanOptionalAction, default=None, help="Use parsimony-based branch lengths (discrete data; defaults to yes for discrete data). Use --no-parsmodel to disable.")
 
     run_ctrl = parser.add_argument_group('Runtime Control')
