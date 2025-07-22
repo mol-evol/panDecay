@@ -1592,21 +1592,20 @@ class panDecayIndices:
 
 
         # Common rate variation and invariable sites for all data types
-        if rates: cmd_parts.append(f"rates={rates}")
-        elif has_gamma: cmd_parts.append("rates=gamma")
-        else: cmd_parts.append("rates=equal")
-
-        current_rates = next((p.split('=')[1] for p in cmd_parts if "rates=" in p), "equal")
-        if gamma_shape is not None and (current_rates == "gamma" or has_gamma):
+        cmd_parts.append(f"rates={rates}")
+        
+        # Handle gamma shape parameter
+        if gamma_shape is not None and rates in ["gamma", "invgamma"]:
             cmd_parts.append(f"shape={gamma_shape}")
-        elif current_rates == "gamma" or has_gamma:
+        elif rates in ["gamma", "invgamma"]:
             cmd_parts.append("shape=estimate")
 
+        # Handle proportion of invariable sites
         if prop_invar is not None:
             cmd_parts.append(f"pinvar={prop_invar}")
-        elif has_invar:
+        elif rates in ["propinv", "invgamma"]:
             cmd_parts.append("pinvar=estimate")
-        else: # No +I and no explicit prop_invar
+        else:
             cmd_parts.append(f"pinvar={PINVAR_ZERO}")
 
         return "lset " + " ".join(cmd_parts) + ";"
@@ -8108,15 +8107,21 @@ def _process_constraints_section(config, args):
 
 
 
-
+def get_rates_suffix(rates: str) -> str:
+    """Convert rates parameter to model suffix string."""
+    rates_map = {
+        "equal": "",
+        "gamma": "+G",
+        "propinv": "+I", 
+        "invgamma": "+I+G"
+    }
+    return rates_map.get(rates, "")
 
 
 def create_decay_calc_from_args(args: Any) -> Any:
     """Create panDecayIndices instance from argument namespace."""
     # Convert effective model string
-    effective_model_str = args.model
-    if args.gamma: effective_model_str += "+G"
-    if args.invariable: effective_model_str += "+I"
+    effective_model_str = args.model + get_rates_suffix(args.rates)
     
     # Handle PAUP block if specified
     paup_block_content = None
@@ -8226,8 +8231,6 @@ def _create_argument_parser():
                        type=case_insensitive_choice(["fasta", "phylip", "nexus", "clustal", "stockholm"]),
                        help="Override auto-detected alignment format. Format is automatically detected from file extension and content by default.")
     parser.add_argument("--model", default="GTR", help="Base substitution model (e.g., GTR, HKY, JC). **DEPRECATED for DNA data** - use --nst instead. For protein/discrete data only.")
-    parser.add_argument("--gamma", action="store_true", help="Add Gamma rate heterogeneity (+G) to model.")
-    parser.add_argument("--invariable", action="store_true", help="Add invariable sites (+I) to model.")
 
     parser.add_argument("--paup", default="paup", help="Path to PAUP* executable.")
     parser.add_argument("--output", default="pan_decay_indices.txt", help="Output file for summary results.")
@@ -8244,7 +8247,8 @@ def _create_argument_parser():
     mparams.add_argument("--gamma-shape", type=float, help="Fixed Gamma shape value (default: estimate if +G).")
     mparams.add_argument("--prop-invar", type=float, help="Fixed proportion of invariable sites (default: estimate if +I).")
     mparams.add_argument("--base-freq", type=case_insensitive_choice(["equal", "estimate", "empirical"]), help="Base/state frequencies (default: model-dependent). 'empirical' uses observed frequencies.")
-    mparams.add_argument("--rates", type=case_insensitive_choice(["equal", "gamma"]), help="Site rate variation model (overrides --gamma flag if specified).")
+    mparams.add_argument("--rates", type=case_insensitive_choice(["equal", "gamma", "propinv", "invgamma"]), default="equal",
+                        help="Site rate variation model: equal (no variation), gamma (+G), propinv (+I), invgamma (+I+G).")
     mparams.add_argument("--protein-model", help="Specific protein model (e.g., JTT, WAG; overrides base --model for protein data).")
     mparams.add_argument("--nst", type=int, choices=[1, 2, 6], help="Number of substitution types for DNA data. Directly controls substitution complexity: 1=JC-like (equal rates), 2=HKY-like (ti/tv), 6=GTR-like (all rates). Overrides model-based NST for both PAUP* and MrBayes.")
     mparams.add_argument("--parsmodel", action=argparse.BooleanOptionalAction, default=None, help="Use parsimony-based branch lengths (discrete data; defaults to yes for discrete data). Use --no-parsmodel to disable.")
@@ -8473,9 +8477,7 @@ def main() -> None:
         args.keep_files = True # Debug implies keeping files
 
     # Construct full model string for display and internal use if not using paup_block
-    effective_model_str = args.model
-    if args.gamma: effective_model_str += "+G"
-    if args.invariable: effective_model_str += "+I"
+    effective_model_str = args.model + get_rates_suffix(args.rates)
     
     # Issue deprecation warning for DNA data using --model instead of --nst
     if args.data_type == "dna" and not args.paup_block:
@@ -8487,7 +8489,7 @@ def main() -> None:
             if args.nst is None:  # Only warn if user didn't already specify NST
                 logger.warning("⚠️  DEPRECATION WARNING: Using --model with DNA data is deprecated.")
                 logger.warning(f"   Please use --nst {suggested_nst} instead of --model {base_model}")
-                logger.warning(f"   Example: --nst {suggested_nst} --base-freq estimate" + (" --gamma" if args.gamma else "") + (" --invariable" if args.invariable else ""))
+                logger.warning(f"   Example: --nst {suggested_nst} --base-freq estimate --rates {args.rates}")
                 logger.warning("   This provides clearer control over substitution complexity.")
     
     # Provide helpful NST guidance for DNA analysis

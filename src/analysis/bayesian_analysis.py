@@ -200,18 +200,26 @@ class BayesianAnalysisEngine(AnalysisEngine):
             
             # Model settings based on data type
             if self.config.data_type == "dna":
-                if hasattr(self.config, 'bayes_model'):
+                # Get NST value
+                if hasattr(self.config, 'nst') and self.config.nst is not None:
+                    nst_val = self.config.nst
+                elif hasattr(self.config, 'bayes_model'):
                     model = self.config.bayes_model.lower()
                     if model == "jc":
-                        mb_commands.append("lset nst=1 rates=equal;")
+                        nst_val = 1
                     elif model == "hky":
-                        mb_commands.append("lset nst=2 rates=gamma;")
+                        nst_val = 2
                     elif model == "gtr":
-                        mb_commands.append("lset nst=6 rates=gamma;")
+                        nst_val = 6
                     else:
-                        mb_commands.append("lset nst=6 rates=gamma;")  # Default to GTR
+                        nst_val = 6  # Default to GTR
                 else:
-                    mb_commands.append("lset nst=6 rates=gamma;")  # Default
+                    nst_val = 6  # Default
+                
+                # Get rates value
+                rates_val = getattr(self.config, 'rates', 'gamma')  # Default to gamma for compatibility
+                
+                mb_commands.append(f"lset nst={nst_val} rates={rates_val};")
             elif self.config.data_type == "protein":
                 mb_commands.append("prset aamodelpr=mixed;")
             
