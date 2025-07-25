@@ -6,11 +6,10 @@ This document provides comprehensive API documentation for panDecay's classes, m
 
 1. [Core Classes](#core-classes)
 2. [Configuration Models](#configuration-models)  
-3. [Async Processing](#async-processing)
-4. [Visualization Systems](#visualization-systems)
-5. [Utility Functions](#utility-functions)
-6. [Configuration Schema](#configuration-schema)
-7. [Usage Examples](#usage-examples)
+3. [Visualization Systems](#visualization-systems)
+4. [Utility Functions](#utility-functions)
+5. [Configuration Schema](#configuration-schema)
+6. [Usage Examples](#usage-examples)
 
 ## Core Classes
 
@@ -242,8 +241,6 @@ Performance and resource configuration.
 ```python
 class ComputationalConfig(BaseModel):
     threads: Union[int, str] = "auto"
-    async_constraints: bool = False
-    max_async_workers: int = 4
     constraint_timeout: int = 1800
     ml_timeout: int = 7200
     memory_limit: Optional[str] = None
@@ -263,57 +260,6 @@ class VisualizationConfig(BaseModel):
     theme: str = "publication"
 ```
 
-## Async Processing
-
-### AsyncConstraintProcessor
-
-Manages parallel constraint analysis execution.
-
-#### Constructor
-```python
-AsyncConstraintProcessor(
-    max_workers: int = 4,
-    timeout: int = 1800
-)
-```
-
-#### Key Methods
-
-##### `process_constraints_async(tasks: List[ConstraintTask]) -> List[ConstraintResult]`
-Executes constraint analyses in parallel using ThreadPoolExecutor.
-
-**Parameters:**
-- `tasks`: List of constraint analysis tasks
-
-**Returns:** List of analysis results with timing and error information.
-
-### ConstraintTask
-
-Represents a single constraint analysis task.
-
-```python
-@dataclass
-class ConstraintTask:
-    clade_id: str
-    taxa: List[str]
-    command_file: str
-    log_file: str
-    timeout: int = 1800
-```
-
-### ConstraintResult
-
-Contains results from constraint analysis execution.
-
-```python
-@dataclass  
-class ConstraintResult:
-    clade_id: str
-    success: bool
-    execution_time: float
-    result_data: Optional[Dict[str, Any]] = None
-    error_message: Optional[str] = None
-```
 
 ## Visualization Systems
 
@@ -409,8 +355,6 @@ analysis:
 
 computational:
   threads: "auto"               # auto or integer
-  async_constraints: true       # Enable parallel constraint processing
-  max_async_workers: 4          # Maximum parallel workers
   constraint_timeout: 1800      # Timeout per constraint (seconds)
   ml_timeout: 7200             # ML search timeout (seconds)
   memory_limit: "8G"           # Optional memory limit
@@ -485,31 +429,6 @@ calc = panDecayIndices(
 results = calc.run_analysis()
 ```
 
-### Async Processing Example
-
-```python
-from src.async_constraint_processor import AsyncConstraintProcessor, ConstraintTask
-
-# Create constraint tasks
-tasks = [
-    ConstraintTask(
-        clade_id=f"Clade_{i}",
-        taxa=clade_taxa,
-        command_file=f"constraint_{i}.nex",
-        log_file=f"constraint_{i}.log"
-    )
-    for i, clade_taxa in enumerate(constraint_list)
-]
-
-# Process in parallel
-processor = AsyncConstraintProcessor(max_workers=4, timeout=1800)
-results = processor.process_constraints_async(tasks)
-
-# Check results
-successful = [r for r in results if r.success]
-failed = [r for r in results if not r.success]
-print(f"Successful: {len(successful)}, Failed: {len(failed)}")
-```
 
 ### Custom Visualization Example
 

@@ -27,6 +27,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Improved error handling and fallback mechanisms for edge cases in effect size calculations
 
 ### Removed
+- **Async constraint processing functionality**
+  - Removed `--async-constraints` and `--max-async-workers` command-line arguments
+  - Removed `AsyncConstraintProcessor` class and entire `async_constraint_processor.py` module (~400 lines)
+  - Removed async configuration fields from YAML/TOML configuration schema
+  - Performance testing revealed async processing was 4% slower than synchronous processing due to resource contention with PAUP*'s internal multithreading
+  - Constraint processing now uses optimized synchronous execution only
 - **Configuration migration functionality**
   - Removed `--migrate-config` command-line argument and associated implementation
   - Removed `migrate_ini_to_yaml()` function and migration utilities

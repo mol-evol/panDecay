@@ -441,13 +441,11 @@ python3 panDecay.py examples/data/Primate.nex --config my_analysis.yaml
 ### Example 7: Performance Optimization
 
 ```bash
-python3 panDecay.py examples/data/Primate.nex --analysis ml --async-constraints --max-async-workers 4 --threads 8
+python3 panDecay.py examples/data/Primate.nex --analysis ml --threads 8
 ```
 
 **New concepts:**
-- `--async-constraints` runs constraint analyses in parallel
-- `--max-async-workers 4` uses 4 parallel processes
-- `--threads 8` uses 8 threads for each analysis
+- `--threads 8` uses 8 threads for analysis
 - Performance optimization for large datasets
 
 ## Interpreting Statistics
@@ -544,7 +542,7 @@ This provides:
 
 3. **Plan your computational resources**
    - Larger datasets need more time and memory
-   - Consider `--async-constraints` for datasets with >10 taxa
+   - Use appropriate thread counts for your system
    - Plan for multiple hours for Bayesian analyses
 
 ### Running Analyses
@@ -567,7 +565,7 @@ python3 panDecay.py alignment.fas --analysis all --bootstrap --site-analysis --v
 **Performance optimization:**
 ```bash
 # For large datasets
-python3 panDecay.py alignment.fas --analysis ml --async-constraints --max-async-workers 4 --threads auto
+python3 panDecay.py alignment.fas --analysis ml --threads auto
 ```
 
 ### Interpreting Results
@@ -618,10 +616,10 @@ Solution: Install PAUP* and ensure it's in your PATH
 **Problem**: Analysis takes forever
 ```
 Solutions:
-1. Use --async-constraints for parallel processing
-2. Reduce dataset size for testing
-3. Check if alignment has errors
-4. Consider simpler models for initial tests
+1. Reduce dataset size for testing
+2. Check if alignment has errors
+3. Consider simpler models for initial tests
+4. Use appropriate thread counts for your system
 ```
 
 **Problem**: All branches show weak support
@@ -661,11 +659,9 @@ Solutions:
 
 **For large datasets:**
 ```bash
-# Use all available optimizations
+# Use available optimizations
 python3 panDecay.py large_alignment.fas \
   --analysis ml \
-  --async-constraints \
-  --max-async-workers 8 \
   --threads auto \
   --constraint-timeout 3600
 ```

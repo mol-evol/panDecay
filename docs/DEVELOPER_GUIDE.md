@@ -20,17 +20,16 @@ This guide provides comprehensive information for developers who want to underst
 panDecay uses a **modular architecture** designed for extensibility, maintainability, and performance. The application has evolved from a single-file script to a multi-module system that supports:
 
 - **Multiple analysis frameworks** (ML, Bayesian, Parsimony)
-- **Async processing** for performance optimization
 - **Dual visualization systems** (static + interactive)
 - **Flexible configuration** (YAML, TOML, INI)
 - **Container deployment** with Docker
 
 ### Design Principles
 
-1. **Separation of Concerns**: Each module handles a specific aspect (config, async processing, visualization)
+1. **Separation of Concerns**: Each module handles a specific aspect (config, visualization, analysis)
 2. **Backward Compatibility**: All existing workflows continue to work
 3. **Extensibility**: Clear interfaces for adding new analysis methods and external tools
-4. **Performance**: Async processing and optimized algorithms for large datasets
+4. **Performance**: Optimized algorithms for large datasets
 5. **User Experience**: Progressive enhancement with sensible defaults
 
 ## Project Structure
@@ -41,7 +40,6 @@ panDecay/
 │   ├── panDecay.py               # Main application logic (7,967 lines)
 │   ├── config_loader.py          # Configuration parsing (593 lines)
 │   ├── config_models.py          # Pydantic configuration models (414 lines)
-│   ├── async_constraint_processor.py  # Async processing (395 lines)
 │   └── dual_visualization.py     # Visualization systems (715 lines)
 ├── tests/                        # Test suite
 │   ├── data/                     # Test datasets
@@ -115,20 +113,7 @@ panDecay/
 - Comprehensive default values
 - Documentation strings for all fields
 
-### 4. `src/async_constraint_processor.py` - Async Processing
-
-**Primary Classes:**
-- `AsyncConstraintProcessor`: Main async orchestrator
-- `ConstraintTask`: Individual constraint analysis task
-- `ConstraintResult`: Analysis result container
-
-**Features:**
-- ThreadPoolExecutor-based parallelism for I/O-bound operations
-- Configurable worker limits and timeouts
-- Progress tracking and error handling
-- Graceful degradation to sequential processing
-
-### 5. `src/dual_visualization.py` - Visualization Systems
+### 4. `src/dual_visualization.py` - Visualization Systems
 
 **Primary Classes:**
 - `PlotManager`: Matplotlib-based visualization system
@@ -160,7 +145,6 @@ def _effect_size_analysis()           # Normalization calculations
 
 **Integration Points:**
 - External tool execution via `ExternalToolRunner`
-- Async processing via `AsyncConstraintProcessor`
 - Tree operations via `TreeManager`
 - Output generation via `OutputManager`
 
@@ -205,22 +189,17 @@ CLI Args → Config File Loading → Schema Validation → Parameter Merge
 Alignment Processing → Tree Search → Constraint Generation → Analysis Execution
 ```
 
-### 4. Processing Phase (Async-enabled)
-```
-Constraint Tasks → Thread Pool → Parallel Execution → Result Aggregation
-```
-
-### 5. Statistical Testing Phase
+### 4. Statistical Testing Phase
 ```
 Result Collection → AU Test / Marginal Likelihood → P-value Calculation
 ```
 
-### 6. Output Phase
+### 5. Output Phase
 ```
 Result Formatting → File Generation → Visualization → Report Creation
 ```
 
-### 7. Cleanup Phase
+### 6. Cleanup Phase
 ```
 Temporary File Management → Debug File Retention → Resource Cleanup
 ```
@@ -409,7 +388,7 @@ from pydantic import BaseModel
 
 # Local imports  
 from .config_models import PanDecayConfig
-from .async_constraint_processor import AsyncConstraintProcessor
+from .dual_visualization import PlotManager
 ```
 
 ### Error Handling

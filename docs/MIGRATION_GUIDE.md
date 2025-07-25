@@ -1,13 +1,12 @@
 # panDecay v1.1 Feature Guide
 
-This guide helps you upgrade from panDecay v1.0 to v1.1, which introduces significant new features including YAML configuration, async processing, dual visualization, and Docker containerization.
+This guide helps you upgrade from panDecay v1.0 to v1.1, which introduces significant new features including YAML configuration, organized output structure, dual visualization, and Docker containerization.
 
 ## Overview of Changes
 
 ### 🆕 New Features in v1.1
 
 - **YAML/TOML Configuration**: Modern configuration format with validation
-- **Async Constraint Processing**: Parallel constraint analysis for 50-80% performance improvement
 - **Organized Output Structure**: Timestamp-based directory organization for better file management
 - **Docker Containerization**: Production-ready containers with PAUP* and MrBayes
 - **Enhanced Error Handling**: Improved diagnostics and graceful degradation
@@ -34,33 +33,11 @@ python3 panDecay.py --generate-toml-config example_config.toml
 
 ## Performance Optimization
 
-### Enable Async Constraint Processing
-
-**Significant performance improvement for analyses with multiple constraints:**
-
-```bash
-# Enable async processing (recommended)
-python3 panDecay.py alignment.fas --async-constraints --max-async-workers 4
-
-# Or in YAML config:
-computational:
-  async_constraints: true
-  max_async_workers: 4
-  constraint_timeout: 1800  # 30 minutes per constraint
-```
-
-**Expected Performance Gains:**
-- Small datasets (5-10 constraints): 30-50% faster
-- Medium datasets (10-20 constraints): 50-70% faster  
-- Large datasets (20+ constraints): 70-80% faster
-
 ### Resource Management
 
 ```yaml
 computational:
   threads: auto              # Auto-detect optimal thread count
-  max_async_workers: 4       # Parallel constraint analyses
-  constraint_timeout: 1800   # Timeout per constraint (seconds)
   memory_limit: 8G          # Optional memory limit
 ```
 
@@ -155,11 +132,6 @@ docker run -v $(pwd):/workspace \
 ### New Arguments
 
 ```bash
-# Async processing
---async-constraints              # Enable parallel constraint processing
---max-async-workers 4           # Number of parallel workers
---constraint-timeout 1800       # Timeout per constraint (seconds)
-
 # Enhanced configuration
 --config config.yaml            # YAML/TOML configuration file
 --generate-yaml-config file     # Generate YAML template
@@ -205,16 +177,7 @@ python3 config_loader.py validate config.yaml
 python3 panDecay.py --config config.yaml --dry-run
 ```
 
-#### 3. Async Processing Issues
-```bash
-# Disable async if having problems
-python3 panDecay.py alignment.fas --no-async-constraints
-
-# Reduce worker count for memory-constrained systems
-python3 panDecay.py alignment.fas --max-async-workers 2
-```
-
-#### 4. Docker Permission Issues
+#### 3. Docker Permission Issues
 ```bash
 # Fix Docker permission issues
 sudo chmod +x docker-deploy.sh
@@ -229,9 +192,8 @@ docker run --user $(id -u):$(id -g) -v $(pwd):/workspace pandecay
 #### Memory Usage
 ```yaml
 computational:
-  max_async_workers: 2          # Reduce for low-memory systems
-  constraint_timeout: 3600      # Increase for complex analyses
   threads: 4                    # Limit thread count if needed
+  memory_limit: 4G             # Set memory limit for constrained systems
 ```
 
 #### Large Dataset Optimization
@@ -254,10 +216,10 @@ visualization:
 - Use different configs for development vs. production
 
 ### Performance Optimization  
-- Enable async processing for multi-constraint analyses
 - Use Docker for consistent environments
 - Monitor resource usage with large datasets
 - Consider batch processing for multiple analyses
+- Optimize thread usage based on system capabilities
 
 ### Visualization Strategy
 - Use interactive plots for exploration and data checking
@@ -280,9 +242,6 @@ visualization:
 
 ### Testing New Features
 ```bash
-# Test async processing
-python3 panDecay.py examples/alignment.fas --async-constraints --debug
-
 # Test dual visualization
 python3 panDecay.py examples/alignment.fas --viz-format both --debug
 

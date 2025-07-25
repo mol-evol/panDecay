@@ -170,7 +170,6 @@ docker run --rm \
 | `PANDECAY_THREADS` | `auto` | Number of analysis threads |
 | `PANDECAY_DEBUG` | `false` | Enable debug mode |
 | `PANDECAY_FORMAT` | `both` | Visualization format (static/interactive/both) |
-| `PANDECAY_ASYNC` | `true` | Enable async constraint processing |
 
 ### Resource Limits
 
@@ -196,8 +195,6 @@ analysis:
 
 computational:
   threads: 8
-  async_constraints: true
-  max_async_workers: 4
 
 visualization:
   format: both
@@ -504,7 +501,6 @@ docker exec pandecay free -h
 # Use memory-efficient settings
 docker run \
   -e PANDECAY_FORMAT=static \
-  -e PANDECAY_ASYNC=false \
   pandecay analyze large_alignment.fas
 ```
 

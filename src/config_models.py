@@ -155,13 +155,6 @@ class ComputationalConfig(BaseModel):
         default=600, ge=60, description="Timeout for site-specific analysis"
     )
     
-    # Async constraint processing
-    use_async_constraints: bool = Field(
-        default=False, description="Enable parallel constraint processing"
-    )
-    max_async_workers: Optional[int] = Field(
-        default=None, ge=1, le=32, description="Maximum number of parallel constraint workers"
-    )
     
     @validator('threads')
     def validate_threads(cls, v):
@@ -395,8 +388,6 @@ class PanDecayConfig(BaseModel):
         # Computational settings
         args['threads'] = self.get_thread_count()
         args['paup'] = self.computational.paup_path
-        args['async_constraints'] = self.computational.use_async_constraints
-        args['max_async_workers'] = self.computational.max_async_workers
         args['constraint_timeout'] = self.computational.constraint_timeout
         
         # Visualization

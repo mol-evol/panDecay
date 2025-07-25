@@ -108,12 +108,6 @@ computational:
   # Path to MrBayes executable  
   mrbayes_path: "mb"
   
-  # Enable async constraint processing (recommended)
-  async_constraints: true
-  
-  # Maximum parallel constraint workers
-  max_async_workers: 4
-  
   # Timeout per constraint analysis (seconds)
   constraint_timeout: 1800
   
@@ -310,7 +304,6 @@ analysis:
 
 computational:
   threads: auto
-  async_constraints: true
 
 visualization:
   format: static
@@ -329,8 +322,6 @@ analysis:
 
 computational:
   threads: auto
-  async_constraints: true
-  max_async_workers: 4
 
 bayesian:
   generations: 2000000
@@ -349,7 +340,7 @@ visualization:
 ### High-Performance Configuration
 
 ```yaml
-# Optimized for speed and parallel processing
+# Optimized for speed
 analysis:
   type: ml
   model: GTR
@@ -357,8 +348,6 @@ analysis:
 
 computational:
   threads: auto
-  async_constraints: true
-  max_async_workers: 8
   constraint_timeout: 900
 
 constraints:
@@ -384,7 +373,6 @@ analysis:
 
 computational:
   threads: auto
-  async_constraints: true
 
 bayesian:
   generations: 5000000
@@ -412,8 +400,6 @@ analysis:
 
 computational:
   threads: auto
-  async_constraints: true
-  max_async_workers: 16
   constraint_timeout: 3600  # Longer timeout
   memory_limit: "32G"
 

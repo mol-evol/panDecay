@@ -35,14 +35,7 @@ except ImportError:
         logger = logging.getLogger(__name__)
         logger.warning("Enhanced configuration support not available. Install pydantic and pyyaml for YAML/TOML support.")
 
-# Async constraint processing support
-try:
-    from .async_constraint_processor import AsyncConstraintProcessor, ConstraintTask, ConstraintResult
-    import asyncio
-    HAS_ASYNC_PROCESSING = True
-except ImportError:
-    HAS_ASYNC_PROCESSING = False
-    asyncio = None
+# Removed: Async constraint processing support (performance testing showed no benefit)
 
 # Dual visualization support
 # Dual visualization system removed - using matplotlib only
@@ -1262,7 +1255,6 @@ class panDecayIndices:
                  max_psrf: float = DEFAULT_MAX_PSRF, max_asdsf: float = DEFAULT_MAX_ASDSF, 
                  convergence_strict: bool = False, mrbayes_parse_timeout: float = 30.0, 
                  output_style: str = "unicode", normalization: str = "basic",
-                 use_async_constraints: bool = False, max_async_workers: Optional[int] = None,
                  constraint_timeout: int = 600) -> None:
 
         self.alignment_file = Path(alignment_file)
@@ -1291,7 +1283,30 @@ class panDecayIndices:
         # Bayesian analysis parameters
         self.bayesian_software = bayesian_software
         self.mrbayes_path = mrbayes_path
-        self.bayes_model = bayes_model or model  # Use ML model if not specified
+        # Generate model string for Bayesian analysis
+        if bayes_model:
+            self.bayes_model = bayes_model
+        else:
+            # Use ML model settings for Bayesian analysis if not specified
+            if data_type == "dna":
+                self.bayes_model = f"NST{nst}" + get_rates_suffix(rates)
+            elif data_type == "protein":
+                self.bayes_model = protein_model + get_rates_suffix(rates)
+            elif data_type == "discrete":
+                self.bayes_model = discrete_model + get_rates_suffix(rates)
+            else:
+                self.bayes_model = "GTR" + get_rates_suffix(rates)  # fallback
+        
+        # Set model_str attribute for ML analysis (used in various places)
+        if data_type == "dna":
+            self.model_str = f"NST{nst}" + get_rates_suffix(rates)
+        elif data_type == "protein":
+            self.model_str = protein_model + get_rates_suffix(rates)
+        elif data_type == "discrete":
+            self.model_str = discrete_model + get_rates_suffix(rates)
+        else:
+            self.model_str = "GTR" + get_rates_suffix(rates)  # fallback
+        
         self.bayes_ngen = bayes_ngen
         self.bayes_burnin = bayes_burnin
         self.bayes_chains = bayes_chains
@@ -1319,9 +1334,6 @@ class panDecayIndices:
         self.constraint_file = constraint_file
         self.config_constraints = config_constraints or {}
         
-        # Async constraint processing parameters
-        self.use_async_constraints = use_async_constraints
-        self.max_async_workers = max_async_workers
         self.constraint_timeout = constraint_timeout
         
         # Convergence checking parameters
@@ -4204,82 +4216,6 @@ class panDecayIndices:
             
         return all_tree_files_rel, constraint_info_map
 
-    def _generate_constraint_trees_async(self, testable_branches: List[Tuple[int, Any, int, List[str]]]) -> Tuple[Optional[List[str]], Optional[Dict[str, Dict[str, Any]]]]:
-        """Generate constraint trees for each testable branch using async processing."""
-        import time
-        start_time = time.time()
-        
-        if not HAS_ASYNC_PROCESSING:
-            logger.warning("Async processing not available, falling back to sequential processing")
-            return self._generate_constraint_trees(testable_branches)
-        
-        logger.info(f"Starting async constraint processing for {len(testable_branches)} branches")
-        
-        # Initialize collections for constraint trees
-        all_tree_files_rel, constraint_info_map = self._initialize_constraint_collections()
-        
-        # Configure async processor
-        max_workers = getattr(self, 'max_async_workers', None)
-        timeout_per_task = getattr(self, 'constraint_timeout', 600)
-        
-        def progress_callback(completed: int, total: int, result: 'ConstraintResult') -> None:
-            """Progress callback for async processing."""
-            progress_pct = (completed / total) * 100
-            logger.info(f"Async progress: {completed}/{total} ({progress_pct:.1f}%) • Task: {result.task.clade_log_idx}")
-        
-        processor = AsyncConstraintProcessor(
-            max_workers=max_workers,
-            timeout_per_task=timeout_per_task,
-            progress_callback=progress_callback
-        )
-        
-        # Run async processing
-        try:
-            # Create constraint generator function bound to self
-            def constraint_generator(clade_taxa_names: List[str], tree_idx: int) -> Tuple[Optional[str], Optional[float]]:
-                return self._generate_and_score_constraint_tree(clade_taxa_names, tree_idx)
-            
-            # Run the async processing
-            results, summary = asyncio.run(
-                processor.process_constraints(testable_branches, constraint_generator)
-            )
-            
-            # Process results and update collections
-            for result in results:
-                if result.success and result.tree_filename:
-                    self._add_constraint_result(
-                        result.task.clade_log_idx,
-                        result.task.clade_taxa_names,
-                        result.tree_filename,
-                        result.likelihood,
-                        all_tree_files_rel,
-                        constraint_info_map
-                    )
-                else:
-                    logger.warning(f"Failed constraint for branch {result.task.clade_log_idx}: {result.error_message}")
-            
-            # Log performance summary
-            processing_time = time.time() - start_time
-            success_count = sum(1 for r in results if r.success)
-            failure_count = len(results) - success_count
-            
-            logger.info(
-                f"Async constraint processing completed: {success_count} successful, "
-                f"{failure_count} failed in {processing_time:.2f}s "
-                f"(speedup: {summary.get('tasks_per_second', 0):.2f} tasks/sec)"
-            )
-            
-        except Exception as e:
-            logger.error(f"Async constraint processing failed: {e}")
-            logger.info("Falling back to sequential processing")
-            return self._generate_constraint_trees(testable_branches)
-        
-        # Validate results
-        if not constraint_info_map:
-            logger.warning("No valid constraint trees were generated. Skipping AU test.")
-            return None, None
-            
-        return all_tree_files_rel, constraint_info_map
 
     def _initialize_constraint_collections(self) -> Tuple[List[str], Dict[str, Dict[str, Any]]]:
         """
@@ -4488,11 +4424,8 @@ class panDecayIndices:
         if testable_branches is None:
             return {}
         
-        # Generate constraint trees (async if enabled)
-        if getattr(self, 'use_async_constraints', False) and HAS_ASYNC_PROCESSING:
-            constraint_result = self._generate_constraint_trees_async(testable_branches)
-        else:
-            constraint_result = self._generate_constraint_trees(testable_branches)
+        # Generate constraint trees
+        constraint_result = self._generate_constraint_trees(testable_branches)
             
         if constraint_result[0] is None:
             self.decay_indices = {}
@@ -8164,7 +8097,6 @@ def create_decay_calc_from_args(args: Any) -> Any:
     return panDecayIndices(
         alignment_file=args.alignment,
         alignment_format=alignment_format,
-        model=effective_model_str,
         temp_dir=temp_dir_path,
         paup_path=args.paup,
         threads=args.threads,
@@ -8207,8 +8139,6 @@ def create_decay_calc_from_args(args: Any) -> Any:
         mrbayes_parse_timeout=args.mrbayes_parse_timeout,
         output_style=args.output_style,
         normalization=args.normalization,
-        use_async_constraints=getattr(args, 'async_constraints', False),
-        max_async_workers=getattr(args, 'max_async_workers', None),
         constraint_timeout=getattr(args, 'constraint_timeout', 600)
     )
 
@@ -8270,8 +8200,6 @@ def _create_argument_parser():
 
     run_ctrl = parser.add_argument_group('Runtime Control')
     run_ctrl.add_argument("--threads", default="auto", help="Number of threads for PAUP* (e.g., 4 or 'auto').")
-    run_ctrl.add_argument("--async-constraints", action="store_true", help="Enable parallel constraint processing for faster analysis (experimental).")
-    run_ctrl.add_argument("--max-async-workers", type=int, help="Maximum number of parallel constraint workers (defaults to auto).")
     run_ctrl.add_argument("--constraint-timeout", type=int, default=600, help="Timeout per constraint task in seconds.")
     run_ctrl.add_argument("--starting-tree", help="Path to a user-provided starting tree file (Newick).")
     run_ctrl.add_argument("--paup-block", help="Path to file with custom PAUP* commands for model/search setup (overrides most model args).")

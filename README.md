@@ -2,11 +2,10 @@
 
 # panDecay: Phylogenetic Analysis using Decay Indices
 
-panDecay is a Python command-line tool for calculating phylogenetic decay indices across multiple analysis frameworks. Version 1.1 introduces major enhancements including **async processing**, **organized output structure**, **YAML configuration**, and **Docker containerization**.
+panDecay is a Python command-line tool for calculating phylogenetic decay indices across multiple analysis frameworks. Version 1.1 introduces major enhancements including **organized output structure**, **YAML configuration**, and **Docker containerization**.
 
 ## What's New in v1.1
 
-- **50-80% faster** with async constraint processing
 - **Organized output structure** - timestamp-based directories with categorized files
 - **Modern YAML/TOML configuration** with Pydantic validation
 - **Docker containers** with PAUP* and MrBayes pre-installed
@@ -25,12 +24,6 @@ All analysis results are automatically organized into timestamped directories (`
 - `site_analysis/` - Site-specific likelihood analysis (when enabled)
 - `logs/` - Debug and analysis log files
 
-### Async Constraint Processing
-Enable parallel constraint analysis with `--async-constraints` for significant performance improvements:
-- **50-80% faster** analysis for datasets with multiple constraints
-- Configurable worker processes and timeouts
-- Robust error handling and progress tracking
-- Recommended for all multi-constraint analyses
 
 ## Documentation
 
@@ -62,8 +55,8 @@ Enable parallel constraint analysis with `--async-constraints` for significant p
 # Install dependencies
 pip install -r requirements.txt
 
-# Run analysis with new async processing
-python3 panDecay.py examples/data/alignment.fas --analysis ml --async-constraints
+# Run analysis
+python3 panDecay.py examples/data/alignment.fas --analysis ml
 ```
 
 ## Table of Contents
@@ -236,7 +229,6 @@ This approach provides honest, statistically sound relative rankings without the
 *   **Bootstrap Analysis**: Optional bootstrap support values alongside decay indices
 
 ### Core Capabilities
-*   **Async Constraint Processing**: Parallel execution of constraints for 50-80% performance improvement
 *   **Organized Output Structure**: Timestamp-based directories with categorized file organization
 *   **Modern Configuration**: YAML/TOML configuration with Pydantic validation and format detection
 *   **Docker Support**: Production-ready containers with PAUP* and MrBayes pre-installed
@@ -278,7 +270,6 @@ This approach provides honest, statistically sound relative rankings without the
     *   Site-specific support visualizations when `--site-analysis` is enabled
 
 ### Technical Features
-*   **Async constraint processing** with configurable parallelism and timeouts
 *   Multi-threaded PAUP\* execution (configurable)
 *   **YAML/TOML configuration** with Pydantic validation
 *   **Docker containerization** for consistent deployment
@@ -378,9 +369,6 @@ python3 panDecay.py <alignment_file> --nst <1|2|6> [options...]
 # Legacy model-based usage (deprecated for DNA, use for protein/discrete only)
 python3 panDecay.py <alignment_file> --model <model_name> [options...]
 
-# With async processing (recommended for multiple constraints)
-python3 panDecay.py examples/data/alignment.fas --analysis ml --async-constraints --viz-format both
-
 # With YAML configuration
 python3 panDecay.py --config examples/configs/example_config.yaml
 
@@ -409,8 +397,6 @@ analysis:
   
 computational:
   threads: auto
-  async_constraints: true
-  max_async_workers: 4
   
 visualization:
   format: both  # static, interactive, or both
@@ -482,8 +468,6 @@ Model Parameter Overrides (optional):
 Runtime Control:
   --threads THREADS     Number of threads for PAUP* (e.g., 4, 'auto', or 'all'). 'auto' uses: total_cores - 2 (if cores > 2), 
                         total_cores - 1 (if cores > 1), or 1 core. Leaving some cores free is recommended for system stability. (default: auto)
-  --async-constraints   Enable async constraint processing for parallel execution (recommended for multiple constraints). (default: False)
-  --max-async-workers N Maximum number of parallel constraint workers (default: 4)
   --constraint-timeout N Timeout per constraint analysis in seconds (default: 1800)
   --starting-tree STARTING_TREE
                         Path to a user-provided starting tree file (Newick).
