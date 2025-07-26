@@ -1,0 +1,9 @@
+#NEXUS
+BEGIN MRBAYES;
+    execute simple_test.nex;
+    set autoclose=yes nowarn=yes;
+    lset nst=1;
+    ss ngen=100 samplefreq=50 nchains=1 alpha=0.3 nsteps=5 savebrlens=yes printfreq=50 diagnfreq=50;
+    sump burnin=1;
+    sumt burnin=1;  
+END;

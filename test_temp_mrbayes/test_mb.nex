@@ -1,0 +1,10 @@
+#NEXUS
+
+BEGIN MRBAYES;
+    execute test_simple.nex;
+    set autoclose=yes nowarn=yes;
+    lset nst=1 rates=equal;
+    mcmc ngen=1000 printfreq=1000 samplefreq=1000 nchains=1 savebrlens=yes;
+    sump;
+    sumt;
+END;
