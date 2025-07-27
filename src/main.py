@@ -10,6 +10,7 @@ import sys
 import argparse
 import logging
 from pathlib import Path
+from typing import Union
 
 from .core.constants import (
     VERSION,
@@ -47,7 +48,7 @@ from .core.configuration import generate_config_template, parse_config
 from .core.analysis_engine import panDecayIndices
 
 
-def get_display_path(path):
+def get_display_path(path: Union[str, Path]) -> str:
     """Get a display-friendly path representation."""
     if isinstance(path, Path):
         path_obj = path
@@ -67,7 +68,7 @@ def get_display_path(path):
     return str(path_obj)
 
 
-def print_runtime_parameters(args_ns, model_str_for_print):
+def print_runtime_parameters(args_ns: argparse.Namespace, model_str_for_print: str) -> None:
     """Print runtime parameters in a formatted box."""
     print("┌─" + "─" * 76 + "─┐")
     print("│" + f" panDecay v{VERSION} - Runtime Parameters".center(76) + " │")

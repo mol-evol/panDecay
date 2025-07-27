@@ -9,12 +9,14 @@ exact configuration parsing behavior.
 import sys
 import logging
 import configparser
+import argparse
 from pathlib import Path
+from typing import Union
 
 logger = logging.getLogger(__name__)
 
 
-def generate_config_template(filepath):
+def generate_config_template(filepath: Union[str, Path]) -> None:
     """Generate a template configuration file with all options and comments."""
     # Get the path to the template file relative to this module
     template_path = Path(__file__).parent / "config_template.txt"
@@ -41,7 +43,7 @@ def generate_config_template(filepath):
         sys.exit(1)
 
 
-def str_to_bool(value):
+def str_to_bool(value: str) -> bool:
     """Convert string to boolean."""
     if value.lower() in ('true', 'yes', 'on', '1'):
         return True
@@ -51,7 +53,7 @@ def str_to_bool(value):
         raise ValueError(f"Cannot convert '{value}' to boolean")
 
 
-def parse_config(config_file, args):
+def parse_config(config_file: Union[str, Path], args: argparse.Namespace) -> argparse.Namespace:
     """Parse configuration file and update args namespace with values."""
     config = configparser.ConfigParser(allow_no_value=True)
     
@@ -179,7 +181,7 @@ def parse_config(config_file, args):
     return args
 
 
-def read_paup_block(paup_block_file_path: Path):
+def read_paup_block(paup_block_file_path: Path) -> str:
     """Read PAUP* block commands from file."""
     try:
         with open(paup_block_file_path, 'r') as f:
