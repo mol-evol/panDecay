@@ -16,6 +16,11 @@ from typing import Union
 logger = logging.getLogger(__name__)
 
 
+class ConfigurationError(Exception):
+    """Custom exception for configuration-related errors."""
+    pass
+
+
 def generate_config_template(filepath: Union[str, Path]) -> None:
     """Generate a template configuration file with all options and comments."""
     # Get the path to the template file relative to this module
@@ -26,11 +31,13 @@ def generate_config_template(filepath: Union[str, Path]) -> None:
         with open(template_path, 'r') as template_file:
             template = template_file.read()
     except FileNotFoundError:
-        logger.error(f"Configuration template file not found: {template_path}")
-        sys.exit(1)
+        msg = f"Configuration template file not found: {template_path}"
+        logger.error(msg)
+        raise ConfigurationError(msg)
     except Exception as e:
-        logger.error(f"Failed to read configuration template: {e}")
-        sys.exit(1)
+        msg = f"Failed to read configuration template: {e}"
+        logger.error(msg)
+        raise ConfigurationError(msg)
     
     try:
         with open(filepath, 'w') as f:
@@ -39,8 +46,9 @@ def generate_config_template(filepath: Union[str, Path]) -> None:
         logger.info("Edit this file with your parameters and run:")
         logger.info(f"  python panDecay.py --config {filepath}")
     except Exception as e:
-        logger.error(f"Failed to generate config template: {e}")
-        sys.exit(1)
+        msg = f"Failed to generate config template: {e}"
+        logger.error(msg)
+        raise ConfigurationError(msg)
 
 
 def str_to_bool(value: str) -> bool:
@@ -50,7 +58,7 @@ def str_to_bool(value: str) -> bool:
     elif value.lower() in ('false', 'no', 'off', '0'):
         return False
     else:
-        raise ValueError(f"Cannot convert '{value}' to boolean")
+        raise ConfigurationError(f"Cannot convert '{value}' to boolean")
 
 
 def parse_config(config_file: Union[str, Path], args: argparse.Namespace) -> argparse.Namespace:
@@ -175,8 +183,9 @@ def parse_config(config_file: Union[str, Path], args: argparse.Namespace) -> arg
         logger.info(f"Configuration loaded from {config_file}")
         
     except Exception as e:
-        logger.error(f"Error parsing config file {config_file}: {e}")
-        sys.exit(1)
+        msg = f"Error parsing config file {config_file}: {e}"
+        logger.error(msg)
+        raise ConfigurationError(msg)
     
     return args
 
@@ -188,5 +197,6 @@ def read_paup_block(paup_block_file_path: Path) -> str:
             content = f.read().strip()
         return content
     except Exception as e:
-        logger.error(f"Failed to read PAUP* block file {paup_block_file_path}: {e}")
-        sys.exit(1)
+        msg = f"Failed to read PAUP* block file {paup_block_file_path}: {e}"
+        logger.error(msg)
+        raise ConfigurationError(msg)

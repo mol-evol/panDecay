@@ -44,8 +44,8 @@ from .core.constants import (
     DEFAULT_OUTPUT_STYLE,
     DEFAULT_CONSTRAINT_MODE
 )
-from .core.configuration import generate_config_template, parse_config
-from .core.analysis_engine import panDecayIndices
+from .core.configuration import generate_config_template, parse_config, ConfigurationError
+from .core.analysis_engine import panDecayIndices, AnalysisEngineError
 
 
 def get_display_path(path: Union[str, Path]) -> str:
@@ -218,8 +218,12 @@ def validate_arguments(args: argparse.Namespace, parser: argparse.ArgumentParser
     
     # Handle config generation
     if args.generate_config:
-        generate_config_template(args.generate_config)
-        sys.exit(0)
+        try:
+            generate_config_template(args.generate_config)
+            sys.exit(0)
+        except ConfigurationError as e:
+            logger.error(f"Configuration generation failed: {e}")
+            sys.exit(1)
     
     # Validate required arguments
     if not args.alignment:
@@ -399,7 +403,11 @@ def main():
     
     # Load configuration file if provided
     if args.config:
-        args = parse_config(args.config, args)
+        try:
+            args = parse_config(args.config, args)
+        except ConfigurationError as e:
+            logger.error(f"Configuration error: {e}")
+            sys.exit(1)
     
     # Validate arguments and handle early exits
     validate_arguments(args, parser)
@@ -423,9 +431,10 @@ def main():
         from .core.configuration import read_paup_block
         pbf_path = Path(args.paup_block)
         logger.info(f"Reading PAUP block from: {pbf_path}")
-        paup_block_content = read_paup_block(pbf_path)
-        if paup_block_content is None:
-            logger.error("Failed to read or validate PAUP block file. Exiting.")
+        try:
+            paup_block_content = read_paup_block(pbf_path)
+        except ConfigurationError as e:
+            logger.error(f"PAUP block error: {e}")
             sys.exit(1)
     
     # Print runtime parameters
@@ -433,8 +442,14 @@ def main():
     
     try:
         run_analysis(args, effective_model_str, paup_block_content)
+    except (ConfigurationError, AnalysisEngineError) as e:
+        logger.error(f"panDecay analysis failed: {e}")
+        if args.debug:
+            import traceback
+            logger.debug("Full traceback:\n%s", traceback.format_exc())
+        sys.exit(1)
     except Exception as e:
-        logger.error(f"panDecay analysis terminated with an error: {e}")
+        logger.error(f"panDecay analysis terminated with an unexpected error: {e}")
         if args.debug:
             import traceback
             logger.debug("Full traceback:\n%s", traceback.format_exc())

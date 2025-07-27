@@ -20,6 +20,16 @@ import multiprocessing
 import time
 import datetime
 from pathlib import Path
+
+
+class AnalysisEngineError(Exception):
+    """Custom exception for analysis engine errors."""
+    pass
+
+
+class ExternalToolError(AnalysisEngineError):
+    """Exception for external tool execution errors."""
+    pass
 from .constants import (
     VERSION,
     NEXUS_ALIGNMENT_FN,
@@ -210,10 +220,16 @@ class panDecayIndices:
         try:
             self.alignment = AlignIO.read(str(self.alignment_file), self.alignment_format)
             logger.info(f"Loaded alignment: {len(self.alignment)} sequences, {self.alignment.get_alignment_length()} sites.")
-        except Exception as e:
-            logger.error(f"Failed to load alignment '{self.alignment_file}': {e}")
+        except FileNotFoundError:
+            msg = f"Alignment file not found: '{self.alignment_file}'"
+            logger.error(msg)
             if self._temp_dir_obj: self._temp_dir_obj.cleanup() # Manual cleanup if init fails early
-            raise
+            raise AnalysisEngineError(msg)
+        except Exception as e:
+            msg = f"Failed to load alignment '{self.alignment_file}': {e}"
+            logger.error(msg)
+            if self._temp_dir_obj: self._temp_dir_obj.cleanup() # Manual cleanup if init fails early
+            raise AnalysisEngineError(msg)
 
         if self.data_type == "discrete":
             if not self._validate_discrete_data():
