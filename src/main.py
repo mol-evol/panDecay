@@ -46,54 +46,11 @@ from .core.constants import (
 )
 from .core.configuration import generate_config_template, parse_config, ConfigurationError
 from .core.analysis_engine import panDecayIndices, AnalysisEngineError
+from .core.utils import get_display_path, print_runtime_parameters
 
 
-def get_display_path(path: Union[str, Path]) -> str:
-    """Get a display-friendly path representation."""
-    if isinstance(path, Path):
-        path_obj = path
-    else:
-        path_obj = Path(path)
-    
-    if path_obj.is_absolute():
-        try:
-            # Try to get relative path from current directory
-            rel_path = path_obj.relative_to(Path.cwd())
-            # Use relative path if it's shorter and doesn't go up too many levels
-            if len(str(rel_path)) < len(str(path_obj)) and not str(rel_path).startswith('../../../'):
-                return str(rel_path)
-        except ValueError:
-            pass  # Path is not relative to current directory
-    
-    return str(path_obj)
 
 
-def print_runtime_parameters(args_ns: argparse.Namespace, model_str_for_print: str) -> None:
-    """Print runtime parameters in a formatted box."""
-    print("┌─" + "─" * 76 + "─┐")
-    print("│" + f" panDecay v{VERSION} - Runtime Parameters".center(76) + " │")
-    print("├─" + "─" * 76 + "─┤")
-    print(f"│ {'Alignment:':<20} {get_display_path(args_ns.alignment):<54} │")
-    print(f"│ {'Format:':<20} {args_ns.format:<54} │")
-    print(f"│ {'Data type:':<20} {args_ns.data_type:<54} │")
-    print(f"│ {'Model:':<20} {model_str_for_print:<54} │")
-    print(f"│ {'Analysis mode:':<20} {args_ns.analysis:<54} │")
-    print(f"│ {'Threads:':<20} {str(args_ns.threads):<54} │")
-    print(f"│ {'Output file:':<20} {get_display_path(args_ns.output):<54} │")
-    
-    if args_ns.starting_tree:
-        print(f"│ {'Starting tree:':<20} {get_display_path(args_ns.starting_tree):<54} │")
-    
-    if args_ns.site_analysis:
-        print(f"│ {'Site analysis:':<20} {'Enabled':<54} │")
-    
-    if args_ns.bootstrap:
-        print(f"│ {'Bootstrap:':<20} {f'{args_ns.bootstrap_reps} replicates':<54} │")
-    
-    if args_ns.visualize:
-        print(f"│ {'Visualization:':<20} {f'{args_ns.viz_format.upper()} format':<54} │")
-    
-    print("└─" + "─" * 76 + "─┘")
 
 
 def setup_argument_parser() -> argparse.ArgumentParser:
