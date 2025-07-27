@@ -46,7 +46,7 @@ from .core.constants import (
 )
 from .core.configuration import generate_config_template, parse_config, ConfigurationError
 from .core.analysis_engine import panDecayIndices, AnalysisEngineError
-from .core.utils import get_display_path, print_runtime_parameters
+from .core.utils import get_display_path, print_runtime_parameters, build_effective_model_display
 
 
 
@@ -369,18 +369,21 @@ def main():
     # Validate arguments and handle early exits
     validate_arguments(args, parser)
     
-    # Construct full model string
+    # Build accurate model display string that reflects all parameter overrides
+    effective_model_display = build_effective_model_display(args)
+    
+    # Keep simple model string for analysis engine (it handles overrides internally)
     effective_model_str = args.model
     if args.gamma: 
         effective_model_str += "+G"
     if args.invariable: 
         effective_model_str += "+I"
     
-    # Handle protein/discrete model adjustments
+    # Handle protein/discrete model adjustments  
     if args.data_type == "protein" and not args.protein_model and not any(pm in args.model.upper() for pm in ["JTT", "WAG", "LG", "DAYHOFF"]):
-        logger.info(f"Protein data with generic model '{args.model}'. Effective model might default to JTT within PAUP* settings.")
+        logger.info(f"Protein data with generic model '{args.model}'. Using JTT as effective protein model.")
     elif args.data_type == "discrete" and "MK" not in args.model.upper():
-        logger.info(f"Discrete data with non-Mk model '{args.model}'. Effective model might default to Mk within PAUP* settings.")
+        logger.info(f"Discrete data detected. Using Mk model regardless of specified base model '{args.model}'.")
     
     # Read PAUP block if specified
     paup_block_content = None
@@ -394,8 +397,8 @@ def main():
             logger.error(f"PAUP block error: {e}")
             sys.exit(1)
     
-    # Print runtime parameters
-    print_runtime_parameters(args, effective_model_str)
+    # Print runtime parameters with accurate model display
+    print_runtime_parameters(args, effective_model_display)
     
     try:
         run_analysis(args, effective_model_str, paup_block_content)

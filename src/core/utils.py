@@ -165,3 +165,79 @@ def format_support_symbol(pvalue: float) -> str:
                 return f'{p_val:.3f}*'
     except:
         return 'N/A'
+
+
+def build_effective_model_display(args: argparse.Namespace) -> str:
+    """Build an accurate model display string that reflects parameter overrides."""
+    # Start with base model
+    base_model = args.model.split("+")[0].upper()
+    has_gamma = args.gamma or "+G" in args.model.upper()
+    has_invar = args.invariable or "+I" in args.model.upper()
+    
+    # Collect override indicators
+    overrides = []
+    effective_model = base_model
+    
+    # Handle data type specific overrides
+    if args.data_type == "dna":
+        # NST override - this is the key fix for the reported issue
+        if args.nst is not None:
+            if args.nst == 1:
+                effective_model = "JC"  # JC-like model
+            elif args.nst == 2:
+                effective_model = "HKY"  # HKY-like model  
+            elif args.nst == 6:
+                effective_model = "GTR"  # GTR-like model
+            overrides.append(f"nst={args.nst}")
+        
+        # Base frequency override
+        if args.base_freq:
+            overrides.append(f"basefreq={args.base_freq}")
+        
+        # Rates override (overrides gamma flag)
+        if args.rates:
+            overrides.append(f"rates={args.rates}")
+            if args.rates == "gamma":
+                has_gamma = True
+            elif args.rates == "equal":
+                has_gamma = False
+    
+    elif args.data_type == "protein":
+        # Protein model override
+        if args.protein_model:
+            effective_model = args.protein_model.upper()
+            overrides.append(f"protein={args.protein_model}")
+        elif base_model not in ["JTT", "WAG", "LG", "DAYHOFF", "MTREV", "CPREV", "BLOSUM62", "HIVB", "HIVW"]:
+            # Generic protein model defaults to JTT in analysis
+            effective_model = "JTT"
+            overrides.append("protein=jtt")
+    
+    elif args.data_type == "discrete":
+        effective_model = "Mk"
+        overrides.append("nst=1")
+        if args.base_freq:
+            overrides.append(f"basefreq={args.base_freq}")
+        else:
+            overrides.append("basefreq=equal")
+        
+        # Parsimony model override
+        if args.parsmodel is not None:
+            overrides.append(f"parsmodel={str(args.parsmodel).lower()}")
+    
+    # Add gamma and invariable sites
+    if has_gamma:
+        effective_model += "+G"
+        if args.gamma_shape is not None:
+            overrides.append(f"shape={args.gamma_shape}")
+    
+    if has_invar:
+        effective_model += "+I"
+        if args.prop_invar is not None:
+            overrides.append(f"pinvar={args.prop_invar}")
+    
+    # Build display string with override indicators
+    if overrides:
+        override_str = ", ".join(overrides)
+        return f"{effective_model} ({override_str})"
+    else:
+        return effective_model
