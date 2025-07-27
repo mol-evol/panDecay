@@ -96,8 +96,8 @@ def print_runtime_parameters(args_ns: argparse.Namespace, model_str_for_print: s
     print("└─" + "─" * 76 + "─┘")
 
 
-def main():
-    """Main entry point for panDecay."""
+def setup_argument_parser() -> argparse.ArgumentParser:
+    """Set up and configure the command-line argument parser."""
     parser = argparse.ArgumentParser(
         description=f"panDecay v{VERSION}: Calculate phylogenetic decay indices (ML, Bayesian, and parsimony).",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
@@ -209,20 +209,17 @@ def main():
     parser.add_argument("--config", help="Configuration file with analysis parameters (overrides command-line options).")
     parser.add_argument("--generate-config", help="Generate a template configuration file at the specified path and exit.")
     
-    args = parser.parse_args()
-    
-    # Set up logging
-    logging.basicConfig(level=logging.INFO, format='%(message)s')
+    return parser
+
+
+def validate_arguments(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
+    """Validate command-line arguments and handle early exits."""
     logger = logging.getLogger(__name__)
     
     # Handle config generation
     if args.generate_config:
         generate_config_template(args.generate_config)
-        return
-    
-    # Load configuration file if provided
-    if args.config:
-        args = parse_config(args.config, args)
+        sys.exit(0)
     
     # Validate required arguments
     if not args.alignment:
@@ -236,9 +233,16 @@ def main():
     # Validate Bayesian analysis arguments
     if args.analysis == "ml" and args.bayesian_software:
         logger.warning("Bayesian software specified but analysis mode is ML-only. Bayesian options will be ignored.")
+
+
+def configure_logging(args: argparse.Namespace) -> None:
+    """Set up logging configuration based on arguments."""
+    # Set up logging
+    logging.basicConfig(level=logging.INFO, format='%(message)s')
     
-    # Set up debug logging
+    # Set up debug logging if requested
     if args.debug:
+        logger = logging.getLogger(__name__)
         logger.setLevel(logging.DEBUG)
         debug_log_path = Path.cwd() / "mldecay_debug.log"
         fh = logging.FileHandler(debug_log_path, mode='w')
@@ -248,6 +252,157 @@ def main():
         logger.addHandler(fh)
         logger.info(f"Debug logging enabled. Detailed log: {debug_log_path}")
         args.keep_files = True
+
+
+def run_analysis(args: argparse.Namespace, effective_model_str: str, paup_block_content: str) -> None:
+    """Run the main panDecay analysis."""
+    logger = logging.getLogger(__name__)
+    
+    # Convert string paths to Path objects
+    temp_dir_path = Path(args.temp) if args.temp else None
+    starting_tree_path = Path(args.starting_tree) if args.starting_tree else None
+    
+    # Create panDecayIndices instance
+    decay_calc = panDecayIndices(
+        alignment_file=args.alignment,
+        alignment_format=args.format,
+        model=effective_model_str,
+        temp_dir=temp_dir_path,
+        paup_path=args.paup,
+        threads=args.threads,
+        starting_tree=starting_tree_path,
+        data_type=args.data_type,
+        debug=args.debug,
+        keep_files=args.keep_files,
+        gamma_shape=args.gamma_shape, 
+        prop_invar=args.prop_invar,
+        base_freq=args.base_freq, 
+        rates=args.rates,
+        protein_model=args.protein_model, 
+        nst=args.nst,
+        parsmodel=args.parsmodel,
+        paup_block=paup_block_content,
+        analysis_mode=args.analysis,
+        bayesian_software=args.bayesian_software,
+        mrbayes_path=args.mrbayes_path,
+        bayes_model=args.bayes_model,
+        bayes_ngen=args.bayes_ngen,
+        bayes_burnin=args.bayes_burnin,
+        bayes_chains=args.bayes_chains,
+        bayes_sample_freq=args.bayes_sample_freq,
+        marginal_likelihood=args.marginal_likelihood,
+        ss_alpha=args.ss_alpha,
+        ss_nsteps=args.ss_nsteps,
+        use_mpi=args.use_mpi,
+        mpi_processors=args.mpi_processors,
+        mpirun_path=args.mpirun_path,
+        use_beagle=args.use_beagle,
+        beagle_device=args.beagle_device,
+        beagle_precision=args.beagle_precision,
+        beagle_scaling=args.beagle_scaling,
+        constraint_mode=args.constraint_mode,
+        test_branches=args.test_branches,
+        constraint_file=args.constraint_file,
+        config_constraints=getattr(args, 'config_constraints', None),
+        check_convergence=args.check_convergence,
+        min_ess=args.min_ess,
+        max_psrf=args.max_psrf,
+        max_asdsf=args.max_asdsf,
+        convergence_strict=args.convergence_strict,
+        mrbayes_parse_timeout=args.mrbayes_parse_timeout,
+        output_style=args.output_style
+    )
+    
+    # Build ML tree
+    decay_calc.build_ml_tree()
+    
+    if decay_calc.ml_tree and decay_calc.ml_likelihood is not None:
+        # Run bootstrap analysis if requested
+        if args.bootstrap:
+            logger.info(f"Running bootstrap analysis with {args.bootstrap_reps} replicates...")
+            decay_calc.run_bootstrap_analysis(num_replicates=args.bootstrap_reps)
+        
+        # Calculate decay indices
+        decay_calc.calculate_decay_indices(perform_site_analysis=args.site_analysis)
+        
+        # Write site analysis results if available
+        if hasattr(decay_calc, 'decay_indices') and decay_calc.decay_indices:
+            for clade_id, data in decay_calc.decay_indices.items():
+                if 'site_data' in data:
+                    site_output_dir = Path(args.output).parent / f"{Path(args.output).stem}_site_analysis"
+                    decay_calc.write_site_analysis_results(site_output_dir)
+                    logger.info(f"Site-specific analysis results written to {get_display_path(site_output_dir)}")
+                    break
+        
+        # Write main results
+        output_main_path = Path(args.output)
+        decay_calc.write_formatted_results(output_main_path)
+        
+        # Generate detailed report
+        report_path = output_main_path.with_suffix(".md")
+        decay_calc.generate_detailed_report(report_path)
+        
+        # Create annotated trees
+        output_dir = output_main_path.resolve().parent
+        tree_base_name = args.tree
+        tree_files = decay_calc.annotate_trees(output_dir, tree_base_name)
+        
+        if tree_files:
+            logger.info(f"Successfully created {len(tree_files)} annotated trees.")
+            for tree_type, path in tree_files.items():
+                logger.info(f"  - {tree_type} tree: {get_display_path(path)}")
+        else:
+            logger.warning("Failed to create annotated trees.")
+        
+        # Handle visualization
+        if args.visualize:
+            viz_out_dir = output_main_path.resolve().parent
+            viz_base_name = output_main_path.stem
+            viz_kwargs = {'width': 10, 'height': 6, 'format': args.viz_format}
+            
+            # Check for visualization libraries
+            try: 
+                import matplotlib, seaborn
+            except ImportError:
+                logger.warning("Matplotlib/Seaborn not installed. Skipping static visualizations.")
+                args.visualize = False
+            
+            if args.visualize:
+                decay_calc.visualize_support_distribution(
+                    viz_out_dir / f"{viz_base_name}_dist_{args.annotation}.{args.viz_format}",
+                    value_type=args.annotation, **viz_kwargs)
+            
+            if args.site_analysis:
+                if args.visualize:
+                    decay_calc.viz_format = args.viz_format
+                
+                site_output_dir = output_main_path.parent / f"{output_main_path.stem}_site_analysis"
+                decay_calc.write_site_analysis_results(site_output_dir)
+                logger.info(f"Site-specific analysis results written to {get_display_path(site_output_dir)}")
+        
+        # Cleanup
+        decay_calc.cleanup_intermediate_files()
+        logger.info("panDecay analysis completed successfully.")
+    else:
+        logger.error("ML tree construction failed or likelihood missing. Halting.")
+        sys.exit(1)
+
+
+def main():
+    """Main entry point for panDecay."""
+    parser = setup_argument_parser()
+    args = parser.parse_args()
+    
+    # Set up logging first
+    configure_logging(args)
+    logger = logging.getLogger(__name__)
+    
+    # Load configuration file if provided
+    if args.config:
+        args = parse_config(args.config, args)
+    
+    # Validate arguments and handle early exits
+    validate_arguments(args, parser)
     
     # Construct full model string
     effective_model_str = args.model
@@ -277,145 +432,13 @@ def main():
     print_runtime_parameters(args, effective_model_str)
     
     try:
-        # Convert string paths to Path objects
-        temp_dir_path = Path(args.temp) if args.temp else None
-        starting_tree_path = Path(args.starting_tree) if args.starting_tree else None
-        
-        # Create panDecayIndices instance
-        decay_calc = panDecayIndices(
-            alignment_file=args.alignment,
-            alignment_format=args.format,
-            model=effective_model_str,
-            temp_dir=temp_dir_path,
-            paup_path=args.paup,
-            threads=args.threads,
-            starting_tree=starting_tree_path,
-            data_type=args.data_type,
-            debug=args.debug,
-            keep_files=args.keep_files,
-            gamma_shape=args.gamma_shape, 
-            prop_invar=args.prop_invar,
-            base_freq=args.base_freq, 
-            rates=args.rates,
-            protein_model=args.protein_model, 
-            nst=args.nst,
-            parsmodel=args.parsmodel,
-            paup_block=paup_block_content,
-            analysis_mode=args.analysis,
-            bayesian_software=args.bayesian_software,
-            mrbayes_path=args.mrbayes_path,
-            bayes_model=args.bayes_model,
-            bayes_ngen=args.bayes_ngen,
-            bayes_burnin=args.bayes_burnin,
-            bayes_chains=args.bayes_chains,
-            bayes_sample_freq=args.bayes_sample_freq,
-            marginal_likelihood=args.marginal_likelihood,
-            ss_alpha=args.ss_alpha,
-            ss_nsteps=args.ss_nsteps,
-            use_mpi=args.use_mpi,
-            mpi_processors=args.mpi_processors,
-            mpirun_path=args.mpirun_path,
-            use_beagle=args.use_beagle,
-            beagle_device=args.beagle_device,
-            beagle_precision=args.beagle_precision,
-            beagle_scaling=args.beagle_scaling,
-            constraint_mode=args.constraint_mode,
-            test_branches=args.test_branches,
-            constraint_file=args.constraint_file,
-            config_constraints=getattr(args, 'config_constraints', None),
-            check_convergence=args.check_convergence,
-            min_ess=args.min_ess,
-            max_psrf=args.max_psrf,
-            max_asdsf=args.max_asdsf,
-            convergence_strict=args.convergence_strict,
-            mrbayes_parse_timeout=args.mrbayes_parse_timeout,
-            output_style=args.output_style
-        )
-        
-        # Build ML tree
-        decay_calc.build_ml_tree()
-        
-        if decay_calc.ml_tree and decay_calc.ml_likelihood is not None:
-            # Run bootstrap analysis if requested
-            if args.bootstrap:
-                logger.info(f"Running bootstrap analysis with {args.bootstrap_reps} replicates...")
-                decay_calc.run_bootstrap_analysis(num_replicates=args.bootstrap_reps)
-            
-            # Calculate decay indices
-            decay_calc.calculate_decay_indices(perform_site_analysis=args.site_analysis)
-            
-            # Write site analysis results if available
-            if hasattr(decay_calc, 'decay_indices') and decay_calc.decay_indices:
-                for clade_id, data in decay_calc.decay_indices.items():
-                    if 'site_data' in data:
-                        site_output_dir = Path(args.output).parent / f"{Path(args.output).stem}_site_analysis"
-                        decay_calc.write_site_analysis_results(site_output_dir)
-                        logger.info(f"Site-specific analysis results written to {get_display_path(site_output_dir)}")
-                        break
-            
-            # Write main results
-            output_main_path = Path(args.output)
-            decay_calc.write_formatted_results(output_main_path)
-            
-            # Generate detailed report
-            report_path = output_main_path.with_suffix(".md")
-            decay_calc.generate_detailed_report(report_path)
-            
-            # Create annotated trees
-            output_dir = output_main_path.resolve().parent
-            tree_base_name = args.tree
-            tree_files = decay_calc.annotate_trees(output_dir, tree_base_name)
-            
-            if tree_files:
-                logger.info(f"Successfully created {len(tree_files)} annotated trees.")
-                for tree_type, path in tree_files.items():
-                    logger.info(f"  - {tree_type} tree: {get_display_path(path)}")
-            else:
-                logger.warning("Failed to create annotated trees.")
-            
-            # Handle visualization
-            if args.visualize:
-                viz_out_dir = output_main_path.resolve().parent
-                viz_base_name = output_main_path.stem
-                viz_kwargs = {'width': 10, 'height': 6, 'format': args.viz_format}
-                
-                # Check for visualization libraries
-                try: 
-                    import matplotlib, seaborn
-                except ImportError:
-                    logger.warning("Matplotlib/Seaborn not installed. Skipping static visualizations.")
-                    args.visualize = False
-                
-                if args.visualize:
-                    decay_calc.visualize_support_distribution(
-                        viz_out_dir / f"{viz_base_name}_dist_{args.annotation}.{args.viz_format}",
-                        value_type=args.annotation, **viz_kwargs)
-                
-                if args.site_analysis:
-                    if args.visualize:
-                        decay_calc.viz_format = args.viz_format
-                    
-                    site_output_dir = output_main_path.parent / f"{output_main_path.stem}_site_analysis"
-                    decay_calc.write_site_analysis_results(site_output_dir)
-                    logger.info(f"Site-specific analysis results written to {get_display_path(site_output_dir)}")
-            
-            # Cleanup
-            decay_calc.cleanup_intermediate_files()
-            logger.info("panDecay analysis completed successfully.")
-        else:
-            logger.error("ML tree construction failed or likelihood missing. Halting.")
-            sys.exit(1)
-    
+        run_analysis(args, effective_model_str, paup_block_content)
     except Exception as e:
         logger.error(f"panDecay analysis terminated with an error: {e}")
         if args.debug:
             import traceback
             logger.debug("Full traceback:\n%s", traceback.format_exc())
         sys.exit(1)
-    
-    finally:
-        if 'decay_calc' in locals() and (args.debug or args.keep_files):
-            logger.info(f"Temporary files are preserved in: {decay_calc.temp_path}")
 
 
 if __name__ == "__main__":
