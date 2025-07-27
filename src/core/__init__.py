@@ -1,0 +1,1 @@
+"""Core panDecay modules (constants, configuration, analysis engine)."""
