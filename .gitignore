@@ -104,3 +104,8 @@ MLDecay/
 *.pyc
 *.pyo
 .pytest_cache/
+
+# Documentation files (private)
+activeContext.md
+progress.md
+pytest.ini
