@@ -26,71 +26,42 @@ The tool analyzes phylogenetic trees by comparing optimal trees with constrained
 - **Progress tracking**: Real-time console updates with integrated progress logging
 - **Proven reliability**: Extensively tested and validated system
 
-## v2.0 Modular Architecture (Recommended)
+## Current Architecture (Monolithic System)
 
 ### Entry Points
-- **`src/panDecay.py`**: Main entry point using modular architecture with orchestration
-- **`src/pandecay_main.py`**: Legacy implementation (fallback compatibility)
+- **`panDecay.py`**: Main entry point (root directory)
+- **`src/main.py`**: Argument parsing and workflow coordination
+- **`src/core/analysis_engine.py`**: Core analysis implementation (4,963 lines)
 
-### Core Modular Components
+### Core Components
 
-#### Analysis Engines (`src/analysis/engines/`)
-- **`base_engine.py`**: Abstract base class defining common interface for all engines
-- **`ml_engine.py`**: Maximum Likelihood analysis with PAUP* integration and AU testing
-- **`bayesian_engine.py`**: Bayesian analysis with MrBayes integration and marginal likelihood
-- **`parsimony_engine.py`**: Traditional parsimony analysis with Bremer support calculation
+#### Core Analysis (`src/core/`)
+- **`analysis_engine.py`**: Main `panDecayIndices` class with all analysis methods (4,963 lines)
+- **`configuration.py`**: Configuration management and validation
+- **`constants.py`**: Centralized configuration constants
+- **`utils.py`**: Utility functions and progress tracking
 
-#### Orchestration System (`src/orchestration/`)
-- **`analysis_orchestrator.py`**: Coordinates multiple analysis engines, manages shared resources
+### Monolithic Data Flow
 
-#### Configuration Management (`src/config/`)
-- **`constants.py`**: Centralized configuration constants (eliminates 57+ magic numbers)
+1. **Entry Point**: `panDecay.py` imports and calls `src/main.py`
+2. **Argument Processing**: `src/main.py` parses arguments and validates configuration
+3. **Analysis Setup**: Creates `panDecayIndices` instance with all parameters
+4. **Analysis Execution**: Single comprehensive class handles all analysis types
+5. **Output Generation**: Organized file structure with results, trees, reports, visualizations
+6. **Cleanup**: Comprehensive cleanup of temporary files
 
-#### Core Infrastructure (`src/core/`)
-- **`file_tracker.py`**: Organized output directory management with timestamp-based structure
-- **`progress_logger.py`**: Clean console progress tracking with dynamic updates
+### Key Advantages of Monolithic Architecture
 
-#### External Tool Management (`src/external_tools/`)
-- **`tool_manager.py`**: Context-managed execution of PAUP*, MrBayes with proper cleanup
+- **Simplicity**: Single comprehensive analysis class
+- **Reliability**: Proven, extensively tested system
+- **Integration**: All analysis types work together seamlessly
+- **Resource Management**: Centralized resource management and cleanup
+- **Error Handling**: Comprehensive exception handling throughout
+- **Memory Management**: Efficient memory usage and monitoring
 
-#### Utilities (`src/utils/`)
-- **`thread_calculator.py`**: Adaptive thread calculation based on system resources
-- **`memory_manager.py`**: Memory monitoring and optimization
-- **`script_generators.py`**: PAUP*/MrBayes script generation utilities
+## Implementation Details
 
-#### Exception Handling (`src/exceptions/`)
-- **`analysis_exceptions.py`**: Analysis-specific exceptions with context information
-- **`tool_exceptions.py`**: External tool error handling
-- **`io_exceptions.py`**: Input/output error management
-
-### Modular Data Flow
-
-1. **Entry Point**: `src/panDecay.py` parses arguments and initializes orchestrator
-2. **Engine Creation**: Orchestrator creates appropriate analysis engines based on user request
-3. **Resource Setup**: FileTracker creates organized output directories, memory monitoring begins
-4. **Analysis Execution**: Each engine performs specialized analysis with proper resource management
-5. **Result Aggregation**: Orchestrator collects results from all engines
-6. **Output Generation**: Organized file structure with results, trees, reports, visualizations
-7. **Cleanup**: Context managers ensure proper resource cleanup
-
-### Key Advantages of Modular Architecture
-
-- **Separation of Concerns**: Each engine handles one analysis type
-- **Extensibility**: Easy to add new analysis engines
-- **Testability**: Individual components can be tested in isolation
-- **Resource Management**: Proper context managers and cleanup
-- **Error Handling**: Comprehensive exception hierarchy with context
-- **Memory Optimization**: Active memory monitoring and management
-- **Import Reliability**: Robust absolute import system eliminates import failures
-
-## Legacy Architecture (Backward Compatibility)
-
-### Core Components (Legacy)
-- **Main Script**: `src/pandecay_main.py` - Original monolithic implementation
-- **Main Class**: `panDecayIndices` - Single large class handling all analysis types
-- **Usage**: Automatically used as fallback when modular system encounters issues
-
-### Legacy Data Flow
+### Core Workflow
 1. **Input Processing**: Alignment files converted to NEXUS format
 2. **Tree Search**: Optimal tree search using PAUP* or MrBayes
 3. **Constraint Generation**: Automated constraint generation for each internal branch
@@ -100,34 +71,24 @@ The tool analyzes phylogenetic trees by comparing optimal trees with constrained
 
 ## Development Commands
 
-### Running the Tool (v2.0 Modular Architecture)
+### Running the Tool
 
 ```bash
-# Basic usage with modular architecture
-python3 src/panDecay.py alignment.fas --nst 6 --gamma
+# Basic usage
+python3 panDecay.py alignment.fas --nst 6 --gamma
 
-# Multi-analysis with orchestration
-python3 src/panDecay.py alignment.fas --analysis ml+bayesian --nst 6
-
-# Memory-optimized analysis
-python3 src/panDecay.py alignment.fas --analysis ml --threads auto --memory-limit 8G
+# Multi-analysis 
+python3 panDecay.py alignment.fas --analysis ml+bayesian --nst 6
 
 # With configuration file
-python3 src/panDecay.py --config analysis.yaml
+python3 panDecay.py --config analysis.yaml
 
-# All analysis types with orchestration
-python3 src/panDecay.py alignment.fas --analysis all --nst 6 --gamma
-```
+# All analysis types
+python3 panDecay.py alignment.fas --analysis all --nst 6 --gamma
 
-### Running the Tool (Legacy Architecture)
-
-```bash
-# Legacy usage (automatically used as fallback if needed)
-python3 src/pandecay_main.py alignment.fas --model GTR --gamma
-
-# Different analysis types (legacy)
-python3 src/pandecay_main.py alignment.fas --analysis ml+bayesian --model GTR
-python3 src/pandecay_main.py alignment.fas --analysis parsimony
+# Different data types
+python3 panDecay.py proteins.phy --data-type protein --protein-model WAG
+python3 panDecay.py morpho.nex --data-type discrete --discrete-model Mk
 ```
 
 ### Installing Dependencies
@@ -143,54 +104,32 @@ pip install -r requirements.txt
 
 ### Testing and Validation
 
-**v2.0 Modular Architecture** includes comprehensive testing framework:
-- **8-Phase Test Suite**: Systematic validation covering all system components
+**Testing Framework** includes comprehensive validation:
+- **Multi-Phase Test Suite**: Systematic validation covering core functionality
   - Import system verification
-  - Core functionality testing
-  - Individual engine validation
-  - Orchestration integration testing
+  - Core analysis engine testing
   - End-to-end workflow testing
   - Error handling validation
   - Configuration testing
   - Output verification
-- **Import System Testing**: All 86+ import statements verified
 - **Memory Testing**: Resource usage and cleanup validation
-- **Error Recovery Testing**: Exception hierarchy and context validation
+- **Integration Testing**: External tool integration validation
 
-**Legacy Testing** methods:
+**Testing Methods**:
 - Example datasets in `examples/` directory (alignment.fas, proteins.phy, morpho.nex)
 - Debug mode with temporary file retention: `--debug --keep-files`
 - Validation against known phylogenetic results
 
-### Common Development Tasks (v2.0 Modular)
+### Common Development Tasks
 
-- **Add new analysis engine**: 
-  1. Create new engine class inheriting from `AnalysisEngine`
-  2. Implement required abstract methods (`analyze()`, `validate_inputs()`, `get_analysis_type()`)
-  3. Register engine with orchestrator
-  4. Add comprehensive tests
-
-- **Modify analysis workflow**: 
-  1. Update appropriate engine in `src/analysis/engines/`
-  2. Modify orchestrator if cross-engine coordination needed
-  3. Update configuration constants if new parameters added
-
-- **Add new external software**: 
-  1. Extend `ExternalToolManager` with new tool support
-  2. Create script generator utilities
-  3. Add error handling for tool-specific issues
-  4. Follow MrBayes integration pattern
-
+- **Add new analysis method**: Extend `panDecayIndices` class with new analysis method
+- **Modify output format**: Update result writing and tree generation methods
+- **Add new external software**: Implement new integration following PAUP*/MrBayes pattern
 - **Extend configuration**: 
-  1. Add constants to `src/config/constants.py`
-  2. Update argument parsing in main entry point
+  1. Add constants to `src/core/constants.py`
+  2. Update argument parsing in `src/main.py`
   3. Add validation logic
-
-### Common Development Tasks (Legacy)
-
-- **Add new analysis method**: Extend `panDecayIndices` class with new `_<method>_analysis()` method
-- **Modify output format**: Update `_write_results()` and `_generate_annotated_trees()` methods
-- **Add new external software**: Implement new methods following MrBayes integration pattern
+- **Modify analysis workflow**: Update methods in `src/core/analysis_engine.py`
 
 ## Key Configuration Files
 
@@ -200,54 +139,39 @@ pip install -r requirements.txt
 - **CHANGELOG.md**: Version history and feature updates
 - **docs/**: Detailed documentation and guides
 
-## Important Implementation Details (v2.0 Modular)
+## Important Implementation Details
 
 ### Resource Management
-- **Context Managers**: All external tool execution uses context managers for proper cleanup
 - **Memory Monitoring**: Active memory usage tracking with peak usage reporting
-- **FileTracker**: Organized output directory management with timestamp-based structure
+- **File Organization**: Organized output directory management with timestamp-based structure
 - **Automatic Cleanup**: Comprehensive resource cleanup unless `--keep-files` specified
 
 ### Thread Safety and Parallel Processing
-- **Adaptive Threading**: `AdaptiveThreadCalculator` determines optimal thread usage
 - **PAUP* threading**: Controlled via `--threads` parameter with intelligent defaults
 - **MrBayes MPI support**: Via `--use-mpi` with processor specification
-- **Resource Coordination**: Orchestrator manages shared resources across engines
+- **Constraint analyses**: Run sequentially to avoid resource conflicts
 
 ### Error Handling and Recovery
-- **Exception Hierarchy**: Custom exceptions with detailed context information
-- **Graceful Degradation**: Engines can fail independently without affecting others
+- **Exception Handling**: Custom exceptions with detailed context information
+- **Graceful Degradation**: Robust error handling for external tool failures
 - **Error Context**: Comprehensive error reporting with analysis context
-- **Recovery Mechanisms**: Fallback to legacy architecture when needed
+- **Logging**: Enhanced logging with debug mode support
 
 ### Import System
-- **Absolute Imports**: Robust import system using `src.` prefix throughout
-- **No Relative Imports**: Eliminates "attempted relative import beyond top-level package" errors
+- **Simple Imports**: Clear import structure: panDecay.py → src/main.py → src/core/analysis_engine.py
 - **Package Structure**: Proper Python package with `__init__.py` files
-- **Import Verification**: All imports tested and validated
+- **Import Reliability**: All imports tested and validated
 
 ### Model Parameter Handling
-- **Centralized Configuration**: All constants managed in `src/config/constants.py`
-- **Flexible Specification**: Override parameters supported across all engines
+- **Centralized Configuration**: All constants managed in `src/core/constants.py`
+- **Flexible Specification**: Override parameters supported for all analysis types
 - **NST-Based Models**: Preferred DNA model specification using NST values
 - **Cross-Software Compatibility**: Automatic model conversion between PAUP*/MrBayes
 
-## Important Implementation Details (Legacy)
-
-### Thread Safety and Parallel Processing (Legacy)
-- PAUP* threading controlled via `--threads` parameter
-- MrBayes MPI support via `--use-mpi` with processor specification
-- Constraint analyses run sequentially to avoid resource conflicts
-
-### Temporary File Management (Legacy)
+### Temporary File Management
 - Uses system temp directory or user-specified location
-- Debug mode (`--debug`) retains all temporary files in `debug_runs/`
+- Debug mode (`--debug`) retains all temporary files
 - Automatic cleanup unless `--keep-files` specified
-
-### Error Handling Patterns (Legacy)
-- Robust subprocess handling for external software
-- Graceful degradation when optional features fail
-- Basic logging with debug mode support
 
 ## External Software Integration
 
@@ -292,22 +216,15 @@ pip install -r requirements.txt
 
 ## Development Notes
 
-### v2.0 Modular Architecture (Recommended)
-- **Fully decomposed modular system** replacing monolithic design
-- **SOLID principles**: Single responsibility, dependency injection, strategy patterns
-- **Comprehensive testing**: 8-phase test suite with 80%+ coverage requirement
-- **Resource management**: Context managers and proper cleanup throughout
-- **Import system**: Robust absolute imports eliminate all import complications
-- **Error handling**: Comprehensive exception hierarchy with detailed context
+### Current Architecture (Monolithic System)
+- **Comprehensive monolithic design** with all functionality integrated
+- **Proven reliability**: Extensively tested and validated system
+- **Resource management**: Proper cleanup and file management throughout
+- **Import system**: Simple, reliable import structure
+- **Error handling**: Enhanced exception handling with detailed context
 - **Memory optimization**: Active monitoring and intelligent resource management
-- **Extensibility**: Plugin-based architecture for custom analysis types
-- **Documentation**: Comprehensive API documentation and development guides
-
-### Legacy Architecture (Compatibility)
-- **Monolithic design** maintained for backward compatibility
-- **Automatic fallback** when modular system encounters issues
-- **Traditional patterns** following original implementation
-- **Basic error handling** with limited context information
+- **Professional presentation**: Clean UI with proper citations and organized output
+- **Documentation**: Comprehensive user documentation and development guides
 
 ### General Notes
 - **Cross-platform compatibility** (tested on macOS, Linux, Windows)
@@ -317,9 +234,9 @@ pip install -r requirements.txt
 - **Organized output structure** with timestamp-based directory management
 
 ### Development Workflow
-1. **Prefer modular architecture** for all new development
+1. **Work within monolithic structure** maintaining integration of all components
 2. **Use comprehensive testing** for all changes
-3. **Follow import guidelines** using absolute imports with `src.` prefix
-4. **Implement proper resource management** with context managers
+3. **Follow simple import structure** with clear entry point flow
+4. **Implement proper resource management** with cleanup and file handling
 5. **Add comprehensive error handling** with custom exceptions and context
 6. **Document all changes** in both code and user documentation

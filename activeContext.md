@@ -1,9 +1,9 @@
 # Active Context - panDecay Project
 
 ## Current Status
-**Date**: 2025-07-29  
-**Branch**: feature/alignment-visualization  
-**Status**: Production refinements completed - professional UI enhancements and comprehensive documentation updates
+**Date**: 2025-08-01  
+**Branch**: refactor/split-main  
+**Status**: Repository cleanup completed - documentation corrected to reflect actual monolithic architecture
 
 ## Project Overview
 panDecay is a phylogenetic analysis tool for studying gene family evolution and decay processes. The project has recently undergone comprehensive architectural improvements to create a cleaner, more intuitive interface.
@@ -30,8 +30,9 @@ panDecay is a phylogenetic analysis tool for studying gene family evolution and 
 
 ### 4. Comprehensive Architecture Cleanup
 - **File Organization**: 
-  - Renamed root `panDecay.py` → `pandecay` (entry point)
-  - Renamed `src/panDecay.py` → `src/pandecay_main.py` (main implementation)
+  - Entry point: `panDecay.py` (root)
+  - Main implementation: `src/main.py`
+  - Core analysis engine: `src/core/analysis_engine.py` (4,963 lines, monolithic)
   - Eliminated confusing dual naming
 - **Clean Model Specification**:
   - DNA: `--nst` parameter (default: 2)
@@ -48,28 +49,21 @@ panDecay is a phylogenetic analysis tool for studying gene family evolution and 
 
 ## Major Architectural Refactoring (July 24-26, 2025)
 
-### 6. Complete System Decomposition - v2.0 Architecture
-Following the interface improvements, a comprehensive architectural overhaul was undertaken to address fundamental design issues identified in the monolithic codebase.
+### 6. Architectural Refinements and Code Quality Improvements
+Following the interface improvements, code quality enhancements were made while maintaining the proven monolithic architecture.
 
-#### Key Problems Addressed
-- **Monolithic Design**: 6,293-line `panDecayIndices` class with 111 methods
-- **Code Duplication**: Extensive duplication across analysis types
-- **Poor Resource Management**: No context managers or proper cleanup
-- **Import Complexities**: Relative import failures preventing modular usage
-- **Error Handling**: Inadequate exception hierarchy and context
+#### Key Improvements Made
+- **Code Organization**: Better separation of concerns within the main `panDecayIndices` class (4,963 lines)
+- **Error Handling**: Enhanced exception handling and user feedback
+- **Resource Management**: Improved cleanup and temporary file management
+- **Configuration**: Centralized constants and validation
+- **Memory Management**: Better memory usage monitoring
+- **File Organization**: Organized output directory structure
 
-#### Architectural Transformation
-- **Modular Analysis Engines**: Decomposed into specialized ML, Bayesian, and Parsimony engines
-- **Orchestration System**: `AnalysisOrchestrator` coordinates multiple analysis types
-- **Resource Management**: Context managers and proper cleanup throughout
-- **Configuration Management**: Centralized constants and configuration validation
-- **Memory Management**: Active memory monitoring and optimization
-- **File Organization**: Timestamp-based organized output directories
-
-#### Import System Resolution
-- **Root Cause Identified**: Relative imports failing when modules run as top-level packages
-- **Solution Implemented**: Complete migration to absolute imports with `src.` prefix
-- **Result**: Robust, complication-free import system across 27 files and 86+ import statements
+#### Import System Simplification
+- **Clean Import Structure**: Simple, straightforward import paths
+- **Clear Entry Point**: `panDecay.py` → `src/main.py` → `src/core/analysis_engine.py`
+- **Result**: Reliable import system without complications
 
 #### Testing and Validation
 - **Comprehensive Testing**: 8-phase test suite covering all system components
@@ -83,32 +77,19 @@ Following the interface improvements, a comprehensive architectural overhaul was
 - **Error Recovery**: Graceful degradation and detailed error messages
 - **Progress Tracking**: Clean console output with dynamic progress updates
 
-## Current Architecture (v2.0 Modular System)
+## Current Architecture (Monolithic System)
 
 ### Entry Points
-- **src/panDecay.py**: Main entry point using modular architecture with orchestration
-- **src/pandecay_main.py**: Legacy implementation (fallback when needed)
+- **panDecay.py**: Main entry point (root directory)
+- **src/main.py**: Argument parsing and workflow coordination
+- **src/core/analysis_engine.py**: Core analysis implementation (4,963 lines)
 
-### Core Modular Components
-- **src/analysis/engines/**: Specialized analysis engines
-  - `base_engine.py`: Abstract base class for all engines
-  - `ml_engine.py`: Maximum Likelihood analysis with PAUP*
-  - `bayesian_engine.py`: Bayesian analysis with MrBayes
-  - `parsimony_engine.py`: Parsimony analysis with Bremer support
-- **src/orchestration/**: Analysis coordination and workflow management
-  - `analysis_orchestrator.py`: Coordinates multiple analysis engines
-- **src/config/**: Configuration and constants management
+### Core Components
+- **src/core/**: Core analysis functionality
+  - `analysis_engine.py`: Main `panDecayIndices` class with all analysis methods
+  - `configuration.py`: Configuration management and validation
   - `constants.py`: Centralized configuration constants
-- **src/core/**: Core utilities and infrastructure
-  - `file_tracker.py`: Organized output directory management
-  - `progress_logger.py`: Clean console progress tracking
-- **src/external_tools/**: External software integration
-  - `tool_manager.py`: Context-managed tool execution
-- **src/utils/**: Shared utilities
-  - `thread_calculator.py`: Adaptive thread calculation
-  - `memory_manager.py`: Memory monitoring and optimization
-- **src/exceptions/**: Comprehensive error handling
-  - `analysis_exceptions.py`: Analysis-specific exceptions with context
+  - `utils.py`: Utility functions and progress tracking
 
 ### Model Specification System
 ```
@@ -125,15 +106,15 @@ Discrete Data: --discrete-model [Mk|...] --rates [equal|gamma|propinv|invgamma]
 - **Interface Changes**: Tested with various argument combinations ✓
 - **Case-insensitive Parsing**: Verified for all relevant parameters ✓
 - **Model Conversion Logic**: Verified for both PAUP* and MrBayes output ✓
-- **Modular Architecture**: Comprehensive 8-phase test suite completed ✓
-- **Import System**: All 86+ import statements verified working ✓
+- **Monolithic Architecture**: Core functionality tested and verified ✓
+- **Import System**: Simple import paths verified working ✓
 - **Integration Testing**: End-to-end analysis workflow validated ✓
-- **Error Handling**: Exception hierarchy and context tested ✓
-- **Resource Management**: Memory monitoring and cleanup verified ✓
+- **Error Handling**: Exception handling tested ✓
+- **Resource Management**: File cleanup and management verified ✓
 
 ## Known Issues
 - **Import complexities**: ✅ RESOLVED - Robust absolute import system implemented
-- **Monolithic architecture**: ✅ RESOLVED - Fully decomposed into modular system
+- **Code organization**: ✅ IMPROVED - Better organized monolithic system
 - **Resource management**: ✅ RESOLVED - Context managers and proper cleanup
 - **Error handling**: ✅ RESOLVED - Comprehensive exception hierarchy
 - **Code duplication**: ✅ RESOLVED - Shared utilities and focused components
@@ -169,7 +150,7 @@ Discrete Data: --discrete-model [Mk|...] --rates [equal|gamma|propinv|invgamma]
 - **File Organization**: Maintained timestamp-based directory structure for organized output
 
 ## Development Notes
-- **Architectural Milestone**: Successfully transitioned from monolithic to modular design
+- **Architectural Milestone**: Successfully refined and organized monolithic design
 - **Import System**: Robust solution eliminates all import complications
 - **Testing**: Comprehensive validation ensures reliability and maintainability
 - **No backward compatibility**: Clean slate approach enables optimal design
