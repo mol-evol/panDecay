@@ -238,6 +238,32 @@
 - **Error handling**: ✅ RESOLVED - Comprehensive exception hierarchy
 - **Magic numbers**: ✅ RESOLVED - Centralized configuration constants
 
+### July 29, 2025: Production Refinements and Documentation
+
+#### Session 9: User Interface Enhancement and Bug Fixes
+**Issues Addressed**:
+- **Runtime Parameters Display**: User reported "table at the beginning is still jagged"
+- **Citation Requirements**: Need to include proper software citation in output
+- **Markdown Report Failure**: Report generation producing empty files due to alignment attribute error
+
+**Implementation**:
+- **Professional Runtime Banner**: Completely replaced jagged parameter table with clean banner format
+  - Fixed 80-character width for consistent appearance across all terminals
+  - Prominent citation display: "McInerney, J.O. (2025) panDecay: Phylogenetic Analysis with Decay Indices"
+  - Organized parameter sections (Analysis Configuration, Runtime Settings, Bayesian Parameters)
+  - Clean separator lines using Unicode drawing characters
+- **Bug Fix**: Corrected critical markdown report generation error
+  - Problem: `'MultipleSeqAlignment' object has no attribute 'name'`
+  - Solution: Replaced `self.alignment.name` with `self.alignment_file.stem` in 6 locations
+  - Result: Markdown reports now generate successfully with proper file naming
+
+#### Session 10: Comprehensive Documentation Upgrade
+**User Request**: "the documentation is lagging significantly behind"
+- **Documentation Plan**: Created comprehensive upgrade plan covering all major files
+- **Files Updated**: README.md, progress.md, activeContext.md, dev/CLAUDE.md
+- **New Documentation**: OUTPUT_GUIDE.md and INTERPRETATION_GUIDE.md creation planned
+- **Content Updates**: All documentation brought in line with current v2.0 functionality
+
 ### Future Considerations
 - **Performance optimization**: Further memory and processing improvements
 - **Additional analysis engines**: Support for specialized phylogenetic methods

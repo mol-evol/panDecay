@@ -67,6 +67,10 @@ viz_format = png
 # Options: au, lnl
 annotation = lnl
 
+# Output formatting style (default: unicode)
+# Options: unicode, ascii
+output_style = unicode
+
 
 # ==============================================================================
 # MODEL SETTINGS (for ML and Bayesian analyses)
@@ -94,14 +98,27 @@ invariable = false
 
 # Base frequencies (optional)
 # Options: equal, estimate, empirical
-# base_freq = empirical
+base_freq = estimate
 
 # Number of substitution types for DNA (optional)
 # Options: 1, 2, 6
-# nst = 6
+nst = 6
 
 # Protein-specific model (overrides base model for protein data)
-# protein_model = WAG
+protein_model = WAG
+
+# Fixed gamma shape parameter (advanced)
+gamma_shape = 0.5
+
+# Fixed proportion of invariable sites (advanced)
+prop_invar = 0.2
+
+# Site rate variation (overrides gamma setting)
+# Options: equal, gamma
+rates = gamma
+
+# Parsimony model for discrete data (default: true for discrete)
+parsmodel = true
 
 # ==============================================================================
 # COMPUTATIONAL SETTINGS
@@ -116,11 +133,14 @@ threads = auto
 paup = paup
 
 # Starting tree file in Newick format (optional)
-# starting_tree = my_starting_tree.nwk
+starting_tree = my_starting_tree.nwk
 
 # Custom PAUP* commands file (optional)
 # This overrides most model settings above
-# paup_block = custom_paup_commands.txt
+paup_block = custom_paup_commands.txt
+
+# Custom temporary directory (optional)
+temp = /path/to/temp
 
 # ==============================================================================
 # BAYESIAN-SPECIFIC SETTINGS
@@ -136,7 +156,7 @@ mrbayes_path = mb
 
 # Model for Bayesian analysis (optional)
 # If not specified, uses same as ML model
-# bayes_model = GTR+G+I
+bayes_model = GTR+G+I
 
 # Number of MCMC generations (default: 1000000)
 bayes_ngen = 1000000
@@ -181,6 +201,10 @@ max_asdsf = 0.01
 # If false, warnings are issued but analysis continues
 convergence_strict = false
 
+# Timeout for parsing MrBayes consensus trees in seconds (default: 30.0)
+# Set to 0 to disable timeout
+mrbayes_parse_timeout = 30.0
+
 # ==============================================================================
 # PARALLEL PROCESSING (MrBayes only)
 # ==============================================================================
@@ -189,7 +213,7 @@ convergence_strict = false
 use_mpi = false
 
 # Number of MPI processors (default: number of chains)
-# mpi_processors = 8
+mpi_processors = 8
 
 # Path to mpirun executable (default: mpirun)
 mpirun_path = mpirun
@@ -220,11 +244,11 @@ constraint_mode = all
 # Specify branches to test (optional)
 # Format: semicolon-separated clades, each clade is comma-separated taxa
 # Example: Homo_sapiens,Pan_troglodytes;Mus_musculus,Rattus_norvegicus
-# test_branches = 
+test_branches = Homo_sapiens,Pan_troglodytes;Mus_musculus,Rattus_norvegicus
 
 # Constraint file (optional)
 # File containing constraint definitions (one per line)
-# constraint_file = constraints.txt
+constraint_file = constraints.txt
 
 # ==============================================================================
 # CONSTRAINT DEFINITIONS

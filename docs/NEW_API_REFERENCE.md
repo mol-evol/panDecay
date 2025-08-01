@@ -1,6 +1,6 @@
-# panDecay API Reference (Refactored Architecture)
+# panDecay API Reference (v2.0 Modular Architecture)
 
-This document provides comprehensive API documentation for the refactored panDecay system, featuring a modular architecture with specialized analysis engines, orchestration, and utility components.
+This document provides comprehensive API documentation for the panDecay v2.0 system, featuring a fully decomposed modular architecture with specialized analysis engines, orchestration, and comprehensive utility components. Updated July 29, 2025.
 
 ## Table of Contents
 
@@ -22,9 +22,11 @@ src/
 ├── analysis/engines/          # Specialized analysis engines
 ├── orchestration/            # Analysis coordination
 ├── config/                   # Configuration management
+├── core/                     # Core infrastructure (FileTracker, ProgressLogger)
 ├── external_tools/           # Tool management
 ├── utils/                   # Shared utilities
 ├── exceptions/              # Error handling
+├── visualization/           # Plot and visualization management
 └── io/                     # Input/output operations
 ```
 
@@ -648,4 +650,21 @@ if analysis_config.requires_model_configuration():
     }
 ```
 
-This API reference provides comprehensive documentation for the refactored panDecay system, focusing on the modular architecture and new capabilities for extensibility, testing, and maintainability.
+## Recent Enhancements (July 29, 2025)
+
+### Professional User Interface
+- **Runtime Parameters Banner**: Clean, fixed-width banner format with academic citation
+- **Progress Tracking**: Enhanced console output with ProgressLogger integration
+- **File Organization**: Timestamp-based directory structure via FileTracker
+
+### Enhanced Reporting
+- **Markdown Reports**: Comprehensive analysis reports with site analysis integration
+- **Output Organization**: Structured output files with consistent formatting
+- **Citation Integration**: Proper academic attribution in all user-facing output
+
+### Core Infrastructure
+- **FileTracker**: Organized output directory management with timestamp-based structure
+- **ProgressLogger**: Clean console progress tracking with dynamic updates
+- **Professional Presentation**: Academic-quality software presentation standards
+
+This API reference provides comprehensive documentation for the panDecay v2.0 system, focusing on the modular architecture and enhanced capabilities for extensibility, testing, maintainability, and professional presentation.

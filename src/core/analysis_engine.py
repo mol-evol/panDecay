@@ -9,6 +9,7 @@ monolithic system to preserve exact behavior and functionality.
 import os
 import sys
 import json
+import csv
 import numpy as np
 from Bio import Phylo, AlignIO, SeqIO
 import tempfile
@@ -20,6 +21,8 @@ import multiprocessing
 import time
 import datetime
 from pathlib import Path
+
+from .utils import ProgressIndicator, OverwritingProgress
 
 
 class AnalysisEngineError(Exception):
@@ -530,7 +533,6 @@ class panDecayIndices:
                             logger.warning(f"Likelihood value problematic (e.g., '******') in {score_file_path}, line: '{data_line_text}'")
                             continue # Try next line if multiple scores
                         likelihood = float(val_str)
-                        logger.info(f"Parsed log-likelihood from {score_file_path}: {likelihood}")
                         return likelihood
                     except ValueError:
                         logger.warning(f"Could not convert LNL value to float: '{parts[lnl_col_idx]}' from line '{data_line_text}' in {score_file_path}")
@@ -542,7 +544,9 @@ class panDecayIndices:
             return None
 
     def build_ml_tree(self):
-        logger.info("Building maximum likelihood tree...")
+        progress = ProgressIndicator()
+        progress.start("Building maximum likelihood tree...")
+        
         script_cmds = [f"execute {NEXUS_ALIGNMENT_FN};", self._get_paup_model_setup_cmds()]
 
         if self.user_paup_block is None: # Standard model processing, add search commands
@@ -584,27 +588,30 @@ class panDecayIndices:
 
             self.ml_likelihood = self._parse_likelihood_from_score_file(self.temp_path / ML_SCORE_FN)
             if self.ml_likelihood is None and paup_result.stdout: # Fallback to log
-                logger.info(f"Fallback: Parsing ML likelihood from PAUP* log {ML_LOG_FN}")
                 patterns = [r'-ln\s*L\s*=\s*([0-9.]+)', r'likelihood\s*=\s*([0-9.]+)', r'score\s*=\s*([0-9.]+)']
                 for p in patterns:
                     m = re.findall(p, paup_result.stdout, re.IGNORECASE)
                     if m: self.ml_likelihood = float(m[-1]); break
-                if self.ml_likelihood: logger.info(f"Extracted ML likelihood from log: {self.ml_likelihood}")
-                else: logger.warning("Could not extract ML likelihood from PAUP* log.")
+                if not self.ml_likelihood: logger.warning("Could not extract ML likelihood from PAUP* log.")
 
             ml_tree_path = self.temp_path / ML_TREE_FN
             if ml_tree_path.exists() and ml_tree_path.stat().st_size > 0:
                 # Clean the tree file if it has metadata after semicolon
                 cleaned_tree_path = self._clean_newick_tree(ml_tree_path)
                 self.ml_tree = Phylo.read(str(cleaned_tree_path), "newick")
-                logger.info(f"Successfully built ML tree. Log-likelihood: {self.ml_likelihood if self.ml_likelihood is not None else 'N/A'}")
+                
+                # Consolidated final message
+                lk_display = f"{self.ml_likelihood:.3f}" if self.ml_likelihood is not None else "N/A"
+                progress.stop(f"ML tree built → Log-likelihood: {lk_display}")
+                
                 if self.ml_likelihood is None:
                     logger.error("ML tree built, but likelihood could not be determined. Analysis may be compromised.")
-                    # Decide if this is a fatal error for downstream steps
             else:
+                progress.stop()
                 logger.error(f"ML tree file {ml_tree_path} not found or is empty after PAUP* run.")
                 raise FileNotFoundError(f"ML tree file missing or empty: {ml_tree_path}")
         except Exception as e:
+            progress.stop()
             logger.error(f"ML tree construction failed: {e}")
             raise # Re-raise to be handled by the main try-except block
 
@@ -1047,8 +1054,8 @@ class panDecayIndices:
             logger.error("No Bayesian software specified.")
             return {}
             
-        logger.info(f"Running Bayesian decay analysis using {self.bayesian_software}")
-        logger.info(f"MCMC settings: {self.bayes_ngen} generations, {self.bayes_chains} chains, sampling every {self.bayes_sample_freq}")
+        progress = ProgressIndicator()
+        progress.start(f"Running Bayesian analysis ({self.bayes_ngen:,} gen, {self.bayes_chains} chains)...")
         
         # Log parallel processing settings
         if self.use_mpi:
@@ -1057,18 +1064,8 @@ class panDecayIndices:
         if self.use_beagle:
             logger.info(f"BEAGLE enabled: device={self.beagle_device}, precision={self.beagle_precision}, scaling={self.beagle_scaling}")
         
-        # Warn if this will take a long time
-        estimated_time = (self.bayes_ngen * self.bayes_chains) / 10000  # Very rough estimate
-        if estimated_time > 60:
-            logger.warning(f"Bayesian analysis may take a long time (~{estimated_time:.0f} seconds per run)")
-        
         # First, run unconstrained Bayesian analysis
-        box_content = [
-            "Unconstrained analysis (baseline)",
-            "Running MrBayes without constraints",
-            f"{self.bayes_ngen:,} generations, {self.bayes_chains} chains"
-        ]
-        logger.info(self._format_progress_box("Bayesian Analysis", box_content))
+        progress.update("Running unconstrained analysis...")
         
         # Create NEXUS file with MrBayes block
         nexus_content = self.nexus_file_path.read_text()
@@ -1094,6 +1091,7 @@ class panDecayIndices:
         unconstrained_ml = self._run_mrbayes(unconstrained_nexus, "unc")
         
         if unconstrained_ml is None:
+            progress.stop()
             logger.error("Unconstrained Bayesian analysis failed")
             return {}
             
@@ -1129,101 +1127,70 @@ class panDecayIndices:
         
         logger.info(f"Testing {len(testable_branches)} branches for Bayesian decay...")
         
-        for branch_num, (i, clade_obj, clade_log_idx, clade_taxa) in enumerate(testable_branches, 1):
-            clade_id = f"Clade_{clade_log_idx}"
-            
-            # Display progress box
-            # Show first few taxa names for context
-            taxa_sample = ", ".join(clade_taxa[:2])
-            if len(clade_taxa) > 2:
-                taxa_sample += "..."
-            
-            box_content = [
-                f"Testing clade {clade_log_idx} ({branch_num} of {len(testable_branches)}) • {len(clade_taxa)} taxa",
-                f"Testing constraint on: {taxa_sample}",
-                "Running MrBayes with negative constraint",
-                f"{self.bayes_ngen:,} generations, {self.bayes_chains} chains"
-            ]
-            logger.info(self._format_progress_box("Bayesian Analysis", box_content))
-            
-            # Create constrained NEXUS file
-            mrbayes_block = self._generate_mrbayes_nexus(
-                clade_taxa=clade_taxa, 
-                constraint_id=clade_id
-            )
-            combined_nexus = filtered_nexus + "\n" + mrbayes_block
-            
-            constrained_nexus = self.temp_path / f"c_{clade_log_idx}.nex"
-            constrained_nexus.write_text(combined_nexus)
-            
-            # Debug: save first constraint file for inspection
-            if clade_log_idx == 3 and self.debug:
-                debug_copy = self.temp_path.parent / "debug_mrbayes_constraint.nex"
-                debug_copy.write_text(combined_nexus)
-                logger.info(f"Debug: Saved constraint file to {debug_copy}")
-            
-            # Run constrained analysis
-            constrained_ml = self._run_mrbayes(constrained_nexus, f"c_{clade_log_idx}")
-            
-            if constrained_ml is not None:
-                # Calculate Bayesian decay (marginal likelihood difference)
-                bayes_decay = unconstrained_ml - constrained_ml
+        try:
+            for branch_num, (i, clade_obj, clade_log_idx, clade_taxa) in enumerate(testable_branches, 1):
+                clade_id = f"Clade_{clade_log_idx}"
                 
-                # Calculate Bayes Factor with reasonable bounds for display
-                # Note: log(BF) = Bayes Decay
-                # Cap display at BF = 10^6 (decay ~13.8) for readability
-                MAX_DISPLAY_DECAY = 13.8  # log(10^6)
+                # Update progress with current branch
+                progress.update(f"Testing branch {branch_num}/{len(testable_branches)} ({clade_id})...")
                 
-                if bayes_decay > MAX_DISPLAY_DECAY:
-                    bayes_factor = 10**6  # Display cap
-                    bayes_factor_display = ">10^6"
-                    # Note: Large BD values are expected in phylogenetics, no warning needed
-                elif bayes_decay < -MAX_DISPLAY_DECAY:
-                    bayes_factor = 10**-6  # Display cap
-                    bayes_factor_display = "<10^-6"
+                # Create constrained NEXUS file
+                mrbayes_block = self._generate_mrbayes_nexus(
+                    clade_taxa=clade_taxa, 
+                    constraint_id=clade_id
+                )
+                combined_nexus = filtered_nexus + "\n" + mrbayes_block
+                
+                constrained_nexus = self.temp_path / f"c_{clade_log_idx}.nex"
+                constrained_nexus.write_text(combined_nexus)
+                
+                # Debug: save first constraint file for inspection
+                if clade_log_idx == 3 and self.debug:
+                    debug_copy = self.temp_path.parent / "debug_mrbayes_constraint.nex"
+                    debug_copy.write_text(combined_nexus)
+                    logger.info(f"Debug: Saved constraint file to {debug_copy}")
+                
+                # Run constrained analysis
+                constrained_ml = self._run_mrbayes(constrained_nexus, f"c_{clade_log_idx}")
+                
+                if constrained_ml is not None:
+                    # Calculate Bayesian decay (marginal likelihood difference)
+                    bayes_decay = unconstrained_ml - constrained_ml
+                    
+                    bayesian_results[clade_id] = {
+                        'unconstrained_ml': unconstrained_ml,
+                        'constrained_ml': constrained_ml,
+                        'bayes_decay': bayes_decay,
+                        'taxa': clade_taxa
+                    }
+                    
+                    # Results will be displayed in final summary
+                    if bayes_decay < 0:
+                        logger.warning(f"WARNING: {clade_id} has negative Bayes Decay ({bayes_decay:.4f}), suggesting potential convergence or estimation issues")
                 else:
-                    bayes_factor = np.exp(bayes_decay)
-                    if bayes_factor > 1000:
-                        bayes_factor_display = f"{bayes_factor:.2e}"
-                    else:
-                        bayes_factor_display = f"{bayes_factor:.2f}"
-                
-                bayesian_results[clade_id] = {
-                    'unconstrained_ml': unconstrained_ml,
-                    'constrained_ml': constrained_ml,
-                    'bayes_decay': bayes_decay,
-                    'bayes_factor': bayes_factor,
-                    'bayes_factor_display': bayes_factor_display,
-                    'taxa': clade_taxa
-                }
-                
-                # Update progress box with results
-                # Use phylogenetic-specific BD interpretation scale
-                if bayes_decay > 10:
-                    support_desc = "very strong support"
-                elif bayes_decay > 5:
-                    support_desc = "strong support"
-                elif bayes_decay > 2:
-                    support_desc = "moderate support"
-                else:
-                    support_desc = "weak support"
-                result_lines = [
-                    f"MrBayes completed successfully",
-                    f"Marginal likelihood (stepping-stone): {constrained_ml:.3f}",
-                    f"Bayes Decay: {bayes_decay:.2f}",
-                    f"Bayes Factor: {bayes_factor_display} ({support_desc})"
-                ]
-                logger.info(self._format_progress_box("Bayesian Analysis Results", result_lines))
-                if bayes_decay < 0:
-                    logger.warning(f"⚠️  {clade_id} has negative Bayes Decay ({bayes_decay:.4f}), suggesting potential convergence or estimation issues")
-            else:
-                logger.warning(f"Constrained analysis failed for {clade_id}")
+                    logger.warning(f"Constrained analysis failed for {clade_id}")
         
-        # Check for negative Bayes Decay values and issue summary warning
+            progress.stop(f"Bayesian analysis completed → {len(bayesian_results)} branches analyzed")
+        except Exception as e:
+            progress.stop()
+            raise
+        
+        # Display consolidated results for each branch with overwriting progress
         if bayesian_results:
+            overwrite_progress = OverwritingProgress()
+            try:
+                branch_list = list(bayesian_results.items())
+                for i, (clade_id, data) in enumerate(branch_list, 1):
+                    bayes_decay = data['bayes_decay']
+                    overwrite_progress.update(f"Processing results: {clade_id} ({i}/{len(branch_list)})")
+                overwrite_progress.finish(f"Bayesian results: {len(branch_list)} branches completed")
+            except Exception:
+                overwrite_progress.finish(f"Bayesian results: {len(bayesian_results)} branches completed")
+            
+            # Check for negative Bayes Decay values and issue summary warning
             negative_clades = [cid for cid, data in bayesian_results.items() if data['bayes_decay'] < 0]
             if negative_clades:
-                logger.warning(f"\n⚠️  WARNING: {len(negative_clades)}/{len(bayesian_results)} clades have negative Bayes Decay values!")
+                logger.warning(f"\nWARNING: {len(negative_clades)}/{len(bayesian_results)} clades have negative Bayes Decay values!")
                 logger.warning("This suggests potential issues with MCMC convergence or marginal likelihood estimation.")
                 logger.warning("Consider:")
                 logger.warning("  1. Increasing MCMC generations (--bayes-ngen 5000000 or higher)")
@@ -1689,7 +1656,7 @@ class panDecayIndices:
             
             formatted_values = []
             # Order matters for readability
-            order = ['AU', 'ΔlnL', 'BD', 'BF', 'PD', 'PP', 'BS']
+            order = ['AU', 'ΔlnL', 'BD', 'PD', 'PP', 'BS']
             for key in order:
                 if key in annotation_dict and annotation_dict[key] is not None:
                     val = annotation_dict[key]
@@ -1713,7 +1680,7 @@ class panDecayIndices:
         elif style == "symbols":
             # Symbol format with separators
             symbols = {
-                'AU': '✓', 'ΔlnL': '△', 'BD': '◆', 'BF': '※', 
+                'AU': '✓', 'ΔlnL': '△', 'BD': '◆', 
                 'PD': '#', 'PP': '●', 'BS': '◯'
             }
             parts = []
@@ -2068,7 +2035,7 @@ class panDecayIndices:
         
         # Log warnings at warning level
         for warning in convergence_data['warnings']:
-            logger.warning(f"  ⚠️  {warning}")
+            logger.warning(f"  WARNING: {warning}")
         
         # If strict mode and not converged, treat as failure
         if self.convergence_strict and not convergence_data['converged']:
@@ -2101,7 +2068,8 @@ class panDecayIndices:
         Returns:
             Dictionary mapping clade IDs to parsimony decay values
         """
-        logger.info("Running parsimony decay analysis...")
+        progress = ProgressIndicator()
+        progress.start("Building parsimony tree...")
         
         # Build parsimony tree if not already done
         PARS_TREE_FN = "pars_tree.tre"
@@ -2217,100 +2185,111 @@ class panDecayIndices:
                     continue
                 testable_branches.append((i, clade_obj, clade_log_idx, clade_taxa))
             
-            logger.info(f"Testing {len(testable_branches)} branches for parsimony decay...")
+            progress.update(f"Testing branches for parsimony decay ({len(testable_branches)} branches)...")
             
             # Process testable branches
-            for branch_num, (i, clade_obj, clade_log_idx, clade_taxa) in enumerate(testable_branches, 1):
-                clade_id = f"Clade_{clade_log_idx}"
-                
-                # Display progress box
-                taxa_sample = ", ".join(clade_taxa[:2])
-                if len(clade_taxa) > 2:
-                    taxa_sample += "..."
-                
-                box_content = [
-                    f"Testing clade {clade_log_idx} ({branch_num} of {len(testable_branches)}) • {len(clade_taxa)} taxa",
-                    f"Testing constraint on: {taxa_sample}",
-                    "Running PAUP* with converse constraint"
-                ]
-                logger.info(self._format_progress_box("Parsimony Analysis", box_content))
-                
-                # Create constraint forcing non-monophyly
-                # Format taxa names for PAUP* constraint syntax
-                formatted_clade_taxa = [self._format_taxon_for_paup(t) for t in clade_taxa]
-                # Use same constraint specification format as ML analysis
-                clade_spec = "((" + ", ".join(formatted_clade_taxa) + "));"
-                constraint_cmds = [
-                    f"execute {NEXUS_ALIGNMENT_FN};",
-                    f"set criterion=parsimony;",
-                    f"constraint broken_clade (MONOPHYLY) = {clade_spec}",
-                    f"hsearch start=stepwise addseq=random nreps=10 swap=tbr multrees=yes enforce=yes converse=yes constraints=broken_clade;",
-                    f"savetrees file=pars_constraint_{clade_log_idx}.tre replace=yes;",
-                    f"pscores 1 / scorefile=pars_constraint_score_{clade_log_idx}.txt replace=yes;"
-                ]
-                
-                constraint_script = f"#NEXUS\nbegin paup;\n" + "\n".join(constraint_cmds) + "\nquit;\nend;\n"
-                constraint_path = self.temp_path / f"pars_constraint_{clade_log_idx}.nex"
-                constraint_path.write_text(constraint_script)
-                
-                try:
-                    self._run_paup_command_file(f"pars_constraint_{clade_log_idx}.nex", f"paup_pars_constraint_{clade_log_idx}.log")
+            try:
+                results_to_display = []
+                for branch_num, (i, clade_obj, clade_log_idx, clade_taxa) in enumerate(testable_branches, 1):
+                    clade_id = f"Clade_{clade_log_idx}"
                     
-                    # Parse constrained score
-                    constrained_score_path = self.temp_path / f"pars_constraint_score_{clade_log_idx}.txt"
-                    constrained_score = None
+                    # Update progress with current branch
+                    progress.update(f"Testing branch {branch_num}/{len(testable_branches)} ({clade_id})...")
                     
-                    if constrained_score_path.exists():
-                        score_content = constrained_score_path.read_text()
-                        logger.debug(f"Constraint {clade_log_idx} parsimony score file content:\n{score_content}")
-                        # Use same parsing logic as initial parsimony score
-                        for line in score_content.splitlines():
-                            # Pattern 1: "Length = 123"
-                            if "Length" in line and "=" in line:
-                                try:
-                                    score_str = line.split("=")[1].strip().split()[0]
-                                    constrained_score = int(score_str)
-                                    break
-                                except (ValueError, IndexError):
-                                    pass
-                            # Pattern 2: "Tree    Length"
-                            # Next line: "1       123"
-                            elif line.strip() and line.split()[0] == "1":
-                                parts = line.strip().split()
-                                if len(parts) >= 2:
+                    # Create constraint forcing non-monophyly
+                    # Format taxa names for PAUP* constraint syntax
+                    formatted_clade_taxa = [self._format_taxon_for_paup(t) for t in clade_taxa]
+                    # Use same constraint specification format as ML analysis
+                    clade_spec = "((" + ", ".join(formatted_clade_taxa) + "));"
+                    constraint_cmds = [
+                        f"execute {NEXUS_ALIGNMENT_FN};",
+                        f"set criterion=parsimony;",
+                        f"constraint broken_clade (MONOPHYLY) = {clade_spec}",
+                        f"hsearch start=stepwise addseq=random nreps=10 swap=tbr multrees=yes enforce=yes converse=yes constraints=broken_clade;",
+                        f"savetrees file=pars_constraint_{clade_log_idx}.tre replace=yes;",
+                        f"pscores 1 / scorefile=pars_constraint_score_{clade_log_idx}.txt replace=yes;"
+                    ]
+                    
+                    constraint_script = f"#NEXUS\nbegin paup;\n" + "\n".join(constraint_cmds) + "\nquit;\nend;\n"
+                    constraint_path = self.temp_path / f"pars_constraint_{clade_log_idx}.nex"
+                    constraint_path.write_text(constraint_script)
+                
+                    try:
+                        self._run_paup_command_file(f"pars_constraint_{clade_log_idx}.nex", f"paup_pars_constraint_{clade_log_idx}.log")
+                        
+                        # Parse constrained score
+                        constrained_score_path = self.temp_path / f"pars_constraint_score_{clade_log_idx}.txt"
+                        constrained_score = None
+                        
+                        if constrained_score_path.exists():
+                            score_content = constrained_score_path.read_text()
+                            logger.debug(f"Constraint {clade_log_idx} parsimony score file content:\n{score_content}")
+                            # Use same parsing logic as initial parsimony score
+                            for line in score_content.splitlines():
+                                # Pattern 1: "Length = 123"
+                                if "Length" in line and "=" in line:
                                     try:
-                                        constrained_score = int(parts[1])
+                                        score_str = line.split("=")[1].strip().split()[0]
+                                        constrained_score = int(score_str)
                                         break
-                                    except ValueError:
+                                    except (ValueError, IndexError):
                                         pass
-                            # Pattern 3: Original pattern "Length 123"
-                            elif "Length" in line:
-                                parts = line.strip().split()
-                                for i, part in enumerate(parts):
-                                    if part == "Length" and i+1 < len(parts):
+                                # Pattern 2: "Tree    Length"
+                                # Next line: "1       123"
+                                elif line.strip() and line.split()[0] == "1":
+                                    parts = line.strip().split()
+                                    if len(parts) >= 2:
                                         try:
-                                            constrained_score = int(parts[i+1])
+                                            constrained_score = int(parts[1])
                                             break
-                                        except (ValueError, IndexError):
-                                            continue
-                                if constrained_score:
-                                    break
+                                        except ValueError:
+                                            pass
+                                # Pattern 3: Original pattern "Length 123"
+                                elif "Length" in line:
+                                    parts = line.strip().split()
+                                    for i, part in enumerate(parts):
+                                        if part == "Length" and i+1 < len(parts):
+                                            try:
+                                                constrained_score = int(parts[i+1])
+                                                break
+                                            except (ValueError, IndexError):
+                                                continue
+                                    if constrained_score:
+                                        break
+                        
+                        if constrained_score is not None:
+                            decay_value = constrained_score - pars_score
+                            parsimony_decay[clade_id] = {
+                                'pars_decay': decay_value,
+                                'pars_score': pars_score,
+                                'constrained_score': constrained_score,
+                                'taxa': clade_taxa
+                            }
+                            # Store result for final display
+                            results_to_display.append((clade_id, decay_value, pars_score, constrained_score))
+                        
+                    except Exception as e:
+                        logger.error(f"Failed to calculate parsimony decay for {clade_id}: {e}")
+                        continue
                     
-                    if constrained_score is not None:
-                        decay_value = constrained_score - pars_score
-                        parsimony_decay[clade_id] = {
-                            'pars_decay': decay_value,
-                            'pars_score': pars_score,
-                            'constrained_score': constrained_score,
-                            'taxa': clade_taxa
-                        }
-                        logger.info(f"{clade_id}: Parsimony decay = {decay_value} (constrained: {constrained_score}, optimal: {pars_score})")
+                progress.stop(f"Parsimony analysis completed → {len(parsimony_decay)} branches analyzed")
+                
+                # Display consolidated results with overwriting progress
+                if results_to_display:
+                    overwrite_progress = OverwritingProgress()
+                    try:
+                        for i, (clade_id, decay_value, pars_score, constrained_score) in enumerate(results_to_display, 1):
+                            overwrite_progress.update(f"Processing results: {clade_id} ({i}/{len(results_to_display)})")
+                        overwrite_progress.finish(f"Parsimony results: {len(results_to_display)} branches completed")
+                    except Exception:
+                        overwrite_progress.finish(f"Parsimony results: {len(results_to_display)} branches completed")
                     
-                except Exception as e:
-                    logger.error(f"Failed to calculate parsimony decay for {clade_id}: {e}")
-                    continue
-                    
+            except Exception as inner_e:
+                progress.stop()
+                raise inner_e
+                
         except Exception as e:
+            progress.stop()
             logger.error(f"Parsimony decay analysis failed: {e}")
             # Restore original tree if we temporarily used parsimony tree
             if original_tree is not None:
@@ -2458,8 +2437,7 @@ class panDecayIndices:
                         self.decay_indices[clade_id].update({
                             'bayes_unconstrained_ml': bayes_data.get('unconstrained_ml'),
                             'bayes_constrained_ml': bayes_data.get('constrained_ml'),
-                            'bayes_decay': bayes_data.get('bayes_decay'),
-                            'bayes_factor': bayes_data.get('bayes_factor')
+                            'bayes_decay': bayes_data.get('bayes_decay')
                         })
                     else:
                         # Create new entry for Bayesian-only results
@@ -2467,7 +2445,6 @@ class panDecayIndices:
         
         # Calculate parsimony decay indices if requested
         if self.do_parsimony:
-            logger.info("Calculating parsimony decay indices...")
             parsimony_results = self.run_parsimony_decay_analysis()
             
             # Merge parsimony results with existing results
@@ -2529,46 +2506,38 @@ class panDecayIndices:
                 continue
             testable_branches.append((i, clade_obj, clade_log_idx, clade_taxa_names))
         
-        logger.info(f"Testing {len(testable_branches)} branches for ML decay...")
+        progress_ml = ProgressIndicator()
+        progress_ml.start(f"Testing {len(testable_branches)} branches for ML decay...")
         
-        # Track time for progress estimation
-        import time
-        start_time = time.time()
-        
-        for branch_num, (i, clade_obj, clade_log_idx, clade_taxa_names) in enumerate(testable_branches, 1):
-            elapsed = time.time() - start_time
+        try:
+            for branch_num, (i, clade_obj, clade_log_idx, clade_taxa_names) in enumerate(testable_branches, 1):
+                # Update progress with current branch
+                progress_ml.update(f"Testing branch {branch_num}/{len(testable_branches)} (Clade_{clade_log_idx})...")
+                
+                rel_constr_tree_fn, constr_lnl = self._generate_and_score_constraint_tree(clade_taxa_names, clade_log_idx)
+
+                if rel_constr_tree_fn: # Successfully generated and scored (even if LNL is None)
+                    all_tree_files_rel.append(rel_constr_tree_fn)
+                    clade_id_str = f"Clade_{clade_log_idx}"
+
+                    lnl_diff = (constr_lnl - self.ml_likelihood) if constr_lnl is not None and self.ml_likelihood is not None else None
+                    if constr_lnl is None: logger.warning(f"{clade_id_str}: Constrained LNL is None.")
+
+                    constraint_info_map[clade_id_str] = {
+                        'taxa': clade_taxa_names,
+                        'paup_tree_index': len(all_tree_files_rel), # 1-based index for PAUP*
+                        'constrained_lnl': constr_lnl,
+                        'lnl_diff': lnl_diff,
+                        'tree_filename': rel_constr_tree_fn  # Store tree filename for site analysis
+                    }
+                else:
+                    logger.warning(f"Failed to generate/score constraint tree for branch {clade_log_idx}. It will be excluded.")
+
+            progress_ml.stop(f"ML constraint analysis completed → {len(constraint_info_map)} branches analyzed")
+        except Exception as e:
+            progress_ml.stop()
+            raise
             
-            # Show progress
-            # Display progress box
-            taxa_sample = ", ".join(clade_taxa_names[:2])
-            if len(clade_taxa_names) > 2:
-                taxa_sample += "..."
-            
-            box_content = [
-                f"Testing clade {clade_log_idx} ({branch_num} of {len(testable_branches)}) • {len(clade_taxa_names)} taxa",
-                f"Testing constraint on: {taxa_sample}",
-                "Running PAUP* with reverse constraint"
-            ]
-            logger.info(self._format_progress_box("ML Analysis", box_content))
-            rel_constr_tree_fn, constr_lnl = self._generate_and_score_constraint_tree(clade_taxa_names, clade_log_idx)
-
-            if rel_constr_tree_fn: # Successfully generated and scored (even if LNL is None)
-                all_tree_files_rel.append(rel_constr_tree_fn)
-                clade_id_str = f"Clade_{clade_log_idx}"
-
-                lnl_diff = (constr_lnl - self.ml_likelihood) if constr_lnl is not None and self.ml_likelihood is not None else None
-                if constr_lnl is None: logger.warning(f"{clade_id_str}: Constrained LNL is None.")
-
-                constraint_info_map[clade_id_str] = {
-                    'taxa': clade_taxa_names,
-                    'paup_tree_index': len(all_tree_files_rel), # 1-based index for PAUP*
-                    'constrained_lnl': constr_lnl,
-                    'lnl_diff': lnl_diff,
-                    'tree_filename': rel_constr_tree_fn  # Store tree filename for site analysis
-                }
-            else:
-                logger.warning(f"Failed to generate/score constraint tree for branch {clade_log_idx}. It will be excluded.")
-
         if not constraint_info_map:
             logger.warning("No valid constraint trees were generated. Skipping AU test.")
             self.decay_indices = {}
@@ -2576,26 +2545,50 @@ class panDecayIndices:
 
         # Perform site-specific likelihood analysis if requested
         if perform_site_analysis:
-            logger.info("Performing site-specific likelihood analysis for each branch...")
+            progress = ProgressIndicator()
+            progress.start("Analyzing site-specific likelihoods...")
+            
+            try:
+                for clade_id, cdata in list(constraint_info_map.items()):
+                    rel_constr_tree_fn = cdata.get('tree_filename')
 
-            for clade_id, cdata in list(constraint_info_map.items()):
-                rel_constr_tree_fn = cdata.get('tree_filename')
+                    if rel_constr_tree_fn:
+                        tree_files = [ML_TREE_FN, rel_constr_tree_fn]
+                        site_analysis_result = self._calculate_site_likelihoods(tree_files, clade_id)
 
-                if rel_constr_tree_fn:
-                    tree_files = [ML_TREE_FN, rel_constr_tree_fn]
-                    site_analysis_result = self._calculate_site_likelihoods(tree_files, clade_id)
-
-                    if site_analysis_result:
-                        # Store all site analysis data
-                        constraint_info_map[clade_id].update(site_analysis_result)
-
-                        # Log key results
-                        supporting = site_analysis_result.get('supporting_sites', 0)
-                        conflicting = site_analysis_result.get('conflicting_sites', 0)
-                        ratio = site_analysis_result.get('support_ratio', 0.0)
-                        weighted = site_analysis_result.get('weighted_support_ratio', 0.0)
-
-                        logger.info(f"Branch {clade_id}: {supporting} supporting sites, {conflicting} conflicting sites, ratio: {ratio:.2f}, weighted ratio: {weighted:.2f}")
+                        if site_analysis_result:
+                            # Store all site analysis data
+                            constraint_info_map[clade_id].update(site_analysis_result)
+                            
+                progress.stop("Site analysis completed")
+                
+                # Display site analysis results
+                # Use actual alignment length as total sites (constant for all branches)
+                total_sites = self.alignment.get_alignment_length()
+                
+                for clade_id, cdata in constraint_info_map.items():
+                    if 'supporting_sites' in cdata:  # Has site analysis data
+                        supporting = cdata.get('supporting_sites', 0)
+                        conflicting = cdata.get('conflicting_sites', 0)
+                        neutral = cdata.get('neutral_sites', 0)
+                        
+                        # Verify site counting adds up (debugging info)
+                        calculated_total = supporting + conflicting + neutral
+                        if calculated_total != total_sites:
+                            logger.debug(f"Site count mismatch for {clade_id}: {calculated_total} calculated vs {total_sites} alignment length")
+                        
+                        ratio = cdata.get('support_ratio', 0.0)
+                        weighted = cdata.get('weighted_support_ratio', 0.0)
+                        sum_supporting = cdata.get('sum_supporting_delta', 0.0)
+                        sum_conflicting = cdata.get('sum_conflicting_delta', 0.0)
+                        
+                        supporting_pct = (supporting / total_sites * 100) if total_sites > 0 else 0
+                        conflicting_pct = (conflicting / total_sites * 100) if total_sites > 0 else 0
+                        
+                        logger.info(f"Branch {clade_id}: {total_sites} sites → {supporting} supporting ({supporting_pct:.1f}%), {conflicting} conflicting ({conflicting_pct:.1f}%) | Support ratio: {ratio:.2f} | Weighted: {weighted:.2f} (Δ support: {sum_supporting:.2f}, Δ conflict: {sum_conflicting:.2f})")
+            except Exception as e:
+                progress.stop()
+                raise
 
         logger.info(f"Running AU test on {len(all_tree_files_rel)} trees (1 ML + {len(constraint_info_map)} constrained).")
         au_test_results = self.run_au_test(all_tree_files_rel)
@@ -2686,7 +2679,6 @@ class panDecayIndices:
                 'bayes_unconstrained_ml': bayes_data['unconstrained_ml'],
                 'bayes_constrained_ml': bayes_data['constrained_ml'],
                 'bayes_decay': bayes_data['bayes_decay'],
-                'bayes_factor': bayes_data['bayes_factor'],
                 # ML fields are None for Bayesian-only analysis
                 'lnl_diff': None,
                 'constrained_lnl': None,
@@ -2726,16 +2718,14 @@ class panDecayIndices:
                     ml_results[clade_id].update({
                         'bayes_unconstrained_ml': bayes_data['unconstrained_ml'],
                         'bayes_constrained_ml': bayes_data['constrained_ml'],
-                        'bayes_decay': bayes_data['bayes_decay'],
-                        'bayes_factor': bayes_data['bayes_factor']
+                        'bayes_decay': bayes_data['bayes_decay']
                     })
                 else:
                     # No Bayesian results for this clade
                     ml_results[clade_id].update({
                         'bayes_unconstrained_ml': None,
                         'bayes_constrained_ml': None,
-                        'bayes_decay': None,
-                        'bayes_factor': None
+                        'bayes_decay': None
                     })
         else:
             logger.warning("Bayesian analysis failed; results will contain ML metrics only.")
@@ -2878,7 +2868,14 @@ class panDecayIndices:
 
                 supporting_sites = sum(1 for d in deltas if d < 0)
                 conflicting_sites = sum(1 for d in deltas if d > 0)
-                neutral_sites = sum(1 for d in deltas if abs(d) < 1e-6)
+                # Calculate neutral sites as remainder to ensure all sites are accounted for
+                total_alignment_sites = self.alignment.get_alignment_length()
+                sites_analyzed = len(deltas)
+                neutral_sites = sites_analyzed - supporting_sites - conflicting_sites
+                
+                # If we have fewer analyzed sites than alignment length, note the difference
+                if sites_analyzed != total_alignment_sites:
+                    logger.debug(f"Branch {branch_id}: Analyzed {sites_analyzed} sites, alignment has {total_alignment_sites} sites")
 
                 # Calculate sum of likelihood differences
                 sum_supporting_delta = sum(d for d in deltas if d < 0)  # Sum of negative deltas (supporting)
@@ -2891,9 +2888,7 @@ class panDecayIndices:
                 support_ratio = supporting_sites / conflicting_sites if conflicting_sites > 0 else float('inf')
 
                 logger.info(f"Extracted site likelihoods for {len(site_data)} sites for branch {branch_id}")
-                logger.info(f"Branch {branch_id}: {supporting_sites} supporting sites, {conflicting_sites} conflicting sites")
-                logger.info(f"Branch {branch_id}: {supporting_sites} supporting sites, {conflicting_sites} conflicting sites, ratio: {support_ratio:.2f}")
-                logger.info(f"Branch {branch_id}: Sum supporting delta: {sum_supporting_delta:.4f}, sum conflicting: {sum_conflicting_delta:.4f}, weighted ratio: {weighted_support_ratio:.2f}")
+                # Verbose logging removed - consolidated output handled by caller
 
                 # Return a comprehensive dictionary with all info
                 return {
@@ -3285,7 +3280,7 @@ class panDecayIndices:
                         annotated_nodes_count += 1
 
                 Phylo.write(au_tree, str(au_tree_path), "newick")
-                logger.info(f"Annotated tree with {annotated_nodes_count} branch values written to {self._get_display_path(au_tree_path)} (type: au).")
+                logger.info(f"AU tree saved: {au_tree_path.name} ({annotated_nodes_count} branches)")
                 tree_files['au'] = au_tree_path
             except Exception as e:
                 logger.error(f"Failed to create AU tree: {e}")
@@ -3319,7 +3314,7 @@ class panDecayIndices:
                         annotated_nodes_count += 1
 
                 Phylo.write(lnl_tree, str(lnl_tree_path), "newick")
-                logger.info(f"Annotated tree with {annotated_nodes_count} branch values written to {self._get_display_path(lnl_tree_path)} (type: delta_lnl).")
+                logger.info(f"Delta-LnL tree saved: {lnl_tree_path.name} ({annotated_nodes_count} branches)")
                 tree_files['lnl'] = lnl_tree_path
             except Exception as e:
                 logger.error(f"Failed to create LNL tree: {e}")
@@ -3363,7 +3358,6 @@ class panDecayIndices:
                             au_val = decay_info.get('AU_pvalue')
                             lnl_val = decay_info.get('lnl_diff')
                             bayes_decay = decay_info.get('bayes_decay')
-                            bayes_factor = decay_info.get('bayes_factor')
 
                             if au_val is not None:
                                 annotation_parts.append(f"AU:{au_val:.4f}")
@@ -3373,19 +3367,6 @@ class panDecayIndices:
                                 
                             if bayes_decay is not None:
                                 annotation_parts.append(f"BD:{bayes_decay:.4f}")
-                                
-                            # Use display string for Bayes Factor if available
-                            bayes_factor_display = decay_info.get('bayes_factor_display')
-                            if bayes_factor_display:
-                                annotation_parts.append(f"BF:{bayes_factor_display}")
-                            elif bayes_factor is not None:
-                                # Fallback for older results
-                                if bayes_factor > 10**6:
-                                    annotation_parts.append(f"BF:>10^6")
-                                elif bayes_factor > 1000:
-                                    annotation_parts.append(f"BF:{bayes_factor:.2e}")
-                                else:
-                                    annotation_parts.append(f"BF:{bayes_factor:.2f}")
                                 
                             # Add parsimony decay if available
                             pars_decay = decay_info.get('pars_decay')
@@ -3433,7 +3414,7 @@ class panDecayIndices:
                 # Write the modified tree
                 Phylo.write(combined_tree, str(combined_tree_path), "newick")
 
-                logger.info(f"Annotated tree with {annotated_nodes_count} branch values written to {self._get_display_path(combined_tree_path)} (type: combined).")
+                logger.info(f"Combined tree saved: {combined_tree_path.name} ({annotated_nodes_count} branches)")
                 tree_files['combined'] = combined_tree_path
             except Exception as e:
                 logger.error(f"Failed to create combined tree: {e}")
@@ -3471,7 +3452,7 @@ class panDecayIndices:
                     
                     # Write the ML tree with bootstrap values
                     Phylo.write(ml_tree_for_bootstrap, str(bootstrap_tree_path), "newick")
-                    logger.info(f"Bootstrap tree (ML topology with bootstrap values) written to {self._get_display_path(bootstrap_tree_path)}")
+                    logger.info(f"Bootstrap tree saved: {bootstrap_tree_path.name}")
                     tree_files['bootstrap'] = bootstrap_tree_path
                 except Exception as e:
                     logger.error(f"Failed to write bootstrap tree: {e}")
@@ -3519,7 +3500,6 @@ class panDecayIndices:
                             au_val = matched_data.get('AU_pvalue')
                             lnl_val = matched_data.get('lnl_diff')
                             bayes_decay = matched_data.get('bayes_decay')
-                            bayes_factor = matched_data.get('bayes_factor')
 
                             if au_val is not None:
                                 annotation_parts.append(f"AU:{au_val:.4f}")
@@ -3529,19 +3509,6 @@ class panDecayIndices:
                                 
                             if bayes_decay is not None:
                                 annotation_parts.append(f"BD:{bayes_decay:.4f}")
-                                
-                            # Use display string for Bayes Factor if available
-                            bayes_factor_display = decay_info.get('bayes_factor_display')
-                            if bayes_factor_display:
-                                annotation_parts.append(f"BF:{bayes_factor_display}")
-                            elif bayes_factor is not None:
-                                # Fallback for older results
-                                if bayes_factor > 10**6:
-                                    annotation_parts.append(f"BF:>10^6")
-                                elif bayes_factor > 1000:
-                                    annotation_parts.append(f"BF:{bayes_factor:.2e}")
-                                else:
-                                    annotation_parts.append(f"BF:{bayes_factor:.2f}")
                                 
                             # Add parsimony decay if available
                             pars_decay = decay_info.get('pars_decay')
@@ -3573,7 +3540,7 @@ class panDecayIndices:
 
                     # Write the tree
                     Phylo.write(comprehensive_tree, str(comprehensive_tree_path), "newick")
-                    logger.info(f"Comprehensive tree with {annotated_nodes_count} branch values written to {self._get_display_path(comprehensive_tree_path)}")
+                    logger.info(f"Comprehensive tree saved: {comprehensive_tree_path.name} ({annotated_nodes_count} branches)")
                     tree_files['comprehensive'] = comprehensive_tree_path
                 except Exception as e:
                     logger.error(f"Failed to create comprehensive tree: {e}")
@@ -3612,53 +3579,11 @@ class panDecayIndices:
                             annotated_nodes_count += 1
 
                     Phylo.write(bd_tree, str(bayes_decay_tree_path), "newick")
-                    logger.info(f"Annotated tree with {annotated_nodes_count} Bayes decay values written to {self._get_display_path(bayes_decay_tree_path)}")
+                    logger.info(f"Bayes decay tree saved: {bayes_decay_tree_path.name} ({annotated_nodes_count} branches)")
                     tree_files['bayes_decay'] = bayes_decay_tree_path
                 except Exception as e:
                     logger.error(f"Failed to create Bayes decay tree: {e}")
 
-                # Create Bayes factor annotated tree
-                bayes_factor_tree_path = output_dir / f"{base_filename}_bayes_factor.nwk"
-                try:
-                    temp_tree_for_bf = self.temp_path / f"ml_tree_for_bf_annotation.nwk"
-                    Phylo.write(self.ml_tree, str(temp_tree_for_bf), "newick")
-                    cleaned_tree_path = self._clean_newick_tree(temp_tree_for_bf)
-                    bf_tree = Phylo.read(str(cleaned_tree_path), "newick")
-
-                    annotated_nodes_count = 0
-                    for node in bf_tree.get_nonterminals():
-                        if not node or not node.clades: continue
-                        node_taxa_set = set(leaf.name for leaf in node.get_terminals())
-
-                        matched_data = None
-                        matched_clade_id = None
-                        for decay_id_str, decay_info in self.decay_indices.items():
-                            if 'taxa' in decay_info and set(decay_info['taxa']) == node_taxa_set:
-                                matched_data = decay_info
-                                matched_clade_id = decay_id_str
-                                break
-
-                        node.confidence = None  # Default
-                        if matched_data and 'bayes_factor' in matched_data and matched_data['bayes_factor'] is not None:
-                            # Use display string if available
-                            bayes_factor_display = matched_data.get('bayes_factor_display')
-                            if bayes_factor_display:
-                                node.name = f"{matched_clade_id} - BF:{bayes_factor_display}"
-                            else:
-                                bayes_factor_val = matched_data['bayes_factor']
-                                if bayes_factor_val > 10**6:
-                                    node.name = f"{matched_clade_id} - BF:>10^6"
-                                elif bayes_factor_val > 1000:
-                                    node.name = f"{matched_clade_id} - BF:{bayes_factor_val:.2e}"
-                                else:
-                                    node.name = f"{matched_clade_id} - BF:{bayes_factor_val:.2f}"
-                            annotated_nodes_count += 1
-
-                    Phylo.write(bf_tree, str(bayes_factor_tree_path), "newick")
-                    logger.info(f"Annotated tree with {annotated_nodes_count} Bayes factor values written to {self._get_display_path(bayes_factor_tree_path)}")
-                    tree_files['bayes_factor'] = bayes_factor_tree_path
-                except Exception as e:
-                    logger.error(f"Failed to create Bayes factor tree: {e}")
 
             return tree_files
 
@@ -3680,7 +3605,7 @@ class panDecayIndices:
             if has_ml:
                 f.write("────────────────────────────────┬")
             if has_bayesian:
-                f.write("──────────────────────┬")
+                f.write("───────────────────────┬")
             if has_parsimony:
                 f.write("───────────────────────┬")
             f.write("\n")
@@ -3690,7 +3615,7 @@ class panDecayIndices:
             if has_ml:
                 f.write("    Maximum Likelihood          │")
             if has_bayesian:
-                f.write("      Bayesian        │")
+                f.write("       Bayesian        │")
             if has_parsimony:
                 f.write("      Parsimony        │")
             f.write("\n")
@@ -3700,7 +3625,7 @@ class panDecayIndices:
             if has_ml:
                 f.write("──────────┬──────────┬──────────┼")
             if has_bayesian:
-                f.write("────────┬─────────────┼")
+                f.write("───────────────────────┼")
             if has_parsimony:
                 f.write("───────────────────────┤")
             f.write("\n")
@@ -3710,7 +3635,7 @@ class panDecayIndices:
             if has_ml:
                 f.write(" ΔlnL     │ AU p-val │ Support  │")
             if has_bayesian:
-                f.write(" BD     │ BF          │")
+                f.write(" BD                     │")
             if has_parsimony:
                 f.write(" Decay │ Post.Prob     │" if has_posterior else " Decay                 │")
             f.write("\n")
@@ -3720,7 +3645,7 @@ class panDecayIndices:
             if has_ml:
                 f.write("──────────┼──────────┼──────────┼")
             if has_bayesian:
-                f.write("────────┼─────────────┼")
+                f.write("───────────────────────┼")
             if has_parsimony:
                 f.write("───────┼───────────────┤" if has_posterior else "───────────────────────┤")
             f.write("\n")
@@ -3730,7 +3655,7 @@ class panDecayIndices:
             if has_ml:
                 header_parts.extend(["ΔlnL", "AU p-val", "Support"])
             if has_bayesian:
-                header_parts.extend(["BD", "BF"])
+                header_parts.extend(["BD"])
             if has_parsimony:
                 header_parts.append("P.Decay")
                 if has_posterior:
@@ -3763,14 +3688,11 @@ class panDecayIndices:
             
             if has_bayesian:
                 bd = data.get('bayes_decay')
-                bf_display = data.get('bayes_factor_display')
                 
                 if bd is not None:
                     row_values.append(f"{bd:.2f}")
                 else:
                     row_values.append("N/A")
-                    
-                row_values.append(bf_display if bf_display else "N/A")
             
             if has_parsimony:
                 pd = data.get('pars_decay')
@@ -3791,7 +3713,7 @@ class panDecayIndices:
             if has_ml:
                 f.write("──────────┴──────────┴──────────┴")
             if has_bayesian:
-                f.write("────────┴─────────────┴")
+                f.write("───────────────────────┴")
             if has_parsimony:
                 f.write("───────┴───────────────┘" if has_posterior else "───────────────────────┘")
             f.write("\n")
@@ -3851,7 +3773,7 @@ class panDecayIndices:
             
             # Support legend
             f.write("\nSupport Legend: *** = p < 0.001, ** = p < 0.01, * = p < 0.05, ns = not significant\n")
-            f.write("BD = Bayes Decay (log scale), BF = Bayes Factor, Post.Prob = Posterior Probability\n")
+            f.write("BD = Bayes Decay (log scale), Post.Prob = Posterior Probability\n")
             
             # Clade details section
             f.write("\nClade Details\n")
@@ -3859,26 +3781,8 @@ class panDecayIndices:
             
             for clade_id, data in sorted(self.decay_indices.items()):
                 taxa_list = sorted(data.get('taxa', []))
-                support_levels = []
                 
-                if has_ml and data.get('AU_pvalue') is not None:
-                    p = data.get('AU_pvalue', 1.0)
-                    if p < 0.05:
-                        support_levels.append("ML")
-                
-                if has_bayesian and data.get('bayes_factor') is not None:
-                    bf = data.get('bayes_factor', 0)
-                    if bf > 10:
-                        support_levels.append("Bayes")
-                        
-                if has_parsimony and data.get('pars_decay') is not None:
-                    pd = data.get('pars_decay', 0)
-                    if pd > 3:
-                        support_levels.append("Parsimony")
-                
-                support_str = f"Strong support: {'/'.join(support_levels)}" if support_levels else "Weak support"
-                
-                f.write(f"→ {clade_id} ({support_str})\n")
+                f.write(f"→ {clade_id}\n")
                 
                 # Format taxa list with wrapping
                 taxa_str = "  Taxa: "
@@ -3895,7 +3799,7 @@ class panDecayIndices:
                     line_len += len(taxon)
                 f.write("\n\n")
         
-        logger.info(f"Results written to {self._get_display_path(output_path)}")
+        logger.info(f"Results saved: {output_path.name}")
     
     def write_results(self, output_path: Path):
         if not self.decay_indices:
@@ -3953,7 +3857,7 @@ class panDecayIndices:
             if has_parsimony:
                 header_parts.append("Pars_Decay")
             if has_bayesian:
-                header_parts.extend(["Bayes_ML_Diff", "Bayes_Factor"])
+                header_parts.append("Bayes_ML_Diff")
                 if has_posterior:
                     header_parts.append("Posterior_Prob")
             if has_bootstrap:
@@ -4010,16 +3914,7 @@ class panDecayIndices:
                     if isinstance(bayes_decay, float): bayes_decay = f"{bayes_decay:.4f}"
                     elif bayes_decay is None: bayes_decay = 'N/A'
                     
-                    bayes_factor = data.get('bayes_factor', 'N/A')
-                    if isinstance(bayes_factor, float): 
-                        # Use scientific notation for large Bayes factors
-                        if bayes_factor > 1000:
-                            bayes_factor = f"{bayes_factor:.2e}"
-                        else:
-                            bayes_factor = f"{bayes_factor:.2f}"
-                    elif bayes_factor is None: bayes_factor = 'N/A'
-                    
-                    row_parts.extend([bayes_decay, bayes_factor])
+                    row_parts.append(bayes_decay)
                     
                     # Add posterior probability if present
                     if has_posterior:
@@ -4047,7 +3942,7 @@ class panDecayIndices:
                 row_parts = [str(item) for item in row_parts]
                 f.write("\t".join(row_parts) + "\n")
 
-        logger.info(f"Results written to {self._get_display_path(output_path)}")
+        logger.info(f"Results saved: {output_path.name}")
 
     def generate_detailed_report(self, output_path: Path):
         # Basic check
@@ -4064,316 +3959,520 @@ class panDecayIndices:
         # Check which types of results we have
         has_ml = any(d.get('lnl_diff') is not None for d in self.decay_indices.values()) if self.decay_indices else False
         has_bayesian = any(d.get('bayes_decay') is not None for d in self.decay_indices.values()) if self.decay_indices else False
+        has_parsimony = any(d.get('pars_decay') is not None for d in self.decay_indices.values()) if self.decay_indices else False
         has_bootstrap = hasattr(self, 'bootstrap_tree') and self.bootstrap_tree
+        has_site_data = any('site_data' in data for data in self.decay_indices.values()) if self.decay_indices else False
+        
+        # Debugging information
+        logger.debug(f"Markdown report generation - decay_indices entries: {len(self.decay_indices) if self.decay_indices else 0}")
+        logger.debug(f"Markdown report flags: has_ml={has_ml}, has_bayesian={has_bayesian}, has_parsimony={has_parsimony}, has_bootstrap={has_bootstrap}, has_site_data={has_site_data}")
+        if self.decay_indices:
+            for cid, data in list(self.decay_indices.items())[:2]:  # Show first 2 entries for debugging
+                logger.debug(f"Sample data for {cid}: keys={list(data.keys())}")
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        with output_path.open('w') as f:
-            # Title based on analysis type
-            if has_ml and has_bayesian:
-                f.write(f"# panDecay Branch Support Analysis Report (v{VERSION})\n\n")
-            elif has_bayesian:
-                f.write(f"# panDecay Bayesian Branch Support Analysis Report (v{VERSION})\n\n")
-            else:
-                f.write(f"# panDecay ML Branch Support Analysis Report (v{VERSION})\n\n")
-                
-            f.write(f"Date: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
-
-            f.write("## Analysis Parameters\n\n")
-            f.write(f"- Alignment file: `{self.alignment_file.name}`\n")
-            f.write(f"- Data type: `{self.data_type}`\n")
-            f.write(f"- Analysis mode: `{self.analysis_mode}`\n")
-            
-            # ML parameters
-            if has_ml or self.do_ml:
-                if self.user_paup_block:
-                    f.write("- ML Model: User-defined PAUP* block\n")
+        
+        try:
+            with output_path.open('w') as f:
+                # Title based on analysis type
+                if has_ml and has_bayesian:
+                    f.write(f"# panDecay Branch Support Analysis Report (v{VERSION})\n\n")
+                elif has_bayesian:
+                    f.write(f"# panDecay Bayesian Branch Support Analysis Report (v{VERSION})\n\n")
                 else:
-                    f.write(f"- ML Model string: `{self.model_str}`\n")
-                    f.write(f"- PAUP* `lset` command: `{self.paup_model_cmds}`\n")
-            
-            # Bayesian parameters
-            if has_bayesian or self.do_bayesian:
-                f.write(f"- Bayesian software: `{self.bayesian_software}`\n")
-                f.write(f"- Bayesian model: `{self.bayes_model}`\n")
-                f.write(f"- MCMC generations: `{self.bayes_ngen}`\n")
-                f.write(f"- Burnin fraction: `{self.bayes_burnin}`\n")
-                # Report the actual method being used
-                ml_method = "stepping-stone" if self.marginal_likelihood == "ss" else "harmonic mean"
-                f.write(f"- Marginal likelihood method: `{ml_method}`\n")
-                
-            if has_bootstrap:
-                f.write("- Bootstrap analysis: Performed\n")
+                    f.write(f"# panDecay ML Branch Support Analysis Report (v{VERSION})\n\n")
+                    
+                f.write(f"Date: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
 
-            f.write("\n## Summary Statistics\n\n")
-            
-            # ML statistics
-            if has_ml:
-                ml_l = self.ml_likelihood if self.ml_likelihood is not None else "N/A"
-                if isinstance(ml_l, float): ml_l = f"{ml_l:.6f}"
-                f.write(f"- ML tree log-likelihood: **{ml_l}**\n")
+                f.write("## Analysis Parameters\n\n")
+                f.write(f"- Alignment file: `{self.alignment_file.name}`\n")
+                f.write(f"- Data type: `{self.data_type}`\n")
+                f.write(f"- Analysis mode: `{self.analysis_mode}`\n")
                 
-            # Bayesian statistics
-            if has_bayesian and hasattr(self, 'bayes_marginal_likelihood'):
-                bayes_ml = self.bayes_marginal_likelihood if self.bayes_marginal_likelihood is not None else "N/A"
-                if isinstance(bayes_ml, float): bayes_ml = f"{bayes_ml:.6f}"
-                f.write(f"- Bayesian marginal likelihood: **{bayes_ml}**\n")
-                
-            f.write(f"- Number of internal branches tested: {len(self.decay_indices)}\n")
-
-            if self.decay_indices:
-                # ML-specific statistics
-                if has_ml:
-                    lnl_diffs = [d['lnl_diff'] for d in self.decay_indices.values() if d.get('lnl_diff') is not None]
-                    if lnl_diffs:
-                        f.write(f"- Avg ML log-likelihood difference (constrained vs ML): {np.mean(lnl_diffs):.4f}\n")
-                        f.write(f"- Min ML log-likelihood difference: {min(lnl_diffs):.4f}\n")
-                        f.write(f"- Max ML log-likelihood difference: {max(lnl_diffs):.4f}\n")
-
-                    au_pvals = [d['AU_pvalue'] for d in self.decay_indices.values() if d.get('AU_pvalue') is not None]
-                    if au_pvals:
-                        sig_au_count = sum(1 for p in au_pvals if p < 0.05)
-                        f.write(f"- Branches with significant AU support (p < 0.05): {sig_au_count} / {len(au_pvals)} evaluated\n")
-                
-                # Bayesian-specific statistics
-                if has_bayesian:
-                    bayes_decays = [d['bayes_decay'] for d in self.decay_indices.values() if d.get('bayes_decay') is not None]
-                    if bayes_decays:
-                        f.write(f"- Avg Bayesian decay (marginal lnL difference): {np.mean(bayes_decays):.4f}\n")
-                        f.write(f"- Min Bayesian decay: {min(bayes_decays):.4f}\n")
-                        f.write(f"- Max Bayesian decay: {max(bayes_decays):.4f}\n")
-                        
-                        # Check for negative values and add warning
-                        negative_count = sum(1 for bd in bayes_decays if bd < 0)
-                        if negative_count > 0:
-                            f.write(f"\n**⚠️ WARNING**: {negative_count}/{len(bayes_decays)} branches have negative Bayes Decay values.\n")
-                            f.write("This suggests potential issues with:\n")
-                            f.write("- MCMC convergence (consider increasing --bayes-ngen)\n")
-                            f.write("- Marginal likelihood estimation reliability\n")
-                            f.write("- Model specification\n\n")
-                        
-                        # Report on BD distribution
-                        very_strong_count = sum(1 for bd in bayes_decays if bd > 10)
-                        strong_count = sum(1 for bd in bayes_decays if 5 <= bd <= 10)
-                        moderate_count = sum(1 for bd in bayes_decays if 2 <= bd < 5)
-                        weak_count = sum(1 for bd in bayes_decays if 0 <= bd < 2)
-                        
-                        f.write(f"\n**Bayesian Decay Distribution**:\n")
-                        f.write(f"- Very strong support (BD > 10): {very_strong_count} branches\n")
-                        f.write(f"- Strong support (BD 5-10): {strong_count} branches\n")
-                        f.write(f"- Moderate support (BD 2-5): {moderate_count} branches\n")
-                        f.write(f"- Weak support (BD 0-2): {weak_count} branches\n")
-                        if negative_count > 0:
-                            f.write(f"- Negative BD values: {negative_count} branches (see warning above)\n")
-                        
-                        f.write(f"\n**Note**: BD values closely approximating ML log-likelihood differences is expected behavior in phylogenetic topology testing.\n\n")
-                        
-                    # Note: We no longer report traditional BF thresholds as they don't apply well to phylogenetics
-                
-                # Add convergence diagnostics section if available
-                if has_bayesian and hasattr(self, 'convergence_diagnostics'):
-                    f.write("\n## Bayesian Convergence Diagnostics\n\n")
-                    
-                    # Summary across all runs
-                    all_ess = []
-                    all_psrf = []
-                    all_asdsf = []
-                    convergence_issues = []
-                    
-                    for run_id, conv_data in self.convergence_diagnostics.items():
-                        if conv_data['min_ess'] is not None:
-                            all_ess.append(conv_data['min_ess'])
-                        if conv_data['max_psrf'] is not None:
-                            all_psrf.append(conv_data['max_psrf'])
-                        if conv_data['asdsf'] is not None:
-                            all_asdsf.append(conv_data['asdsf'])
-                        if not conv_data['converged']:
-                            convergence_issues.append(run_id)
-                    
-                    if all_ess:
-                        f.write(f"- Minimum ESS across all runs: {min(all_ess):.0f} (threshold: {self.min_ess})\n")
-                    if all_psrf:
-                        f.write(f"- Maximum PSRF across all runs: {max(all_psrf):.3f} (threshold: {self.max_psrf})\n")
-                    if all_asdsf:
-                        f.write(f"- Final ASDSF range: {min(all_asdsf):.6f} - {max(all_asdsf):.6f} (threshold: {self.max_asdsf})\n")
-                    
-                    if convergence_issues:
-                        f.write(f"\n**⚠️ WARNING**: {len(convergence_issues)} runs did not meet convergence criteria:\n")
-                        for run_id in convergence_issues[:5]:  # Show first 5
-                            f.write(f"  - {run_id}\n")
-                        if len(convergence_issues) > 5:
-                            f.write(f"  - ... and {len(convergence_issues) - 5} more\n")
-                        f.write("\nConsider:\n")
-                        f.write("- Increasing MCMC generations (--bayes-ngen)\n")
-                        f.write("- Running longer burnin (--bayes-burnin)\n")
-                        f.write("- Using more chains (--bayes-chains)\n")
-                        f.write("- Checking model specification\n")
-
-            f.write("\n## Detailed Branch Support Results\n\n")
-
-            # Build dynamic table header based on available data
-            header_parts = ["| Clade ID | Taxa Count "]
-            separator_parts = ["|----------|------------ "]
-            
-            if has_ml:
-                header_parts.extend(["| Constrained lnL | ΔlnL (from ML) | AU p-value | Significant (AU) "])
-                separator_parts.extend(["|-----------------|------------------|------------|-------------------- "])
-            
-            if has_bayesian:
-                header_parts.extend(["| Bayes Decay | Bayes Factor | BD Support "])
-                separator_parts.extend(["|-------------|--------------|------------ "])
-                
-            if has_bootstrap:
-                header_parts.append("| Bootstrap ")
-                separator_parts.append("|----------- ")
-                
-            header_parts.append("| Included Taxa (sample) |\n")
-            separator_parts.append("|--------------------------|\n")
-            
-            f.write("".join(header_parts))
-            f.write("".join(separator_parts))
-
-            # Get bootstrap values if bootstrap analysis was performed
-            bootstrap_values = {}
-            if has_bootstrap:
-                for node in self.bootstrap_tree.get_nonterminals():
-                    if node.confidence is not None:
-                        taxa_set = frozenset(leaf.name for leaf in node.get_terminals())
-                        bootstrap_values[taxa_set] = node.confidence
-
-            for clade_id, data in sorted(self.decay_indices.items()):
-                taxa_list = sorted(data.get('taxa', []))
-                taxa_count = len(taxa_list)
-                taxa_sample = ", ".join(taxa_list[:3]) + ('...' if taxa_count > 3 else '')
-
-                # Build the table row
-                row_parts = [f"| {clade_id} | {taxa_count} "]
-                
-                # ML fields
-                if has_ml:
-                    c_lnl = data.get('constrained_lnl', 'N/A')
-                    if isinstance(c_lnl, float): c_lnl = f"{c_lnl:.4f}"
-                    
-                    lnl_d = data.get('lnl_diff', 'N/A')
-                    if isinstance(lnl_d, float): lnl_d = f"{lnl_d:.4f}"
-                    
-                    au_p = data.get('AU_pvalue', 'N/A')
-                    if isinstance(au_p, float): au_p = f"{au_p:.4f}"
-                    
-                    sig_au = data.get('significant_AU', 'N/A')
-                    if isinstance(sig_au, bool): sig_au = "**Yes**" if sig_au else "No"
-                    
-                    row_parts.append(f"| {c_lnl} | {lnl_d} | {au_p} | {sig_au} ")
-                
-                # Bayesian fields
-                if has_bayesian:
-                    bayes_d = data.get('bayes_decay', 'N/A')
-                    if isinstance(bayes_d, float): bayes_d = f"{bayes_d:.4f}"
-                    
-                    bayes_f_raw = data.get('bayes_factor', 'N/A')
-                    
-                    # Interpret support based on Bayes Decay (phylogenetic-specific scale)
-                    bf_support = 'N/A'
-                    bayes_d_val = data.get('bayes_decay')
-                    if isinstance(bayes_d_val, float):
-                        if bayes_d_val > 10:
-                            bf_support = "**Very Strong**"
-                        elif bayes_d_val > 5:
-                            bf_support = "**Strong**"
-                        elif bayes_d_val > 2:
-                            bf_support = "Moderate"
-                        elif bayes_d_val > 0:
-                            bf_support = "Weak"
-                        else:
-                            bf_support = "None"
-                    
-                    # Format for display
-                    bayes_f_display = data.get('bayes_factor_display')
-                    if bayes_f_display:
-                        bayes_f = bayes_f_display
-                    elif isinstance(bayes_f_raw, float):
-                        if bayes_f_raw > 10**6:
-                            bayes_f = ">10^6"
-                        elif bayes_f_raw > 1000:
-                            bayes_f = f"{bayes_f_raw:.2e}"
-                        else:
-                            bayes_f = f"{bayes_f_raw:.2f}"
+                # ML parameters
+                if has_ml or self.do_ml:
+                    if self.user_paup_block:
+                        f.write("- ML Model: User-defined PAUP* block\n")
                     else:
-                        bayes_f = bayes_f_raw
+                        f.write(f"- ML Model string: `{self.model_str}`\n")
+                        f.write(f"- PAUP* `lset` command: `{self.paup_model_cmds}`\n")
+            
+                # Bayesian parameters
+                if has_bayesian or self.do_bayesian:
+                    f.write(f"- Bayesian software: `{self.bayesian_software}`\n")
+                    f.write(f"- Bayesian model: `{self.bayes_model}`\n")
+                    f.write(f"- MCMC generations: `{self.bayes_ngen}`\n")
+                    f.write(f"- Burnin fraction: `{self.bayes_burnin}`\n")
+                    # Report the actual method being used
+                    ml_method = "stepping-stone" if self.marginal_likelihood == "ss" else "harmonic mean"
+                    f.write(f"- Marginal likelihood method: `{ml_method}`\n")
                     
-                    row_parts.append(f"| {bayes_d} | {bayes_f} | {bf_support} ")
-
-                # Bootstrap column if available
                 if has_bootstrap:
-                    taxa_set = frozenset(taxa_list)
-                    bs_val = bootstrap_values.get(taxa_set, "N/A")
-                    # Convert any numeric type to string
-                    if bs_val != "N/A" and bs_val is not None:
-                        try:
-                            bs_val = f"{int(float(bs_val))}"
-                        except (ValueError, TypeError):
-                            bs_val = str(bs_val)
-                    elif bs_val is None:
-                        bs_val = "N/A"
-                    row_parts.append(f"| {bs_val} ")
+                    f.write("- Bootstrap analysis: Performed\n")
 
-                row_parts.append(f"| {taxa_sample} |\n")
-                f.write("".join(row_parts))
-
-            f.write("\n## Interpretation Guide\n\n")
-            
-            if has_ml:
-                f.write("### ML Analysis\n")
-                f.write("- **ΔlnL (from ML)**: Log-likelihood difference between the constrained tree (without the clade) and the ML tree. Calculated as: constrained_lnL - ML_lnL. Larger positive values indicate stronger support for the clade's presence in the ML tree.\n")
-                f.write("- **AU p-value**: P-value from the Approximately Unbiased test comparing the ML tree against the alternative (constrained) tree. Lower p-values (e.g., < 0.05) suggest the alternative tree (where the clade is broken) is significantly worse than the ML tree, thus supporting the clade.\n\n")
+                f.write("\n## Summary Statistics\n\n")
                 
-            if has_bayesian:
-                f.write("### Bayesian Analysis\n")
-                f.write("- **Bayes Decay (BD)**: Marginal log-likelihood difference (unconstrained - constrained). This is the primary metric for Bayesian support.\n")
-                f.write("  - **Key insight**: In phylogenetic topology testing, BD values typically closely approximate ML log-likelihood differences\n")
-                f.write("  - **Phylogenetic-specific interpretation scale**:\n")
-                f.write("    - BD 0-2: Weak support for the clade\n")
-                f.write("    - BD 2-5: Moderate support\n")
-                f.write("    - BD 5-10: Strong support\n")
-                f.write("    - BD > 10: Very strong support\n")
-                f.write("  - **Note**: BD values of 30-50 or higher are common when data strongly support a clade and should not be considered anomalous\n")
-                f.write("  - **Why BD ≈ ΔlnL**: When comparing models that differ only by a topological constraint, the marginal likelihood is dominated by the likelihood component\n")
-                f.write("  - **Negative values** suggest the constrained analysis had higher marginal likelihood, which may indicate:\n")
-                if self.marginal_likelihood == "ss":
-                    f.write("    - Poor chain convergence or insufficient MCMC sampling\n")
-                    f.write("    - Complex posterior distribution requiring more steps\n")
-                    f.write("    - Genuine lack of support for the clade\n")
+                # ML statistics
+                if has_ml:
+                    ml_l = self.ml_likelihood if self.ml_likelihood is not None else "N/A"
+                    if isinstance(ml_l, float): ml_l = f"{ml_l:.6f}"
+                    f.write(f"- ML tree log-likelihood: **{ml_l}**\n")
+                    
+                # Bayesian statistics
+                if has_bayesian and hasattr(self, 'bayes_marginal_likelihood'):
+                    bayes_ml = self.bayes_marginal_likelihood if self.bayes_marginal_likelihood is not None else "N/A"
+                    if isinstance(bayes_ml, float): bayes_ml = f"{bayes_ml:.6f}"
+                    f.write(f"- Bayesian marginal likelihood: **{bayes_ml}**\n")
+                    
+                f.write(f"- Number of internal branches tested: {len(self.decay_indices)}\n")
+
+                if self.decay_indices:
+                    # ML-specific statistics
+                    if has_ml:
+                        lnl_diffs = [d['lnl_diff'] for d in self.decay_indices.values() if d.get('lnl_diff') is not None]
+                        if lnl_diffs:
+                            f.write(f"- Avg ML log-likelihood difference (constrained vs ML): {np.mean(lnl_diffs):.4f}\n")
+                            f.write(f"- Min ML log-likelihood difference: {min(lnl_diffs):.4f}\n")
+                            f.write(f"- Max ML log-likelihood difference: {max(lnl_diffs):.4f}\n")
+
+                        au_pvals = [d['AU_pvalue'] for d in self.decay_indices.values() if d.get('AU_pvalue') is not None]
+                        if au_pvals:
+                            sig_au_count = sum(1 for p in au_pvals if p < 0.05)
+                            f.write(f"- Branches with significant AU support (p < 0.05): {sig_au_count} / {len(au_pvals)} evaluated\n")
+                
+                    # Bayesian-specific statistics
+                    if has_bayesian:
+                        bayes_decays = [d['bayes_decay'] for d in self.decay_indices.values() if d.get('bayes_decay') is not None]
+                        if bayes_decays:
+                            f.write(f"- Avg Bayesian decay (marginal lnL difference): {np.mean(bayes_decays):.4f}\n")
+                            f.write(f"- Min Bayesian decay: {min(bayes_decays):.4f}\n")
+                            f.write(f"- Max Bayesian decay: {max(bayes_decays):.4f}\n")
+                            
+                            # Check for negative values and add warning
+                            negative_count = sum(1 for bd in bayes_decays if bd < 0)
+                            if negative_count > 0:
+                                f.write(f"\n**WARNING**: {negative_count}/{len(bayes_decays)} branches have negative Bayes Decay values.\n")
+                                f.write("This suggests potential issues with:\n")
+                                f.write("- MCMC convergence (consider increasing --bayes-ngen)\n")
+                                f.write("- Marginal likelihood estimation reliability\n")
+                                f.write("- Model specification\n\n")
+                            
+                            f.write(f"\n**Note**: BD values closely approximating ML log-likelihood differences is expected behavior in phylogenetic topology testing.\n\n")
+                            
+                        # Note: We no longer report traditional BF thresholds as they don't apply well to phylogenetics
+                    
+                    # Parsimony-specific statistics
+                    if has_parsimony:
+                        pars_decays = [d['pars_decay'] for d in self.decay_indices.values() if d.get('pars_decay') is not None]
+                        if pars_decays:
+                            f.write(f"- Avg Parsimony decay (step difference): {np.mean(pars_decays):.1f}\n")
+                            f.write(f"- Min Parsimony decay: {min(pars_decays)}\n")
+                            f.write(f"- Max Parsimony decay: {max(pars_decays)}\n")
+                            
+                            # Count branches with no parsimony support
+                            zero_support = sum(1 for pd in pars_decays if pd == 0)
+                            if zero_support > 0:
+                                f.write(f"- Branches with no parsimony support (decay = 0): {zero_support} / {len(pars_decays)}\n")
+                            
+                            f.write("\n")
+                
+                    # Site analysis statistics
+                    if has_site_data:
+                        site_ratios = [d.get('support_ratio', 0.0) for d in self.decay_indices.values() if 'site_data' in d]
+                        weighted_ratios = [d.get('weighted_support_ratio', 0.0) for d in self.decay_indices.values() if 'site_data' in d]
+                        total_sites = self.alignment.get_alignment_length() if hasattr(self.alignment, 'get_alignment_length') else 'N/A'
+                        
+                        if site_ratios:
+                            f.write(f"- Total alignment sites analyzed: {total_sites}\n")
+                            f.write(f"- Avg site support ratio: {np.mean(site_ratios):.2f}\n")
+                            f.write(f"- Min site support ratio: {min(site_ratios):.2f}\n")
+                            f.write(f"- Max site support ratio: {max(site_ratios):.2f}\n")
+                            
+                            if weighted_ratios:
+                                f.write(f"- Avg weighted support ratio: {np.mean(weighted_ratios):.2f}\n")
+                            
+                            # Count clades with strong site support (ratio > 2.0)
+                            strong_support = sum(1 for ratio in site_ratios if ratio > 2.0)
+                            f.write(f"- Clades with strong site support (ratio > 2.0): {strong_support} / {len(site_ratios)}\n")
+                            f.write("\n")
+                
+                    # Add convergence diagnostics section if available
+                    if has_bayesian and hasattr(self, 'convergence_diagnostics'):
+                        f.write("\n## Bayesian Convergence Diagnostics\n\n")
+                        
+                        # Summary across all runs
+                        all_ess = []
+                        all_psrf = []
+                        all_asdsf = []
+                        convergence_issues = []
+                        
+                        for run_id, conv_data in self.convergence_diagnostics.items():
+                            if conv_data['min_ess'] is not None:
+                                all_ess.append(conv_data['min_ess'])
+                            if conv_data['max_psrf'] is not None:
+                                all_psrf.append(conv_data['max_psrf'])
+                            if conv_data['asdsf'] is not None:
+                                all_asdsf.append(conv_data['asdsf'])
+                            if not conv_data['converged']:
+                                convergence_issues.append(run_id)
+                    
+                        if all_ess:
+                            f.write(f"- Minimum ESS across all runs: {min(all_ess):.0f} (threshold: {self.min_ess})\n")
+                        if all_psrf:
+                            f.write(f"- Maximum PSRF across all runs: {max(all_psrf):.3f} (threshold: {self.max_psrf})\n")
+                        if all_asdsf:
+                            f.write(f"- Final ASDSF range: {min(all_asdsf):.6f} - {max(all_asdsf):.6f} (threshold: {self.max_asdsf})\n")
+                        
+                        if convergence_issues:
+                            f.write(f"\n**WARNING**: {len(convergence_issues)} runs did not meet convergence criteria:\n")
+                            for run_id in convergence_issues[:5]:  # Show first 5
+                                f.write(f"  - {run_id}\n")
+                            if len(convergence_issues) > 5:
+                                f.write(f"  - ... and {len(convergence_issues) - 5} more\n")
+                            f.write("\nConsider:\n")
+                            f.write("- Increasing MCMC generations (--bayes-ngen)\n")
+                            f.write("- Running longer burnin (--bayes-burnin)\n")
+                            f.write("- Using more chains (--bayes-chains)\n")
+                            f.write("- Checking model specification\n")
+                    else:
+                        f.write("Convergence diagnostics not available. This may occur when:\n")
+                        f.write("- Using harmonic mean marginal likelihood estimation\n")
+                        f.write("- Convergence monitoring was disabled\n")
+                        f.write("- Analysis completed before diagnostics were calculated\n\n")
+                        f.write("For detailed convergence assessment, consider using stepping-stone sampling with `--marginal-likelihood ss`.\n\n")
+
+                f.write("\n## Detailed Branch Support Results\n\n")
+
+                # Ensure we have data to display
+                if not self.decay_indices:
+                    f.write("No branch support data available.\n\n")
+                    logger.warning("No decay_indices data available for detailed report table")
                 else:
-                    f.write("    - Harmonic mean estimator limitations (notoriously unreliable)\n")
-                    f.write("    - Poor MCMC convergence (try increasing generations)\n")
-                    f.write("    - Genuine lack of support for the clade\n")
-                    f.write("    - **Consider using stepping-stone sampling (--marginal-likelihood ss) for more reliable estimates**\n")
-                f.write("\n- **Bayes Factor (BF)**: Exponential of the Bayes Decay value (BF = e^BD).\n")
-                f.write("  - **Important**: Traditional BF interpretation scales (e.g., BF >10 = strong, >100 = decisive) do not apply to phylogenetic topology testing\n")
-                f.write("  - These traditional scales were developed for comparing fundamentally different models, not topology constraints\n")
-                f.write("  - **Recommendation**: Use BD values for interpretation rather than BF values\n")
-                f.write("  - BF values are capped at 10^6 for display purposes\n\n")
+                    logger.debug(f"Generating table for {len(self.decay_indices)} clades")
+
+                # Build dynamic table header based on available data
+                header_parts = ["| Clade ID | Taxa Count "]
+                separator_parts = ["|----------|------------ "]
                 
-            if has_bootstrap:
-                f.write("- **Bootstrap**: Bootstrap support value (percentage of bootstrap replicates in which the clade appears). Higher values (e.g., > 70) suggest stronger support for the clade.\n")
-            
-            # Add detailed explanation about BD vs ML differences when both analyses are present
-            if has_ml and has_bayesian:
-                f.write("\n## Understanding BD ≈ ΔlnL in Phylogenetics\n\n")
-                f.write("You may notice that Bayesian Decay (BD) values closely approximate the ML log-likelihood differences (ΔlnL). ")
-                f.write("This is **expected behavior** in phylogenetic topology testing, not an anomaly. Here's why:\n\n")
-                f.write("1. **Identical Models**: The constrained and unconstrained analyses use the same substitution model, ")
-                f.write("differing only in whether a specific clade is allowed to exist.\n\n")
-                f.write("2. **Likelihood Dominance**: When data strongly support a topology, the marginal likelihood ")
-                f.write("(which integrates over all parameters) becomes dominated by the likelihood at the optimal parameter values.\n\n")
-                f.write("3. **Minimal Prior Effects**: Since both analyses explore nearly identical parameter spaces ")
-                f.write("(same model parameters, only different tree topologies), the prior's influence is minimal.\n\n")
-                f.write("**Practical Implications**:\n")
-                f.write("- Similar BD and ΔlnL values confirm your analyses are working correctly\n")
-                f.write("- Large BD values (30-50+) simply reflect strong data signal, not \"astronomical\" support\n")
-                f.write("- Use the phylogenetic-specific BD interpretation scale provided above\n")
-                f.write("- Compare relative BD values across branches rather than focusing on absolute values\n")
+                # Always include basic columns, add analysis-specific ones as available  
+                if has_ml:
+                    header_parts.extend(["| Constrained lnL | ΔlnL (from ML) | AU p-value | Significant (AU) "])
+                    separator_parts.extend(["|-----------------|------------------|------------|-------------------- "])
+                    logger.debug("Added ML columns to report table")
                 
-        logger.info(f"Detailed report written to {self._get_display_path(output_path)}")
+                if has_bayesian:
+                    header_parts.extend(["| Bayes Decay "])
+                    separator_parts.extend(["|------------- "])
+                    logger.debug("Added Bayesian columns to report table")
+                    
+                if has_parsimony:
+                    header_parts.extend(["| Parsimony Decay "])
+                    separator_parts.extend(["|----------------- "])
+                    logger.debug("Added Parsimony columns to report table")
+                    
+                if has_bootstrap:
+                    header_parts.append("| Bootstrap ")
+                    separator_parts.append("|----------- ")
+                    logger.debug("Added Bootstrap columns to report table")
+                    
+                header_parts.append("| Included Taxa (sample) |\n")
+                separator_parts.append("|--------------------------|\n")
+                
+                # Log final table structure
+                logger.debug(f"Table header: {''.join(header_parts).strip()}")
+                
+                f.write("".join(header_parts))
+                f.write("".join(separator_parts))
+
+                # Get bootstrap values if bootstrap analysis was performed
+                bootstrap_values = {}
+                if has_bootstrap:
+                    for node in self.bootstrap_tree.get_nonterminals():
+                        if node.confidence is not None:
+                            taxa_set = frozenset(leaf.name for leaf in node.get_terminals())
+                            bootstrap_values[taxa_set] = node.confidence
+
+                logger.debug(f"Starting table generation loop for {len(self.decay_indices)} clades")
+                row_count = 0
+                
+                try:
+                    for clade_id, data in sorted(self.decay_indices.items()):
+                        row_count += 1
+                        logger.debug(f"Processing row {row_count}: {clade_id}")
+                        
+                        taxa_list = sorted(data.get('taxa', []))
+                        taxa_count = len(taxa_list)
+                        taxa_sample = ", ".join(taxa_list[:3]) + ('...' if taxa_count > 3 else '')
+
+                        # Build the table row
+                        row_parts = [f"| {clade_id} | {taxa_count} "]
+                        
+                        # ML fields
+                        if has_ml:
+                            try:
+                                c_lnl = data.get('constrained_lnl', 'N/A')
+                                if isinstance(c_lnl, float): c_lnl = f"{c_lnl:.4f}"
+                                
+                                lnl_d = data.get('lnl_diff', 'N/A')
+                                if isinstance(lnl_d, float): lnl_d = f"{lnl_d:.4f}"
+                                
+                                au_p = data.get('AU_pvalue', 'N/A')
+                                if isinstance(au_p, float): au_p = f"{au_p:.4f}"
+                                
+                                sig_au = data.get('significant_AU', 'N/A')
+                                if isinstance(sig_au, bool): sig_au = "**Yes**" if sig_au else "No"
+                                
+                                row_parts.append(f"| {c_lnl} | {lnl_d} | {au_p} | {sig_au} ")
+                            except Exception as e:
+                                logger.error(f"Error processing ML data for {clade_id}: {e}")
+                                row_parts.append("| N/A | N/A | N/A | N/A ")
+                        
+                        # Bayesian fields
+                        if has_bayesian:
+                            try:
+                                bayes_d = data.get('bayes_decay', 'N/A')
+                                if isinstance(bayes_d, float): bayes_d = f"{bayes_d:.4f}"
+                                
+                                row_parts.append(f"| {bayes_d} ")
+                            except Exception as e:
+                                logger.error(f"Error processing Bayesian data for {clade_id}: {e}")
+                                row_parts.append("| N/A ")
+                        
+                        # Parsimony fields
+                        if has_parsimony:
+                            try:
+                                pars_d = data.get('pars_decay', 'N/A')
+                                if isinstance(pars_d, (int, float)): pars_d = str(int(pars_d))
+                                
+                                row_parts.append(f"| {pars_d} ")
+                            except Exception as e:
+                                logger.error(f"Error processing Parsimony data for {clade_id}: {e}")
+                                row_parts.append("| N/A ")
+
+                        # Bootstrap column if available
+                        if has_bootstrap:
+                            try:
+                                taxa_set = frozenset(taxa_list)
+                                bs_val = bootstrap_values.get(taxa_set, "N/A")
+                                # Convert any numeric type to string
+                                if bs_val != "N/A" and bs_val is not None:
+                                    try:
+                                        bs_val = f"{int(float(bs_val))}"
+                                    except (ValueError, TypeError):
+                                        bs_val = str(bs_val)
+                                elif bs_val is None:
+                                    bs_val = "N/A"
+                                row_parts.append(f"| {bs_val} ")
+                            except Exception as e:
+                                logger.error(f"Error processing Bootstrap data for {clade_id}: {e}")
+                                row_parts.append("| N/A ")
+
+                        row_parts.append(f"| {taxa_sample} |\n")
+                        
+                        try:
+                            row_content = "".join(row_parts)
+                            f.write(row_content)
+                            logger.debug(f"Successfully wrote row for {clade_id}")
+                        except Exception as e:
+                            logger.error(f"Error writing row for {clade_id}: {e}")
+                            logger.debug(f"Row parts: {row_parts}")
+                            # Write a basic fallback row
+                            fallback_row = f"| {clade_id} | {taxa_count} | ERROR | {taxa_sample} |\n"
+                            f.write(fallback_row)
+                
+                except Exception as e:
+                    logger.error(f"Major error in table generation loop: {e}")
+                    f.write(f"\nError generating detailed results table: {e}\n\n")
+
+                logger.debug(f"Completed table generation for {row_count} rows")
+                
+                # Add site analysis summary table
+                f.write("\n## Site Analysis Summary\n\n")
+                
+                # Use the has_site_data variable defined at the top of the function
+                if has_site_data and self.decay_indices:
+                    f.write("Site-specific likelihood analysis showing supporting vs. conflicting sites for each clade:\n\n")
+                    
+                    # Create site analysis table header
+                    f.write("| Clade ID | Supporting Sites | Conflicting Sites | Neutral Sites | Support Ratio | Sum Supporting Δ | Sum Conflicting Δ | Weighted Support Ratio |\n")
+                    f.write("|----------|------------------|-------------------|---------------|---------------|------------------|-------------------|------------------------|\n")
+                    
+                    # Generate table rows for each clade with site data
+                    for clade_id in sorted(self.decay_indices.keys()):
+                        data = self.decay_indices[clade_id]
+                        if 'site_data' not in data:
+                            continue
+                        
+                        supporting = data.get('supporting_sites', 0)
+                        conflicting = data.get('conflicting_sites', 0)
+                        neutral = data.get('neutral_sites', 0)
+                        ratio = data.get('support_ratio', 0.0)
+                        sum_supporting = data.get('sum_supporting_delta', 0.0)
+                        sum_conflicting = data.get('sum_conflicting_delta', 0.0)
+                        weighted_ratio = data.get('weighted_support_ratio', 0.0)
+                        
+                        f.write(f"| {clade_id} | {supporting} | {conflicting} | {neutral} | {ratio:.4f} | {sum_supporting:.4f} | {sum_conflicting:.4f} | {weighted_ratio:.4f} |\n")
+                    
+                    f.write("\n**Note**: Site analysis shows which alignment positions support or conflict with each clade. ")
+                    f.write("Supporting sites have positive likelihood differences when the clade is present, ")
+                    f.write("while conflicting sites favor alternative topologies.\n\n")
+                else:
+                    f.write("Site-specific analysis data not available.\n\n")
+                
+                # Add visualizations section
+                f.write("\n## Visualizations\n\n")
+                
+                # Check for main visualization files
+                visualization_dir = output_path.parent / "visualizations"
+                site_analysis_dir = output_path.parent / "site_analysis"
+                
+                if visualization_dir.exists():
+                    # Main distribution and correlation plots
+                    support_dist_plot = visualization_dir / f"{self.alignment_file.stem}_support_distribution.png"
+                    support_corr_plot = visualization_dir / f"{self.alignment_file.stem}_support_correlation.png"
+                    
+                    if support_dist_plot.exists():
+                        f.write(f"### Support Distribution Plot\n")
+                        f.write(f"![Support Distribution](./visualizations/{support_dist_plot.name})\n\n")
+                        f.write("Distribution of support values across all analytical methods.\n\n")
+                    
+                    if support_corr_plot.exists():
+                        f.write(f"### Support Correlation Plot\n")
+                        f.write(f"![Support Correlation](./visualizations/{support_corr_plot.name})\n\n")
+                        f.write("Correlation between different support measures (ML, Bayesian, Parsimony).\n\n")
+                
+                # Site-specific plots
+                if site_analysis_dir.exists() and has_site_data:
+                    f.write("### Site-Specific Analysis Plots\n\n")
+                    f.write("Individual clade site analysis visualizations:\n\n")
+                    
+                    for clade_id in sorted(self.decay_indices.keys()):
+                        if 'site_data' in self.decay_indices[clade_id]:
+                            site_hist = site_analysis_dir / f"site_hist_{clade_id}.png"
+                            site_plot = site_analysis_dir / f"site_plot_{clade_id}.png"
+                            
+                            if site_hist.exists() or site_plot.exists():
+                                f.write(f"#### {clade_id}\n")
+                                
+                                if site_hist.exists():
+                                    f.write(f"![{clade_id} Site Histogram](./site_analysis/{site_hist.name})\n")
+                                
+                                if site_plot.exists():
+                                    f.write(f"![{clade_id} Site Plot](./site_analysis/{site_plot.name})\n")
+                                
+                                f.write("\n")
+                    
+                    f.write("Site plots show likelihood differences across alignment positions, with positive values indicating support for the clade.\n\n")
+                
+                f.write("\n## Interpretation Guide\n\n")
+                
+                if has_ml:
+                    f.write("### ML Analysis\n")
+                    f.write("- **ΔlnL (from ML)**: Log-likelihood difference between the constrained tree (without the clade) and the ML tree. Calculated as: constrained_lnL - ML_lnL. Larger positive values indicate stronger support for the clade's presence in the ML tree.\n")
+                    f.write("- **AU p-value**: P-value from the Approximately Unbiased test comparing the ML tree against the alternative (constrained) tree. Lower p-values (e.g., < 0.05) suggest the alternative tree (where the clade is broken) is significantly worse than the ML tree, thus supporting the clade.\n\n")
+                    
+                if has_bayesian:
+                    f.write("### Bayesian Analysis\n")
+                    f.write("- **Bayes Decay (BD)**: Marginal log-likelihood difference (unconstrained - constrained). This is the primary metric for Bayesian support.\n")
+                    f.write("  - **Key insight**: In phylogenetic topology testing, BD values typically closely approximate ML log-likelihood differences\n")
+                    f.write("  - **Note**: BD values of 30-50 or higher are common when data support a clade and should not be considered anomalous\n")
+                    f.write("  - **Why BD ≈ ΔlnL**: When comparing models that differ only by a topological constraint, the marginal likelihood is dominated by the likelihood component\n")
+                    f.write("  - **Negative values** suggest the constrained analysis had higher marginal likelihood, which may indicate:\n")
+                    if self.marginal_likelihood == "ss":
+                        f.write("    - Poor chain convergence or insufficient MCMC sampling\n")
+                        f.write("    - Complex posterior distribution requiring more steps\n")
+                        f.write("    - Genuine lack of support for the clade\n")
+                    else:
+                        f.write("    - Harmonic mean estimator limitations (notoriously unreliable)\n")
+                        f.write("    - Poor MCMC convergence (try increasing generations)\n")
+                        f.write("    - Genuine lack of support for the clade\n")
+                        f.write("    - **Consider using stepping-stone sampling (--marginal-likelihood ss) for more reliable estimates**\n")
+                    
+                if has_parsimony:
+                    f.write("### Parsimony Analysis\n")
+                    f.write("- **Parsimony Decay**: The difference in parsimony steps between the unconstrained most parsimonious tree and the constrained tree (without the clade). Calculated as: constrained_steps - unconstrained_steps.\n")
+                    f.write("  - **Interpretation**: Higher positive values indicate that removing the clade requires more evolutionary steps, suggesting stronger parsimony support for the clade.\n")
+                    f.write("  - **Zero values**: Indicate that the clade can be removed without increasing the number of parsimony steps, suggesting weak parsimony support.\n")
+                    f.write("  - **Negative values**: Should not occur in proper decay analysis (would indicate an error).\n\n")
+                    
+                if has_bootstrap:
+                    f.write("### Bootstrap Analysis\n")
+                    f.write("- **Bootstrap**: Bootstrap support value (percentage of bootstrap replicates in which the clade appears). Higher values (e.g., > 70) suggest stronger support for the clade.\n\n")
+                
+                # Add detailed explanation about BD vs ML differences when both analyses are present
+                if has_ml and has_bayesian:
+                    f.write("\n## Understanding BD ≈ ΔlnL in Phylogenetics\n\n")
+                    f.write("You may notice that Bayesian Decay (BD) values closely approximate the ML log-likelihood differences (ΔlnL). ")
+                    f.write("This is **expected behavior** in phylogenetic topology testing, not an anomaly. Here's why:\n\n")
+                    f.write("1. **Identical Models**: The constrained and unconstrained analyses use the same substitution model, ")
+                    f.write("differing only in whether a specific clade is allowed to exist.\n\n")
+                    f.write("2. **Likelihood Dominance**: When data support a topology, the marginal likelihood ")
+                    f.write("(which integrates over all parameters) becomes dominated by the likelihood at the optimal parameter values.\n\n")
+                    f.write("3. **Minimal Prior Effects**: Since both analyses explore nearly identical parameter spaces ")
+                    f.write("(same model parameters, only different tree topologies), the prior's influence is minimal.\n\n")
+                    f.write("**Practical Implications**:\n")
+                    f.write("- Similar BD and ΔlnL values confirm your analyses are working correctly\n")
+                    f.write("- Large BD values (30-50+) simply reflect strong data signal, not \"astronomical\" support\n")
+                    f.write("- Use the phylogenetic-specific BD interpretation scale provided above\n")
+                    f.write("- Compare relative BD values across branches rather than focusing on absolute values\n")
+                
+                # Add file references section
+                f.write("\n## Additional Files and References\n\n")
+                f.write("This analysis generates several output files for detailed examination:\n\n")
+                
+                # Main data files
+                f.write("### Data Files\n")
+                csv_file = output_path.parent / f"{self.alignment_file.stem}_data.csv"
+                summary_file = output_path.parent / f"{self.alignment_file.stem}_summary.txt"
+                
+                if csv_file.exists():
+                    f.write(f"- **CSV Export**: [`{csv_file.name}`](./{csv_file.name}) - Complete numerical results in spreadsheet format\n")
+                if summary_file.exists():
+                    f.write(f"- **Text Summary**: [`{summary_file.name}`](./{summary_file.name}) - Formatted summary with symbols and tables\n")
+                
+                # Tree files
+                trees_dir = output_path.parent / "trees"
+                if trees_dir.exists():
+                    f.write(f"\n### Tree Files\n")
+                    f.write(f"- **Tree Directory**: [`./trees/`](./trees/) - Contains phylogenetic trees with support values:\n")
+                    for tree_type in ['au', 'delta_lnl', 'bayes_decay', 'combined']:
+                        tree_file = trees_dir / f"{self.alignment_file.stem}_{tree_type}.nwk"
+                        if tree_file.exists():
+                            f.write(f"  - `{tree_file.name}` - {tree_type.replace('_', ' ').title()} annotated tree\n")
+                
+                # Site analysis files
+                if site_analysis_dir.exists():
+                    f.write(f"\n### Site Analysis Files\n")
+                    f.write(f"- **Site Analysis Directory**: [`./site_analysis/`](./site_analysis/) - Detailed site-by-site likelihood data\n")
+                    f.write(f"  - `site_analysis_summary.txt` - Summary table of site statistics\n")
+                    f.write(f"  - `site_data_Clade_X.txt` - Individual site likelihood differences for each clade\n")
+                    f.write(f"  - `site_hist_Clade_X.png` - Histogram visualizations of site support\n")
+                    f.write(f"  - `site_plot_Clade_X.png` - Detailed site-by-site support plots\n")
+                
+                # Supplementary files
+                supplementary_dir = output_path.parent / "supplementary"
+                if supplementary_dir.exists():
+                    f.write(f"\n### Configuration and Logs\n")
+                    f.write(f"- **Supplementary Directory**: [`./supplementary/`](./supplementary/) - Analysis configuration and metadata\n")
+                    config_file = supplementary_dir / f"{self.alignment_file.stem}_analysis_config.txt"
+                    if config_file.exists():
+                        f.write(f"  - `{config_file.name}` - Complete analysis parameters and settings\n")
+                
+                    f.write(f"\n---\n")
+                    f.write(f"*Generated by panDecay v1.1.0 on {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*\n")
+                
+        except Exception as e:
+            logger.error(f"Error generating markdown report: {e}")
+            # Write a minimal report on error
+            try:
+                with output_path.open('w') as f:
+                    f.write(f"# panDecay Analysis Report - Error\n\n")
+                    f.write(f"Report generation failed with error: {e}\n\n")
+                    f.write(f"Generated on: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            except Exception as fallback_error:
+                logger.error(f"Failed to write fallback report: {fallback_error}")
+                
+        logger.info(f"Report saved: {output_path.name}")
 
     def write_site_analysis_results(self, output_dir: Path):
         """
@@ -4425,39 +4524,44 @@ class panDecayIndices:
 
                 f.write(f"{clade_id}\t{supporting}\t{conflicting}\t{neutral}\t{ratio_str}\t{sum_supporting:.4f}\t{sum_conflicting:.4f}\t{weighted_ratio_str}\n")
 
-        logger.info(f"Site analysis summary written to {self._get_display_path(summary_path)}")
+        logger.info(f"Site summary saved: {summary_path.name}")
 
-        # For each branch, write detailed site data
-        for clade_id, data in self.decay_indices.items():
-            if 'site_data' not in data:
-                continue
+        # For each branch, write detailed site data with overwriting progress
+        site_data_clades = [(clade_id, data) for clade_id, data in self.decay_indices.items() if 'site_data' in data]
+        if site_data_clades:
+            overwrite_progress = OverwritingProgress()
+            try:
+                for i, (clade_id, data) in enumerate(site_data_clades, 1):
+                    overwrite_progress.update(f"Saving site data: {clade_id} ({i}/{len(site_data_clades)})")
+                    
+                    site_data_path = output_dir / f"site_data_{clade_id}.txt"
+                    with site_data_path.open('w') as f:
+                        f.write(f"Site-Specific Likelihood Analysis for {clade_id}\n")
+                        f.write("=" * 50 + "\n\n")
+                        f.write(f"Supporting sites: {data.get('supporting_sites', 0)}\n")
+                        f.write(f"Conflicting sites: {data.get('conflicting_sites', 0)}\n")
+                        f.write(f"Neutral sites: {data.get('neutral_sites', 0)}\n")
+                        f.write(f"Support ratio: {data.get('support_ratio', 0.0):.4f}\n")
+                        f.write(f"Sum of supporting deltas: {data.get('sum_supporting_delta', 0.0):.4f}\n")
+                        f.write(f"Sum of conflicting deltas: {data.get('sum_conflicting_delta', 0.0):.4f}\n")
+                        f.write(f"Weighted support ratio: {data.get('weighted_support_ratio', 0.0):.4f}\n\n")
+                        f.write("Site\tML_Tree_lnL\tConstrained_lnL\tDelta_lnL\tSupports_Branch\n")
 
-            site_data_path = output_dir / f"site_data_{clade_id}.txt"
-            with site_data_path.open('w') as f:
-                f.write(f"Site-Specific Likelihood Analysis for {clade_id}\n")
-                f.write("=" * 50 + "\n\n")
-                f.write(f"Supporting sites: {data.get('supporting_sites', 0)}\n")
-                f.write(f"Conflicting sites: {data.get('conflicting_sites', 0)}\n")
-                f.write(f"Neutral sites: {data.get('neutral_sites', 0)}\n")
-                f.write(f"Support ratio: {data.get('support_ratio', 0.0):.4f}\n")
-                f.write(f"Sum of supporting deltas: {data.get('sum_supporting_delta', 0.0):.4f}\n")
-                f.write(f"Sum of conflicting deltas: {data.get('sum_conflicting_delta', 0.0):.4f}\n")
-                f.write(f"Weighted support ratio: {data.get('weighted_support_ratio', 0.0):.4f}\n\n")
-                f.write("Site\tML_Tree_lnL\tConstrained_lnL\tDelta_lnL\tSupports_Branch\n")
+                        # Make sure site_data is a dictionary with entries for each site
+                        site_data = data.get('site_data', {})
+                        if isinstance(site_data, dict) and site_data:
+                            for site_num, site_info in sorted(site_data.items()):
+                                # Safely access each field with a default
+                                ml_lnl = site_info.get('lnL_ML', 0.0)
+                                constrained_lnl = site_info.get('lnL_constrained', 0.0)
+                                delta_lnl = site_info.get('delta_lnL', 0.0)
+                                supports = site_info.get('supports_branch', False)
 
-                # Make sure site_data is a dictionary with entries for each site
-                site_data = data.get('site_data', {})
-                if isinstance(site_data, dict) and site_data:
-                    for site_num, site_info in sorted(site_data.items()):
-                        # Safely access each field with a default
-                        ml_lnl = site_info.get('lnL_ML', 0.0)
-                        constrained_lnl = site_info.get('lnL_constrained', 0.0)
-                        delta_lnl = site_info.get('delta_lnL', 0.0)
-                        supports = site_info.get('supports_branch', False)
-
-                        f.write(f"{site_num}\t{ml_lnl:.6f}\t{constrained_lnl:.6f}\t{delta_lnl:.6f}\t{supports}\n")
-
-            logger.info(f"Detailed site data for {clade_id} written to {self._get_display_path(site_data_path)}")
+                                f.write(f"{site_num}\t{ml_lnl:.6f}\t{constrained_lnl:.6f}\t{delta_lnl:.6f}\t{supports}\n")
+                
+                overwrite_progress.finish(f"Site data saved: {len(site_data_clades)} files")
+            except Exception:
+                overwrite_progress.finish(f"Site data saved: {len(site_data_clades)} files")
 
         # Generate site analysis visualizations
         try:
@@ -4468,100 +4572,108 @@ class panDecayIndices:
             # Get visualization options
             viz_format = getattr(self, 'viz_format', 'png')
 
-            for clade_id, data in self.decay_indices.items():
-                if 'site_data' not in data:
-                    continue
+            # Collect clades that have site data for plotting
+            plot_clades = [(clade_id, data) for clade_id, data in self.decay_indices.items() if 'site_data' in data and data.get('site_data', {})]
+            
+            if plot_clades:
+                overwrite_progress = OverwritingProgress()
+                plot_count = 0
+                try:
+                    for i, (clade_id, data) in enumerate(plot_clades, 1):
+                        overwrite_progress.update(f"Generating plots: {clade_id} ({i}/{len(plot_clades)})")
+                        
+                        # Extract data for plotting
+                        site_data = data.get('site_data', {})
 
-                # Extract data for plotting
-                site_data = data.get('site_data', {})
-                if not site_data:
-                    continue
+                        site_nums = sorted(site_data.keys())
+                        deltas = [site_data[site]['delta_lnL'] for site in site_nums if 'delta_lnL' in site_data[site]]
 
-                site_nums = sorted(site_data.keys())
-                deltas = [site_data[site]['delta_lnL'] for site in site_nums if 'delta_lnL' in site_data[site]]
+                        if not deltas:
+                            continue
 
-                if not deltas:
-                    continue
+                        # Get taxa in this clade for visualization
+                        clade_taxa = data.get('taxa', [])
 
-                # Get taxa in this clade for visualization
-                clade_taxa = data.get('taxa', [])
+                        # Prepare taxa list for title display
+                        if len(clade_taxa) <= 3:
+                            taxa_display = ", ".join(clade_taxa)
+                        else:
+                            taxa_display = f"{', '.join(sorted(clade_taxa)[:3])}... (+{len(clade_taxa)-3} more)"
 
-                # Prepare taxa list for title display
-                if len(clade_taxa) <= 3:
-                    taxa_display = ", ".join(clade_taxa)
-                else:
-                    taxa_display = f"{', '.join(sorted(clade_taxa)[:3])}... (+{len(clade_taxa)-3} more)"
+                        # Create standard site analysis plot
+                        fig = plt.figure(figsize=(12, 6))
+                        ax_main = fig.add_subplot(111)
 
-                # Create standard site analysis plot
-                fig = plt.figure(figsize=(12, 6))
-                ax_main = fig.add_subplot(111)
+                        # Create the main bar plot
+                        bar_colors = ['green' if d < 0 else 'red' for d in deltas]
+                        ax_main.bar(range(len(deltas)), deltas, color=bar_colors, alpha=0.7)
 
-                # Create the main bar plot
-                bar_colors = ['green' if d < 0 else 'red' for d in deltas]
-                ax_main.bar(range(len(deltas)), deltas, color=bar_colors, alpha=0.7)
+                        # Add x-axis ticks at reasonable intervals
+                        if len(site_nums) > 50:
+                            tick_interval = max(1, len(site_nums) // 20)
+                            tick_positions = range(0, len(site_nums), tick_interval)
+                            tick_labels = [site_nums[i] for i in tick_positions if i < len(site_nums)]
+                            ax_main.set_xticks(tick_positions)
+                            ax_main.set_xticklabels(tick_labels, rotation=45)
+                        else:
+                            ax_main.set_xticks(range(len(site_nums)))
+                            ax_main.set_xticklabels(site_nums, rotation=45)
 
-                # Add x-axis ticks at reasonable intervals
-                if len(site_nums) > 50:
-                    tick_interval = max(1, len(site_nums) // 20)
-                    tick_positions = range(0, len(site_nums), tick_interval)
-                    tick_labels = [site_nums[i] for i in tick_positions if i < len(site_nums)]
-                    ax_main.set_xticks(tick_positions)
-                    ax_main.set_xticklabels(tick_labels, rotation=45)
-                else:
-                    ax_main.set_xticks(range(len(site_nums)))
-                    ax_main.set_xticklabels(site_nums, rotation=45)
+                        # Add reference line at y=0
+                        ax_main.axhline(y=0, color='black', linestyle='-', alpha=0.3)
 
-                # Add reference line at y=0
-                ax_main.axhline(y=0, color='black', linestyle='-', alpha=0.3)
+                        # Add title that includes some taxa information
+                        ax_main.set_title(f"Site-Specific Likelihood Differences for {clade_id} ({taxa_display})")
+                        ax_main.set_xlabel("Site Position")
+                        ax_main.set_ylabel("Delta lnL (ML - Constrained)")
 
-                # Add title that includes some taxa information
-                ax_main.set_title(f"Site-Specific Likelihood Differences for {clade_id} ({taxa_display})")
-                ax_main.set_xlabel("Site Position")
-                ax_main.set_ylabel("Delta lnL (ML - Constrained)")
+                        # Add summary info text box
+                        support_ratio = data.get('support_ratio', 0.0)
+                        weighted_ratio = data.get('weighted_support_ratio', 0.0)
 
-                # Add summary info text box
-                support_ratio = data.get('support_ratio', 0.0)
-                weighted_ratio = data.get('weighted_support_ratio', 0.0)
+                        ratio_text = "Inf" if support_ratio == float('inf') else f"{support_ratio:.2f}"
+                        weighted_text = "Inf" if weighted_ratio == float('inf') else f"{weighted_ratio:.2f}"
 
-                ratio_text = "Inf" if support_ratio == float('inf') else f"{support_ratio:.2f}"
-                weighted_text = "Inf" if weighted_ratio == float('inf') else f"{weighted_ratio:.2f}"
+                        info_text = (
+                            f"Supporting sites: {data.get('supporting_sites', 0)}\n"
+                            f"Conflicting sites: {data.get('conflicting_sites', 0)}\n"
+                            f"Support ratio: {ratio_text}\n"
+                            f"Weighted ratio: {weighted_text}"
+                        )
 
-                info_text = (
-                    f"Supporting sites: {data.get('supporting_sites', 0)}\n"
-                    f"Conflicting sites: {data.get('conflicting_sites', 0)}\n"
-                    f"Support ratio: {ratio_text}\n"
-                    f"Weighted ratio: {weighted_text}"
-                )
+                        # Add text box with summary info
+                        ax_main.text(
+                            0.02, 0.95, info_text,
+                            transform=ax_main.transAxes,
+                            bbox=dict(boxstyle='round', facecolor='white', alpha=0.8)
+                        )
 
-                # Add text box with summary info
-                ax_main.text(
-                    0.02, 0.95, info_text,
-                    transform=ax_main.transAxes,
-                    bbox=dict(boxstyle='round', facecolor='white', alpha=0.8)
-                )
+                        plt.tight_layout()
 
-                plt.tight_layout()
+                        # Save plot in the requested format
+                        plot_path = output_dir / f"site_plot_{clade_id}.{viz_format}"
+                        plt.savefig(str(plot_path), dpi=150, format=viz_format)
+                        plt.close(fig)
 
-                # Save plot in the requested format
-                plot_path = output_dir / f"site_plot_{clade_id}.{viz_format}"
-                plt.savefig(str(plot_path), dpi=150, format=viz_format)
-                plt.close(fig)
+                        plot_count += 1
 
-                logger.info(f"Site-specific likelihood plot for {clade_id} saved to {plot_path}")
+                        # Optional: Create a histogram of delta values
+                        plt.figure(figsize=(10, 5))
+                        sns.histplot(deltas, kde=True, bins=30)
+                        plt.axvline(x=0, color='black', linestyle='--')
+                        plt.title(f"Distribution of Site Likelihood Differences for {clade_id}")
+                        plt.xlabel("Delta lnL (ML - Constrained)")
+                        plt.tight_layout()
 
-                # Optional: Create a histogram of delta values
-                plt.figure(figsize=(10, 5))
-                sns.histplot(deltas, kde=True, bins=30)
-                plt.axvline(x=0, color='black', linestyle='--')
-                plt.title(f"Distribution of Site Likelihood Differences for {clade_id}")
-                plt.xlabel("Delta lnL (ML - Constrained)")
-                plt.tight_layout()
-
-                hist_path = output_dir / f"site_hist_{clade_id}.{viz_format}"
-                plt.savefig(str(hist_path), dpi=150, format=viz_format)
-                plt.close()
-
-                logger.info(f"Site likelihood histogram for {clade_id} saved to {hist_path}")
+                        hist_path = output_dir / f"site_hist_{clade_id}.{viz_format}"
+                        plt.savefig(str(hist_path), dpi=150, format=viz_format)
+                        plt.close()
+                        
+                        plot_count += 1
+                    
+                    overwrite_progress.finish(f"Plots saved: {plot_count} files ({len(plot_clades)} plots + {len(plot_clades)} histograms)")
+                except Exception:
+                    overwrite_progress.finish(f"Plots saved: {plot_count} files")
 
                 if not self.debug and not self.keep_files:
                     # Clean up tree files
@@ -4606,10 +4718,99 @@ class panDecayIndices:
 
             output_path.parent.mkdir(parents=True, exist_ok=True)
             plt.savefig(str(output_path), format=kwargs.get('format',"png"), dpi=300); plt.close()
-            logger.info(f"Support distribution plot saved to {output_path}")
+            logger.info(f"Distribution plot saved: {output_path.name}")
         except ImportError: logger.error("Matplotlib/Seaborn not found for visualization.")
         except Exception as e: logger.error(f"Failed support distribution plot: {e}")
 
+    def visualize_support_correlation(self, output_file: Path, **kwargs) -> None:
+        """
+        Create support value correlation plot.
+        
+        Args:
+            output_file: Path to output plot file
+            **kwargs: Additional plotting parameters
+        """
+        import logging
+        local_logger = logging.getLogger(__name__)
+        
+        if not self.decay_indices:
+            local_logger.warning("No data for support correlation plot.")
+            return
+        
+        try:
+            import matplotlib.pyplot as plt
+            import seaborn as sns
+            import pandas as pd
+            
+            # Collect support measures for correlation analysis
+            correlation_data = []
+            
+            for clade_id, data in self.decay_indices.items():
+                row = {'clade_id': clade_id}
+                
+                # Add different support measures (using correct key names)
+                if 'AU_pvalue' in data:
+                    row['AU_pvalue'] = data['AU_pvalue']
+                if 'lnl_diff' in data:
+                    row['Delta_LnL'] = abs(data['lnl_diff'])
+                if 'bayes_decay' in data:
+                    row['Bayesian_Decay'] = data['bayes_decay']
+                if 'pars_decay' in data:
+                    row['Parsimony_Decay'] = data['pars_decay']
+                if 'bootstrap_support' in data:
+                    row['Bootstrap_Support'] = data['bootstrap_support']
+                
+                if len(row) > 1:  # Has at least one support measure
+                    correlation_data.append(row)
+            
+            if len(correlation_data) < 2:
+                local_logger.warning("Insufficient data for correlation plot (need at least 2 clades with support measures).")
+                return
+            
+            # Create DataFrame
+            df = pd.DataFrame(correlation_data)
+            
+            # Select only numeric columns for correlation
+            numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+            if 'clade_id' in numeric_cols:
+                numeric_cols.remove('clade_id')
+            
+            if len(numeric_cols) < 2:
+                local_logger.warning("Insufficient numeric support measures for correlation plot.")
+                return
+            
+            # Create correlation matrix
+            corr_data = df[numeric_cols]
+            correlation_matrix = corr_data.corr()
+            
+            # Create plot
+            plt.figure(figsize=(kwargs.get('width', 10), kwargs.get('height', 8)))
+            
+            # Use seaborn heatmap for correlation matrix
+            mask = np.triu(np.ones_like(correlation_matrix, dtype=bool))
+            sns.heatmap(correlation_matrix, 
+                       mask=mask,
+                       annot=True, 
+                       cmap='coolwarm', 
+                       center=0,
+                       square=True,
+                       fmt='.2f',
+                       cbar_kws={"shrink": .8})
+            
+            plt.title('Support Measure Correlation Matrix')
+            plt.tight_layout()
+            
+            # Save plot
+            output_file.parent.mkdir(parents=True, exist_ok=True)
+            plt.savefig(str(output_file), format=kwargs.get('format', "png"), dpi=300)
+            plt.close()
+            
+            local_logger.info(f"Support correlation plot saved: {output_file.name}")
+            
+        except ImportError:
+            local_logger.error("Required packages (matplotlib/seaborn/pandas) not found for correlation visualization.")
+        except Exception as e:
+            local_logger.error(f"Failed to create support correlation plot: {e}")
 
     def cleanup_intermediate_files(self):
         """
@@ -4646,6 +4847,118 @@ class panDecayIndices:
                     logger.debug(f"Deleted intermediate file: {file_path}")
                 except Exception as e:
                     logger.warning(f"Failed to delete intermediate file {file_path}: {e}")
+
+    def export_results_csv(self, output_file: Path) -> None:
+        """
+        Export results to CSV format.
+        
+        Args:
+            output_file: Path to CSV output file
+        """
+        try:
+            with open(output_file, 'w', newline='') as csvfile:
+                if not self.decay_indices:
+                    csvfile.write("No results available\n")
+                    return
+                
+                # Define organized fieldnames with proper support measure names
+                fieldnames = ['clade_id', 'taxa_count', 'taxa']
+                
+                # Add support measures in logical order: PD, LD, BD, BS, AU
+                # Using correct field names from actual data structure
+                support_measures = [
+                    ('PD', 'pars_decay', None),
+                    ('LD', 'lnl_diff', None), 
+                    ('BD', 'bayes_decay', None),
+                    ('BS', 'bootstrap_support', None),
+                    ('AU', 'AU_pvalue', None)
+                ]
+                
+                # Add site analysis measures
+                site_analysis_measures = [
+                    ('Supporting_Sites', 'supporting_sites'),
+                    ('Conflicting_Sites', 'conflicting_sites'), 
+                    ('Neutral_Sites', 'neutral_sites'),
+                    ('Site_Support_Ratio', 'support_ratio'),
+                    ('Weighted_Support_Ratio', 'weighted_support_ratio'),
+                    ('Sum_Supporting_Delta', 'sum_supporting_delta'),
+                    ('Sum_Conflicting_Delta', 'sum_conflicting_delta')
+                ]
+                
+                # Check which measures are available and add columns
+                available_measures = []
+                for short_name, primary_key, fallback_key in support_measures:
+                    has_measure = any(
+                        primary_key in d or (fallback_key and fallback_key in d) 
+                        for d in self.decay_indices.values()
+                    )
+                    if has_measure:
+                        fieldnames.append(short_name)
+                        available_measures.append((short_name, primary_key, fallback_key))
+                
+                # Check for site analysis measures
+                available_site_measures = []
+                for short_name, primary_key in site_analysis_measures:
+                    has_measure = any(
+                        primary_key in d for d in self.decay_indices.values()
+                    )
+                    if has_measure:
+                        fieldnames.append(short_name)
+                        available_site_measures.append((short_name, primary_key))
+                
+                # Add any remaining fields (legacy support)
+                all_keys = set()
+                for decay_data in self.decay_indices.values():
+                    all_keys.update(decay_data.keys())
+                
+                # Exclude internal/technical fields from CSV export
+                exclude_keys = {'clade_id', 'taxa_count', 'taxa', 'analysis_types', 
+                               'pars_decay', 'lnl_diff', 'bayes_decay', 'bootstrap_support', 'AU_pvalue',
+                               'site_data', 'supporting_sites', 'conflicting_sites', 'neutral_sites',
+                               'support_ratio', 'weighted_support_ratio', 'sum_supporting_delta', 
+                               'sum_conflicting_delta', 'significant_AU', 'constrained_lnl', 
+                               'bayes_constrained_ml', 'bayes_unconstrained_ml', 'pars_constrained_score',
+                               'pars_score', 'posterior_prob'}
+                
+                for key in sorted(all_keys):
+                    if key not in fieldnames and key not in exclude_keys:
+                        fieldnames.append(key)
+                
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                writer.writeheader()
+                
+                for clade_id, decay_data in self.decay_indices.items():
+                    row_data = {'clade_id': clade_id}
+                    taxa_list = decay_data.get('taxa', [])
+                    row_data['taxa_count'] = len(taxa_list)
+                    row_data['taxa'] = ', '.join(taxa_list)
+                    
+                    # Add support measures with proper names
+                    for short_name, primary_key, fallback_key in available_measures:
+                        value = decay_data.get(primary_key)
+                        if value is None and fallback_key:
+                            value = decay_data.get(fallback_key)
+                        row_data[short_name] = value if value is not None else 0
+                    
+                    # Add site analysis measures
+                    for short_name, primary_key in available_site_measures:
+                        value = decay_data.get(primary_key, 0)
+                        row_data[short_name] = value
+                    
+                    # Add any remaining fields
+                    for key in fieldnames[3 + len(available_measures) + len(available_site_measures):]:  # Skip all processed fields
+                        if key in decay_data:
+                            value = decay_data[key]
+                            if isinstance(value, list):
+                                value = ', '.join(map(str, value))
+                            row_data[key] = value
+                    writer.writerow(row_data)
+                
+            logger.info(f"Results exported to CSV: {output_file}")
+            
+        except Exception as e:
+            logger.error(f"Failed to export CSV: {e}")
+            raise Exception(f"CSV export failed: {e}")
 
 
 # --- Main Execution Logic ---

@@ -49,8 +49,144 @@ from .core.analysis_engine import panDecayIndices, AnalysisEngineError
 from .core.utils import get_display_path, print_runtime_parameters, build_effective_model_display
 
 
+def setup_output_structure(args, alignment_file: Path):
+    """
+    Set up unified output directory structure with shared basename.
+    
+    Args:
+        args: Parsed command line arguments
+        alignment_file: Path to input alignment file
+        
+    Returns:
+        Dict with output paths for all file types
+    """
+    # Determine basename
+    if args.project_name:
+        basename = args.project_name
+    else:
+        basename = alignment_file.stem
+    
+    # Determine output directory
+    if args.output_dir:
+        output_base = Path(args.output_dir)
+    else:
+        output_base = Path.cwd()
+    
+    # Create main results directory
+    results_dir = output_base / f"{basename}_pandecay_results"
+    results_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Create subdirectories
+    trees_dir = results_dir / "trees"
+    site_analysis_dir = results_dir / "site_analysis"
+    supplementary_dir = results_dir / "supplementary"
+    viz_dir = results_dir / "visualizations"
+    
+    trees_dir.mkdir(exist_ok=True)
+    site_analysis_dir.mkdir(exist_ok=True)
+    supplementary_dir.mkdir(exist_ok=True)
+    viz_dir.mkdir(exist_ok=True)
+    
+    # Define all output paths
+    output_paths = {
+        'basename': basename,
+        'results_dir': results_dir,
+        'trees_dir': trees_dir,
+        'site_analysis_dir': site_analysis_dir,
+        'supplementary_dir': supplementary_dir,
+        'viz_dir': viz_dir,
+        
+        # Main output files
+        'summary_txt': results_dir / f"{basename}_summary.txt",
+        'report_md': results_dir / f"{basename}_report.md",
+        'data_csv': results_dir / f"{basename}_data.csv",
+        
+        # Tree files
+        'tree_basic': trees_dir / f"{basename}.nwk",
+        'tree_comprehensive': trees_dir / f"{basename}_comprehensive.nwk",
+        'tree_pd': trees_dir / f"{basename}_pd.nwk",
+        'tree_ld': trees_dir / f"{basename}_ld.nwk",
+        'tree_bd': trees_dir / f"{basename}_bd.nwk",
+        'tree_bs': trees_dir / f"{basename}_bs.nwk",
+        'tree_au': trees_dir / f"{basename}_au.nwk",
+        
+        # Site analysis files
+        'site_likelihoods': site_analysis_dir / f"{basename}_site_likelihoods.csv",
+        'supporting_sites': site_analysis_dir / f"{basename}_supporting_sites.txt",
+        'conflicting_sites': site_analysis_dir / f"{basename}_conflicting_sites.txt",
+        'site_summary': site_analysis_dir / f"{basename}_site_summary.md",
+        
+        # Supplementary files
+        'summary_stats': supplementary_dir / f"{basename}_summary_stats.txt",
+        'analysis_config': supplementary_dir / f"{basename}_analysis_config.txt",
+        'analysis_log': supplementary_dir / f"{basename}_analysis.log",
+        
+        # Visualization files
+        'support_distribution': viz_dir / f"{basename}_support_distribution.png",
+        'support_correlation': viz_dir / f"{basename}_support_correlation.png",
+        'tree_support_viz': viz_dir / f"{basename}_tree_support.pdf"
+    }
+    
+    return output_paths
 
 
+def write_analysis_config(args, alignment_file: Path, config_output_path: Path):
+    """
+    Write comprehensive analysis configuration summary.
+    
+    Args:
+        args: Parsed command line arguments
+        alignment_file: Path to input alignment file
+        config_output_path: Path to configuration output file
+    """
+    import logging
+    config_logger = logging.getLogger(__name__)
+    
+    try:
+        with open(config_output_path, 'w') as f:
+            f.write("panDecay Analysis Configuration\n")
+            f.write("=" * 40 + "\n\n")
+            
+            # Input information
+            f.write("Input Information:\n")
+            f.write("-" * 20 + "\n")
+            f.write(f"Alignment file: {alignment_file}\n")
+            f.write(f"Alignment format: {args.format}\n")
+            f.write(f"Data type: {args.data_type}\n\n")
+            
+            # Analysis parameters
+            f.write("Analysis Parameters:\n")
+            f.write("-" * 20 + "\n")
+            f.write(f"Analysis mode: {args.analysis}\n")
+            f.write(f"Base model: {args.model}\n")
+            f.write(f"Gamma rate variation: {args.gamma}\n")
+            f.write(f"Invariable sites: {args.invariable}\n")
+            f.write(f"Threads: {args.threads}\n\n")
+            
+            # Output configuration
+            f.write("Output Configuration:\n")
+            f.write("-" * 20 + "\n")
+            f.write(f"Output directory: {args.output_dir or 'current directory'}\n")
+            f.write(f"Project name: {args.project_name or 'derived from alignment'}\n")
+            f.write(f"Site analysis: {args.site_analysis}\n")
+            f.write(f"Bootstrap analysis: {args.bootstrap}\n")
+            if args.bootstrap:
+                f.write(f"Bootstrap replicates: {args.bootstrap_reps}\n")
+            f.write(f"Visualization: {args.visualize}\n\n")
+            
+            # Tool paths
+            f.write("Tool Paths:\n")
+            f.write("-" * 20 + "\n")
+            f.write(f"PAUP* path: {args.paup}\n")
+            f.write(f"MrBayes path: {args.mrbayes_path}\n\n")
+            
+            import datetime
+            f.write(f"Configuration generated: {datetime.datetime.now()}\n")
+        
+        config_logger.debug(f"Analysis configuration written to {config_output_path}")
+    
+    except Exception as e:
+        config_logger.warning(f"Failed to write analysis configuration: {e}")
 
 
 def setup_argument_parser() -> argparse.ArgumentParser:
@@ -68,8 +204,10 @@ def setup_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--invariable", action="store_true", help="Add invariable sites (+I) to model.")
     
     parser.add_argument("--paup", default=DEFAULT_PAUP_PATH, help="Path to PAUP* executable.")
-    parser.add_argument("--output", default=DEFAULT_OUTPUT_FILE, help="Output file for summary results.")
-    parser.add_argument("--tree", default=DEFAULT_TREE_BASE, help="Base name for annotated tree files. Three trees will be generated with suffixes: _au.nwk (AU p-values), _delta_lnl.nwk (likelihood differences), and _combined.nwk (both values).")
+    parser.add_argument("--output-dir", help="Directory for output files (default: current directory). Creates {basename}_pandecay_results/ structure.")
+    parser.add_argument("--project-name", help="Project name for output files (default: derived from alignment filename).")
+    parser.add_argument("--output", default=DEFAULT_OUTPUT_FILE, help="[DEPRECATED] Use --output-dir and --project-name instead.")
+    parser.add_argument("--tree", default=DEFAULT_TREE_BASE, help="[DEPRECATED] Tree naming now uses project name. Multiple trees with support measures (PD, LD, BD, BS, AU) will be generated.")
     parser.add_argument("--site-analysis", action="store_true", help="Perform site-specific likelihood analysis to identify supporting/conflicting sites for each branch.")
     parser.add_argument("--data-type", default=DEFAULT_DATA_TYPE, choices=["dna", "protein", "discrete"], help="Type of sequence data.")
     
@@ -220,8 +358,12 @@ def run_analysis(args: argparse.Namespace, effective_model_str: str, paup_block_
     logger = logging.getLogger(__name__)
     
     # Convert string paths to Path objects
+    alignment_file_path = Path(args.alignment)
     temp_dir_path = Path(args.temp) if args.temp else None
     starting_tree_path = Path(args.starting_tree) if args.starting_tree else None
+    
+    # Set up unified output structure
+    output_paths = setup_output_structure(args, alignment_file_path)
     
     # Create panDecayIndices instance
     decay_calc = panDecayIndices(
@@ -290,35 +432,34 @@ def run_analysis(args: argparse.Namespace, effective_model_str: str, paup_block_
         if hasattr(decay_calc, 'decay_indices') and decay_calc.decay_indices:
             for clade_id, data in decay_calc.decay_indices.items():
                 if 'site_data' in data:
-                    site_output_dir = Path(args.output).parent / f"{Path(args.output).stem}_site_analysis"
-                    decay_calc.write_site_analysis_results(site_output_dir)
-                    logger.info(f"Site-specific analysis results written to {get_display_path(site_output_dir)}")
+                    decay_calc.write_site_analysis_results(output_paths['site_analysis_dir'])
+                    logger.info(f"Site-specific analysis results written to {get_display_path(output_paths['site_analysis_dir'])}")
                     break
         
-        # Write main results
-        output_main_path = Path(args.output)
-        decay_calc.write_formatted_results(output_main_path)
+        # Write main results using new structure
+        decay_calc.write_formatted_results(output_paths['summary_txt'])
+        logger.info(f"Summary results written to {get_display_path(output_paths['summary_txt'])}")
         
         # Generate detailed report
-        report_path = output_main_path.with_suffix(".md")
-        decay_calc.generate_detailed_report(report_path)
+        decay_calc.generate_detailed_report(output_paths['report_md'])
+        logger.info(f"Detailed report written to {get_display_path(output_paths['report_md'])}")
         
-        # Create annotated trees
-        output_dir = output_main_path.resolve().parent
-        tree_base_name = args.tree
-        tree_files = decay_calc.annotate_trees(output_dir, tree_base_name)
+        # Create annotated trees with new comprehensive system
+        tree_files = decay_calc.annotate_trees(output_paths['trees_dir'], output_paths['basename'])
+        
+        # Export CSV data
+        decay_calc.export_results_csv(output_paths['data_csv'])
+        logger.info(f"CSV data exported to {get_display_path(output_paths['data_csv'])}")
         
         if tree_files:
-            logger.info(f"Successfully created {len(tree_files)} annotated trees.")
+            logger.info(f"Successfully created {len(tree_files)} annotated trees in {get_display_path(output_paths['trees_dir'])}.")
             for tree_type, path in tree_files.items():
-                logger.info(f"  - {tree_type} tree: {get_display_path(path)}")
+                logger.info(f"  - {tree_type}: {path.name}")
         else:
             logger.warning("Failed to create annotated trees.")
         
         # Handle visualization
         if args.visualize:
-            viz_out_dir = output_main_path.resolve().parent
-            viz_base_name = output_main_path.stem
             viz_kwargs = {'width': 10, 'height': 6, 'format': args.viz_format}
             
             # Check for visualization libraries
@@ -329,17 +470,27 @@ def run_analysis(args: argparse.Namespace, effective_model_str: str, paup_block_
                 args.visualize = False
             
             if args.visualize:
+                # Create support distribution plot
                 decay_calc.visualize_support_distribution(
-                    viz_out_dir / f"{viz_base_name}_dist_{args.annotation}.{args.viz_format}",
+                    output_paths['support_distribution'],
                     value_type=args.annotation, **viz_kwargs)
-            
-            if args.site_analysis:
-                if args.visualize:
-                    decay_calc.viz_format = args.viz_format
+                logger.info(f"Support distribution plot saved to {get_display_path(output_paths['support_distribution'])}")
                 
-                site_output_dir = output_main_path.parent / f"{output_main_path.stem}_site_analysis"
-                decay_calc.write_site_analysis_results(site_output_dir)
-                logger.info(f"Site-specific analysis results written to {get_display_path(site_output_dir)}")
+                # Create support correlation plot if multiple support measures available
+                decay_calc.visualize_support_correlation(
+                    output_paths['support_correlation'],
+                    **viz_kwargs)
+                logger.info(f"Support correlation plot saved to {get_display_path(output_paths['support_correlation'])}")
+        
+        # Write configuration summary
+        write_analysis_config(args, alignment_file_path, output_paths['analysis_config'])
+        
+        # Summary message
+        logger.info(f"\nAll results saved to: {get_display_path(output_paths['results_dir'])}")
+        logger.info(f"Main results: {output_paths['summary_txt'].name}")
+        logger.info(f"Detailed report: {output_paths['report_md'].name}")
+        logger.info(f"CSV data: {output_paths['data_csv'].name}")
+        logger.info(f"Trees directory: {output_paths['trees_dir'].name}/")
         
         # Cleanup
         decay_calc.cleanup_intermediate_files()

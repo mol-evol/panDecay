@@ -29,6 +29,8 @@ venv/
 ENV/
 env/
 .venv
+pandecay_venv/
+*_venv/
 
 # IDE files
 .vscode/
@@ -71,6 +73,7 @@ my_paup_commands.txt
 # Original/backup files
 original.*
 *.bak
+*.backup
 *_old.*
 README_old.md
 
@@ -92,5 +95,6 @@ Paper/
 # Old code directory (private)
 MLDecay/
 
-# Documentation files (private)
-CLAUDE.md
+# Analysis result directories
+*_pandecay_results/
+*_site_analysis/

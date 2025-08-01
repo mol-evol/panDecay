@@ -138,6 +138,8 @@ def parse_config(config_file: Union[str, Path], args: argparse.Namespace) -> arg
                 'max_psrf': 'max_psrf',
                 'max_asdsf': 'max_asdsf',
                 'convergence_strict': 'convergence_strict',
+                'mrbayes_parse_timeout': 'mrbayes_parse_timeout',
+                'output_style': 'output_style',
             }
             
             # Process each parameter
@@ -158,7 +160,7 @@ def parse_config(config_file: Union[str, Path], args: argparse.Namespace) -> arg
                                      'visualize', 'check_convergence', 'convergence_strict']:
                         value = str_to_bool(value)
                     elif arg_param in ['gamma_shape', 'prop_invar', 'bayes_burnin', 'ss_alpha', 
-                                       'max_psrf', 'max_asdsf']:
+                                       'max_psrf', 'max_asdsf', 'mrbayes_parse_timeout']:
                         value = float(value)
                     elif arg_param in ['nst', 'threads', 'bootstrap_reps', 'bayes_ngen', 
                                        'bayes_chains', 'bayes_sample_freq', 'ss_nsteps', 

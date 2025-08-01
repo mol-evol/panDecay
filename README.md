@@ -143,12 +143,21 @@ panDecay can perform Bayesian analyses using:
 *   Robust error handling and recovery
 
 ### User Interface Features
-*   **Improved Progress Display**: Clear, consistent progress tracking across all analysis types
-    *   Format: "Testing clade X (Y of Z) • N taxa" 
-    *   Shows current test number vs. total testable branches for accurate progress tracking
-    *   Consistent progress boxes with simple dashed formatting for better terminal compatibility
-*   **Clean Output**: Reduced verbose output with important information highlighted
-*   **Relative Path Display**: Shows shortened paths in output messages for better readability
+*   **Professional Runtime Banner**: Clean, professional parameter display at startup
+    *   Fixed 80-character width for consistent appearance
+    *   Organized sections (Analysis Configuration, Runtime Settings, Bayesian Parameters, etc.)
+    *   Includes software citation: "McInerney, J.O. (2025) panDecay: Phylogenetic Analysis with Decay Indices"
+    *   No jagged edges or complex table formatting
+*   **Enhanced Progress Display**: Clean, non-verbose progress tracking
+    *   Unicode spinner animations with dynamic updates
+    *   Consolidated messaging without repetitive output
+    *   Progress indicators that overwrite cleanly
+*   **Comprehensive Output Reports**: Enhanced markdown reports with complete analysis summaries
+    *   Embedded site analysis summary tables
+    *   Integrated parsimony analysis statistics  
+    *   PNG visualization embedding with relative links
+    *   Complete file navigation and cross-references
+*   **Clean Console Output**: Minimal, professional terminal output
 *   **Informative Error Messages**: Clear error reporting with helpful troubleshooting suggestions
 
 ## Installation
