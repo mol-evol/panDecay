@@ -199,41 +199,17 @@ def pytest_collection_modifyitems(config, items):
 @pytest.fixture
 def mock_analysis_result():
     """Create a mock analysis result for testing."""
-    from src.analysis.engines.base_engine import AnalysisResult
-    
-    return AnalysisResult(
-        analysis_type="test",
-        success=True,
-        branches_tested=3,
-        decay_indices={
+    return {
+        'analysis_type': "test",
+        'success': True,
+        'branches_tested': 3,
+        'decay_indices': {
             'group1': {'taxa': ['seq1', 'seq2', 'seq3'], 'decay_value': 0.5},
             'group2': {'taxa': ['seq4', 'seq5', 'seq6'], 'decay_value': 0.8}
         },
-        execution_time=5.0,
-        metadata={'test_run': True}
-    )
-
-
-@pytest.fixture
-def mock_orchestration_result():
-    """Create a mock orchestration result for testing."""
-    from src.orchestration.analysis_orchestrator import OrchestrationResult
-    from src.analysis.engines.base_engine import AnalysisResult
-    
-    ml_result = AnalysisResult(
-        analysis_type="ml",
-        success=True,
-        branches_tested=2,
-        decay_indices={'group1': {'decay_value': 0.5}},
-        execution_time=3.0
-    )
-    
-    return OrchestrationResult(
-        success=True,
-        total_execution_time=10.0,
-        analysis_results={'ml': ml_result},
-        metadata={'successful_analyses': ['ml']}
-    )
+        'execution_time': 5.0,
+        'metadata': {'test_run': True}
+    }
 
 
 class TestHelpers:

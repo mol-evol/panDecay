@@ -98,3 +98,9 @@ MLDecay/
 # Analysis result directories
 *_pandecay_results/
 *_site_analysis/
+*_results/
+
+# Additional Python artifacts
+*.pyc
+*.pyo
+.pytest_cache/

@@ -2,12 +2,10 @@
 """
 panDecay - Phylogenetic Decay Indices Calculator
 
-A modular implementation of phylogenetic decay indices (Bremer support) 
+A comprehensive implementation of phylogenetic decay indices (Bremer support) 
 using Maximum Likelihood, Bayesian, and Parsimony approaches.
 
-This is the main entry point that preserves the exact same command-line
-interface as the original monolithic version while using the new modular
-architecture.
+This is the main entry point for the panDecay analysis system.
 """
 
 import sys

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Main entry point for panDecay modular system.
+Main entry point for panDecay analysis system.
 
-This module provides the same command-line interface as the original
-monolithic version while using the modular components.
+This module provides comprehensive phylogenetic decay analysis
+using the integrated panDecayIndices class.
 """
 
 import sys

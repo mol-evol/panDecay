@@ -1,4 +1,4 @@
-"""panDecay modular implementation."""
+"""panDecay phylogenetic decay analysis system."""
 
 from .core.constants import VERSION
 
