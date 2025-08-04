@@ -2,19 +2,34 @@
 """
 panDecay - Phylogenetic Decay Indices Calculator
 
-A comprehensive implementation of phylogenetic decay indices (Bremer support) 
-using Maximum Likelihood, Bayesian, and Parsimony approaches.
+DEPRECATION WARNING: This script is deprecated. Please use the new package installation:
 
-This is the main entry point for the panDecay analysis system.
+    pip install pandecay
+    pandecay [arguments...]
+
+This wrapper is provided for backward compatibility and will be removed in a future version.
 """
 
 import sys
+import warnings
 from pathlib import Path
 
-# Add the src directory to the Python path
-sys.path.insert(0, str(Path(__file__).parent / "src"))
+# Show deprecation warning
+warnings.warn(
+    "panDecay.py is deprecated. Please install with 'pip install pandecay' and use 'pandecay' command instead.",
+    DeprecationWarning,
+    stacklevel=2
+)
 
-from src.main import main
+# Add the current directory to Python path for package import
+sys.path.insert(0, str(Path(__file__).parent))
 
-if __name__ == "__main__":
-    main()
+try:
+    from pandecay.cli import main
+    if __name__ == "__main__":
+        main()
+except ImportError as e:
+    print("Error: Could not import pandecay package.", file=sys.stderr)
+    print("Please install pandecay with: pip install pandecay", file=sys.stderr)
+    print(f"Import error: {e}", file=sys.stderr)
+    sys.exit(1)

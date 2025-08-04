@@ -12,7 +12,7 @@ import logging
 from pathlib import Path
 from typing import Union
 
-from .core.constants import (
+from pandecay.core.constants import (
     VERSION,
     DEFAULT_ALIGNMENT_FORMAT,
     DEFAULT_MODEL,
@@ -44,9 +44,9 @@ from .core.constants import (
     DEFAULT_OUTPUT_STYLE,
     DEFAULT_CONSTRAINT_MODE
 )
-from .core.configuration import generate_config_template, parse_config, ConfigurationError
-from .core.analysis_engine import panDecayIndices, AnalysisEngineError
-from .core.utils import get_display_path, print_runtime_parameters, build_effective_model_display
+from pandecay.core.configuration import generate_config_template, parse_config, ConfigurationError
+from pandecay.core.analysis_engine import panDecayIndices, AnalysisEngineError
+from pandecay.core.utils import get_display_path, print_runtime_parameters, build_effective_model_display
 
 
 def setup_output_structure(args, alignment_file: Path):
@@ -539,7 +539,7 @@ def main():
     # Read PAUP block if specified
     paup_block_content = None
     if args.paup_block:
-        from .core.configuration import read_paup_block
+        from pandecay.core.configuration import read_paup_block
         pbf_path = Path(args.paup_block)
         logger.info(f"Reading PAUP block from: {pbf_path}")
         try:

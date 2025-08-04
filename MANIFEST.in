@@ -1,0 +1,32 @@
+# Include documentation files
+include README.md
+include LICENSE
+include CHANGELOG.md
+include OUTPUT_GUIDE.md
+
+# Include configuration and requirements
+include requirements.txt
+include pyproject.toml
+include setup.py
+
+# Include example data files
+recursive-include examples *.fas *.nex *.phy *.txt
+
+# Include documentation images
+recursive-include images *.png *.jpg *.jpeg *.gif *.svg
+
+# Include API documentation
+recursive-include docs *.md
+
+# Exclude development and private files
+exclude activeContext.md
+exclude progress.md
+exclude pytest.ini
+exclude REPOSITORY_CLEANUP.md
+exclude INTERPRETATION_GUIDE.md
+recursive-exclude dev *
+recursive-exclude tests *
+global-exclude __pycache__
+global-exclude *.py[cod]
+global-exclude .DS_Store
+global-exclude *.so

@@ -180,52 +180,44 @@ panDecay requires Python 3.8 or higher and has several dependencies that can be 
 
 ### Installing panDecay
 
+#### Option 1: Install from PyPI (Recommended)
+```bash
+pip install pandecay
+```
+
+#### Option 2: Install from GitHub (Latest Development Version)
+```bash
+pip install git+https://github.com/mol-evol/panDecay.git
+```
+
+#### Option 3: Development Installation
+For developers or if you want to modify the code:
+
 1. **Clone the Repository:**
    ```bash
    git clone https://github.com/mol-evol/panDecay.git
    cd panDecay
    ```
 
-2. **Install Dependencies:**
+2. **Install in Development Mode:**
    ```bash
-   pip install -r requirements.txt
+   pip install -e .
    ```
 
-3. **Make the script executable (optional, for convenience):**
-   ```bash
-   chmod +x panDecay.py
-   ```
-
-4. You can then run the script directly:
-   ```bash
-   ./panDecay.py [arguments...]
-   ```
-   or using the python interpreter:
-   ```bash
-   python3 panDecay.py [arguments...]
-   ```
-
-5. **Optional: Make panDecay available system-wide**
-   
-   Consider adding the panDecay directory to your system's PATH or creating a symbolic link to `panDecay.py` in a directory that is already in your PATH (e.g., `~/.local/bin/` or `/usr/local/bin/`).
-
-   For example, to create a symbolic link:
-   ```bash
-   ln -s $(pwd)/panDecay.py ~/.local/bin/mldecay
-   ```
+This installs panDecay in "editable" mode, so changes to the source code are immediately available.
 
 ## Usage
 
 ### Basic Command
 
 ```bash
-python3 panDecay.py <alignment_file> --model <model_name> [options...]
+pandecay <alignment_file> --model <model_name> [options...]
 ```
 
 ### Command-Line Arguments
 
 ```
-usage: panDecay.py [-h] [--format FORMAT] [--model MODEL] [--gamma] [--invariable] [--paup PAUP] [--output OUTPUT] [--tree TREE]
+usage: pandecay [-h] [--format FORMAT] [--model MODEL] [--gamma] [--invariable] [--paup PAUP] [--output OUTPUT] [--tree TREE]
                   [--data-type {dna,protein,discrete}] [--gamma-shape GAMMA_SHAPE] [--prop-invar PROP_INVAR] 
                   [--base-freq {equal,estimate,empirical}] [--rates {equal,gamma}] [--protein-model PROTEIN_MODEL] 
                   [--nst {1,2,6}] [--parsmodel | --no-parsmodel] [--threads THREADS] [--starting-tree STARTING_TREE] 
@@ -573,7 +565,7 @@ Let [alignment.fas](./alignment.fas) be a FASTA DNA alignment, [proteins.phy](./
 Analyze a DNA alignment with GTR+G+I model, automatically estimating parameters.
 
 ```bash
-python3 panDecay.py alignment.fas --model GTR --gamma --invariable --data-type dna \
+pandecay alignment.fas --model GTR --gamma --invariable --data-type dna \
     --output dna_decay.txt --tree dna_annotated
 ```
 
@@ -581,7 +573,7 @@ python3 panDecay.py alignment.fas --model GTR --gamma --invariable --data-type d
 Calculate traditional Bremer support values using parsimony analysis.
 
 ```bash
-python3 panDecay.py alignment.fas --analysis parsimony \
+pandecay alignment.fas --analysis parsimony \
     --output parsimony_bremer.txt --tree parsimony_annotated
 ```
 
@@ -589,7 +581,7 @@ python3 panDecay.py alignment.fas --analysis parsimony \
 Analyze a protein alignment using the WAG model, fixed gamma shape, and estimating proportion of invariable sites.
 
 ```bash
-python3 panDecay.py proteins.phy --format phylip --data-type protein \
+pandecay proteins.phy --format phylip --data-type protein \
     --protein-model WAG --gamma --gamma-shape 0.85 --invariable \
     --output protein_decay.txt --tree protein_annotated --threads 8
 ```
@@ -598,7 +590,7 @@ python3 panDecay.py proteins.phy --format phylip --data-type protein \
 Analyze a binary (0/1) discrete morphological dataset (e.g., in NEXUS format `morpho.nex`) using the Mk+G model.
 
 ```bash
-python3 panDecay.py morpho.nex --format nexus --data-type discrete \
+pandecay morpho.nex --format nexus --data-type discrete \
     --model Mk --gamma \
     --output morpho_decay.txt --tree morpho_annotated
 ```
@@ -608,7 +600,7 @@ python3 panDecay.py morpho.nex --format nexus --data-type discrete \
 Perform a GTR+G analysis, but provide PAUP* with a starting tree to potentially speed up or refine the initial ML search.
 
 ```bash
-python3 panDecay.py alignment.fas --model GTR --gamma \
+pandecay alignment.fas --model GTR --gamma \
     --starting-tree my_start_tree.nwk \
     --output results_with_start_tree.txt
 ```
@@ -621,7 +613,7 @@ hsearch nreps=50 swap=tbr addseq=random hold=1 multrees=yes;
 ```
 Then run:
 ```bash
-python3 panDecay.py alignment.fas --paup-block my_paup_commands.txt \
+pandecay alignment.fas --paup-block my_paup_commands.txt \
     --output results_custom_block.txt
 ```
 *(panDecay will still handle the constraint generation and AU test logic around your block.)*
@@ -630,7 +622,7 @@ python3 panDecay.py alignment.fas --paup-block my_paup_commands.txt \
 Analyze which sites in the alignment support or conflict with each clade:
 
 ```bash
-python3 panDecay.py alignment.fas --model GTR --gamma --site-analysis --visualize \
+pandecay alignment.fas --model GTR --gamma --site-analysis --visualize \
     --output site_analysis_results.txt
 ```
 
@@ -640,14 +632,14 @@ This will generate site-specific likelihood analyses in addition to the standard
 Perform bootstrap analysis (100 replicates by default) alongside ML decay indices:
 
 ```bash
-python3 panDecay.py alignment.fas --model GTR --gamma --bootstrap \
+pandecay alignment.fas --model GTR --gamma --bootstrap \
     --output with_bootstrap.txt
 ```
 
 For more bootstrap replicates:
 
 ```bash
-python3 panDecay.py alignment.fas --model GTR --gamma --bootstrap --bootstrap-reps 500 \
+pandecay alignment.fas --model GTR --gamma --bootstrap --bootstrap-reps 500 \
     --output bootstrap500.txt
 ```
 
@@ -657,7 +649,7 @@ This will produce additional tree files with bootstrap values and a comprehensiv
 Perform only Bayesian decay analysis using MrBayes:
 
 ```bash
-python3 panDecay.py alignment.fas --analysis bayesian --bayesian-software mrbayes \
+pandecay alignment.fas --analysis bayesian --bayesian-software mrbayes \
     --bayes-model GTR --bayes-ngen 500000 --output bayesian_only.txt
 ```
 
@@ -665,7 +657,7 @@ python3 panDecay.py alignment.fas --analysis bayesian --bayesian-software mrbaye
 Run both ML and Bayesian analyses:
 
 ```bash
-python3 panDecay.py alignment.fas --model GTR --gamma --analysis ml+bayesian --bayesian-software mrbayes \
+pandecay alignment.fas --model GTR --gamma --analysis ml+bayesian --bayesian-software mrbayes \
     --bayes-ngen 1000000 --output combined_analysis.txt
 ```
 
@@ -673,7 +665,7 @@ python3 panDecay.py alignment.fas --model GTR --gamma --analysis ml+bayesian --b
 Run both ML and parsimony analyses to compare modern and traditional support values:
 
 ```bash
-python3 panDecay.py alignment.fas --model GTR --gamma --analysis ml+parsimony \
+pandecay alignment.fas --model GTR --gamma --analysis ml+parsimony \
     --output ml_parsimony_analysis.txt
 ```
 
@@ -681,7 +673,7 @@ python3 panDecay.py alignment.fas --model GTR --gamma --analysis ml+parsimony \
 Run ML, Bayesian, and parsimony analyses in a single run:
 
 ```bash
-python3 panDecay.py alignment.fas --model GTR --gamma --analysis all \
+pandecay alignment.fas --model GTR --gamma --analysis all \
     --bayesian-software mrbayes --bayes-ngen 1000000 --output complete_analysis.txt
 ```
 
@@ -689,7 +681,7 @@ python3 panDecay.py alignment.fas --model GTR --gamma --analysis all \
 If you have MPI-enabled MrBayes installed:
 
 ```bash
-python3 panDecay.py alignment.fas --analysis bayesian --bayesian-software mrbayes --use-mpi \
+pandecay alignment.fas --analysis bayesian --bayesian-software mrbayes --use-mpi \
     --mpi-processors 8 --bayes-chains 4 --bayes-ngen 2000000
 ```
 
@@ -699,14 +691,14 @@ This runs 4 chains across 8 processors (2 chains per processor for better mixing
 If MrBayes is compiled with BEAGLE support:
 
 ```bash
-python3 panDecay.py alignment.fas --analysis ml+bayesian --bayesian-software mrbayes --use-beagle \
+pandecay alignment.fas --analysis ml+bayesian --bayesian-software mrbayes --use-beagle \
     --beagle-device gpu --beagle-precision single --bayes-ngen 5000000
 ```
 
 For CPU-based BEAGLE acceleration:
 
 ```bash
-python3 panDecay.py alignment.fas --analysis ml+bayesian --bayesian-software mrbayes --use-beagle \
+pandecay alignment.fas --analysis ml+bayesian --bayesian-software mrbayes --use-beagle \
     --beagle-device cpu --beagle-precision double
 ```
 
@@ -714,7 +706,7 @@ python3 panDecay.py alignment.fas --analysis ml+bayesian --bayesian-software mrb
 For maximum performance with both MPI and BEAGLE:
 
 ```bash
-python3 panDecay.py large_alignment.fas --analysis bayesian --bayesian-software mrbayes \
+pandecay large_alignment.fas --analysis bayesian --bayesian-software mrbayes \
     --use-mpi --mpi-processors 16 --use-beagle --beagle-device gpu \
     --bayes-chains 4 --bayes-ngen 10000000 --bayes-sample-freq 5000
 ```
@@ -743,7 +735,7 @@ make && sudo make install
 For a quick test with minimal MCMC generations:
 
 ```bash
-python3 panDecay.py alignment.fas --analysis ml+bayesian --bayesian-software mrbayes \
+pandecay alignment.fas --analysis ml+bayesian --bayesian-software mrbayes \
     --bayes-ngen 10000 --bayes-sample-freq 100 \
     --output quick_test.txt
 ```
@@ -753,13 +745,13 @@ Generate a template configuration file and use it for analysis:
 
 ```bash
 # Generate template
-python3 panDecay.py --generate-config my_analysis.ini
+pandecay --generate-config my_analysis.ini
 
 # Edit my_analysis.ini with your parameters, then run:
-python3 panDecay.py --config my_analysis.ini
+pandecay --config my_analysis.ini
 
 # Override config file settings with command-line arguments
-python3 panDecay.py --config my_analysis.ini --threads 16 --output different_output.txt
+pandecay --config my_analysis.ini --threads 16 --output different_output.txt
 ```
 
 ### Example 18: Testing Specific Branches
@@ -767,19 +759,19 @@ Test only specific clades of interest:
 
 ```bash
 # Test only clades containing specific taxa (semicolon-separated)
-python3 panDecay.py alignment.fas --constraint-mode specific \
+pandecay alignment.fas --constraint-mode specific \
     --test-branches "Homo_sapiens,Pan_troglodytes;Mus_musculus,Rattus_norvegicus"
 
 # Test specific branch IDs from a previous analysis
-python3 panDecay.py alignment.fas --constraint-mode specific \
+pandecay alignment.fas --constraint-mode specific \
     --test-branches "1,3,5,7"
 
 # Read constraints from a file
-python3 panDecay.py alignment.fas --constraint-mode specific \
+pandecay alignment.fas --constraint-mode specific \
     --test-branches "@my_constraints.txt"
 
 # Test all branches EXCEPT specified ones
-python3 panDecay.py alignment.fas --constraint-mode exclude \
+pandecay alignment.fas --constraint-mode exclude \
     --test-branches "Drosophila_melanogaster,Anopheles_gambiae"
 ```
 
@@ -802,7 +794,7 @@ birds = Gallus_gallus,Taeniopygia_guttata
 
 Then run:
 ```bash
-python3 panDecay.py --config my_analysis.ini
+pandecay --config my_analysis.ini
 ```
 
 ## Interpreting Results

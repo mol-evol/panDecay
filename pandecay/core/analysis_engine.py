@@ -22,7 +22,7 @@ import time
 import datetime
 from pathlib import Path
 
-from .utils import ProgressIndicator, OverwritingProgress
+from pandecay.core.utils import ProgressIndicator, OverwritingProgress
 
 
 class AnalysisEngineError(Exception):
@@ -33,7 +33,7 @@ class AnalysisEngineError(Exception):
 class ExternalToolError(AnalysisEngineError):
     """Exception for external tool execution errors."""
     pass
-from .constants import (
+from pandecay.core.constants import (
     VERSION,
     NEXUS_ALIGNMENT_FN,
     ML_TREE_FN,

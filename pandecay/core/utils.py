@@ -10,7 +10,7 @@ import re
 from pathlib import Path
 from typing import Union
 
-from .constants import VERSION
+from pandecay.core.constants import VERSION
 
 
 def get_display_path(path: Union[str, Path]) -> str:
