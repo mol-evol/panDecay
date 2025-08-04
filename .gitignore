@@ -113,3 +113,10 @@ REPOSITORY_CLEANUP.md
 INTERPRETATION_GUIDE.md
 dev/
 tests/
+
+# PyPI publishing files
+.pypirc_template
+publish.sh
+dist/
+build/
+*.egg-info/
