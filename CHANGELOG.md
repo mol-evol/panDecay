@@ -12,14 +12,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **PyPI Support**: Ready for publication on Python Package Index
 - **Modern Packaging**: Uses pyproject.toml and PEP 518 standards
 - **Entry Point**: Global `pandecay` command after pip installation
-- **Backward Compatibility**: Deprecation wrapper for existing `panDecay.py` users
 
 ### Changed
 - **Package Structure**: Renamed `src/` → `pandecay/` (standard Python naming)
 - **CLI Module**: Renamed `main.py` → `cli.py` for clarity 
 - **Import System**: Updated to absolute imports for better packaging
 - **Installation Method**: Now supports `pip install pandecay`
-- **Command Usage**: New command `pandecay` instead of `python3 panDecay.py`
+- **Command Usage**: New command `pandecay` replaces previous script usage
 - **Documentation**: Updated README with pip installation instructions
 
 ### Technical
@@ -30,10 +29,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Entry Points**: Console script configuration for global command
 
 ### Migration
-- **Old Usage**: `python3 panDecay.py alignment.fas --model GTR` (still works with warning)
-- **New Usage**: `pandecay alignment.fas --model GTR` (recommended)
+- **New Usage**: `pandecay alignment.fas --model GTR`
 - **Installation**: `pip install pandecay` instead of manual clone and setup
-- **No Breaking Changes**: All CLI arguments and functionality identical
+- **Breaking Change**: Previous script-based usage no longer supported
 
 ### Package Info
 - **Name**: `pandecay` (lowercase, PyPI standard)

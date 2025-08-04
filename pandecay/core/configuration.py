@@ -44,7 +44,7 @@ def generate_config_template(filepath: Union[str, Path]) -> None:
             f.write(template)
         logger.info(f"Template configuration file generated: {filepath}")
         logger.info("Edit this file with your parameters and run:")
-        logger.info(f"  python panDecay.py --config {filepath}")
+        logger.info(f"  pandecay --config {filepath}")
     except Exception as e:
         msg = f"Failed to generate config template: {e}"
         logger.error(msg)
