@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=45", "wheel", "setuptools_scm[toml]>=6.2"]
+requires = ["setuptools>=45", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "pandecay"
-dynamic = ["version"]
+version = "1.1.0"
 description = "Phylogenetic Analysis using Decay Indices"
 readme = "README.md"
 license = {file = "LICENSE"}
@@ -68,5 +68,3 @@ include-package-data = true
 [tool.setuptools.package-data]
 pandecay = ["examples/data/*", "examples/*", "images/*"]
 
-[tool.setuptools.dynamic]
-version = {attr = "pandecay.__version__"}

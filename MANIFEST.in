@@ -24,6 +24,7 @@ exclude progress.md
 exclude pytest.ini
 exclude REPOSITORY_CLEANUP.md
 exclude INTERPRETATION_GUIDE.md
+exclude panDecay.py
 recursive-exclude dev *
 recursive-exclude tests *
 global-exclude __pycache__

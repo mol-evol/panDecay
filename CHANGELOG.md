@@ -5,67 +5,55 @@ All notable changes to panDecay will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-
-### Removed
-- **HTML tree visualization functionality**
-  - Removed all HTML-based interactive tree visualization code (~600 lines)
-  - HTML visualization was causing persistent browser compatibility and CORS issues
-  - Users should use dedicated tree visualization software (e.g., FigTree) with the generated Newick files
-
-### Fixed
-- **MrBayes compatibility**
-  - Fixed "Could not find command 'options'" error by filtering PAUP*-specific commands from NEXUS files
-  - MrBayes now properly processes NEXUS files that contain PAUP* options blocks
-- **Program hanging issues**
-  - Fixed redundant NEXUS-to-NEXUS conversion that was causing >1000% CPU usage
-  - Resolved multiple PAUP* processes spawning issue
-- **Documentation accuracy**
-  - Updated Bayesian analysis default from harmonic mean to stepping-stone sampling
-  - Added missing command-line arguments (MPI, BEAGLE, visualization options)
-  - Fixed duplicate default values in help text
-  - Added annotated tree visualization example
-
-### Changed
-- **Bayesian decay interpretation guidance**
-  - Removed arbitrary cutoff values (0-2, 2-5, 5-10, >10)
-  - Now emphasizes comparative interpretation across branches
-  - Recommends evaluating BD values alongside other support metrics
-  - Notes that BD values may scale with alignment properties
-- **Documentation improvements**
-  - Added visual examples including annotated tree and site-specific analysis plots
-  - Updated tree format documentation to match actual FigTree output
-  - Clarified that strong support is best identified through concordance across multiple metrics
-
-## [1.1.0] - 2025-06-29
+## [1.1.0] - 2025-08-04
 
 ### Added
-- Configuration file support (INI format) for reproducible analyses
-  - `--config` option to read parameters from configuration file
-  - `--generate-config` option to create a fully-commented template
-  - Command-line arguments override configuration file values
-- Selective branch testing functionality
-  - `--constraint-mode` option with three modes: all, specific, exclude
-  - `--test-branches` option to specify branches via taxa lists, branch IDs, or file
-  - `--constraint-file` option for external constraint definitions
-  - Support for constraints in configuration file `[constraints]` section
-- Enhanced documentation with new examples for configuration files and constraint usage
+- **Professional Python Package**: Complete conversion to installable pip package
+- **PyPI Support**: Ready for publication on Python Package Index
+- **Modern Packaging**: Uses pyproject.toml and PEP 518 standards
+- **Entry Point**: Global `pandecay` command after pip installation
+- **Backward Compatibility**: Deprecation wrapper for existing `panDecay.py` users
 
 ### Changed
-- Updated version to 1.1.0
-- Modified branch processing logic in ML, Bayesian, and parsimony analyses to respect constraint settings
-- Made alignment argument optional when using configuration file
+- **Package Structure**: Renamed `src/` → `pandecay/` (standard Python naming)
+- **CLI Module**: Renamed `main.py` → `cli.py` for clarity 
+- **Import System**: Updated to absolute imports for better packaging
+- **Installation Method**: Now supports `pip install pandecay`
+- **Command Usage**: New command `pandecay` instead of `python3 panDecay.py`
+- **Documentation**: Updated README with pip installation instructions
 
-### Fixed
-- Improved error handling for missing constraints in "specific" mode
+### Technical
+- **Build System**: setuptools with pyproject.toml configuration
+- **Dependencies**: Managed through requirements.txt and project metadata
+- **Distribution**: Source distribution (sdist) and wheel formats
+- **Manifest**: MANIFEST.in for proper file inclusion/exclusion
+- **Entry Points**: Console script configuration for global command
 
-## [1.0.3] - Previous release
+### Migration
+- **Old Usage**: `python3 panDecay.py alignment.fas --model GTR` (still works with warning)
+- **New Usage**: `pandecay alignment.fas --model GTR` (recommended)
+- **Installation**: `pip install pandecay` instead of manual clone and setup
+- **No Breaking Changes**: All CLI arguments and functionality identical
+
+### Package Info
+- **Name**: `pandecay` (lowercase, PyPI standard)
+- **Version**: 1.1.0
+- **Python**: Requires Python ≥3.8
+- **License**: MIT
+- **Author**: James McInerney
+
+## [1.0.0] - Previous Releases
 
 ### Features
-- ML-based phylogenetic decay indices calculation
-- Bayesian decay indices with MrBayes support
-- Traditional parsimony Bremer support calculation
+- ML-based phylogenetic decay indices
+- Bayesian decay analysis with MrBayes integration  
+- Traditional parsimony Bremer support
+- Approximately Unbiased (AU) test implementation
 - Site-specific likelihood analysis
-- Bootstrap support integration
-- Visualization capabilities
-- MPI and BEAGLE support for Bayesian analyses
+- Bootstrap support analysis
+- Multiple analysis modes (ML, Bayesian, Parsimony, combined)
+- Comprehensive output formats (text, trees, markdown reports)
+- Visualization support (matplotlib/seaborn)
+- Configuration file support
+- Advanced MrBayes features (MPI, BEAGLE, convergence checking)
+- DNA, protein, and discrete morphological data support
