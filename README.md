@@ -71,14 +71,13 @@ panDecay now supports Bayesian phylogenetic decay indices, extending the decay i
 
 The Bayesian decay index for a clade is calculated as:
 - **Bayesian Decay = ln(ML_unconstrained) - ln(ML_constrained)**
-- **Bayes Factor = exp(Bayesian Decay)**
 
 Where ML represents the marginal likelihood (not to be confused with maximum likelihood). A positive Bayesian decay value indicates support for the clade, with larger values indicating stronger support.
 
 **Important Note on Interpretation**: In phylogenetic applications, Bayesian decay values tend to closely approximate ML log-likelihood differences. This occurs because:
 - The compared models differ only in topological constraints, not in substitution models or parameters
 - When data strongly support a topology, the marginal likelihood is dominated by the likelihood component
-- Traditional Bayes Factor interpretation scales (e.g., BF >10 = strong, >100 = decisive) were developed for comparing fundamentally different models and do not apply well to phylogenetic topology testing
+- Traditional interpretation scales were developed for comparing fundamentally different models and do not apply well to phylogenetic topology testing
 
 **Interpreting Bayesian decay values**:
 - BD values should be interpreted comparatively across branches rather than using absolute thresholds
@@ -114,9 +113,8 @@ panDecay can perform Bayesian analyses using:
 *   Marginal likelihood estimation using:
     *   **Stepping-stone sampling** (recommended, more accurate)
     *   **Harmonic mean** (faster but less reliable)
-*   **Improved Bayes Factor reporting**:
-    *   Primary focus on Bayes Decay (log Bayes Factor) for interpretability
-    *   Bayes Factor values capped at 10^6 for display to avoid numerical issues
+*   **Improved Bayesian reporting**:
+    *   Primary focus on Bayes Decay for interpretability
     *   Clear warnings about model dimension effects for extreme values
 *   **MCMC Convergence Diagnostics**:
     *   Automatic checking of ESS (Effective Sample Size)
@@ -436,7 +434,6 @@ A tab-delimited text file containing:
         *   `Significant_AU (p<0.05)`: "Yes" if AU p-value < 0.05, "No" otherwise.
     *   **Bayesian Metrics** (when Bayesian analysis is performed):
         *   `Bayes_ML_Diff`: Marginal likelihood difference (unconstrained - constrained).
-        *   `Bayes_Factor`: Exponential of the Bayes_ML_Diff, indicating support strength.
     *   `Bootstrap` (if bootstrap analysis performed): Bootstrap support value for the clade.
     *   `Taxa_List`: A comma-separated list of taxa in the clade.
 
@@ -463,7 +460,6 @@ In this visualization:
 - **AU**: Approximately Unbiased test p-value (lower values = stronger support)
 - **ΔlnL**: Log-likelihood difference (higher values = stronger support)
 - **BD**: Bayesian Decay (higher values = stronger support)
-- **BF**: Bayes Factor (exponential of BD)
 - **PD**: Parsimony Decay (traditional Bremer support)
 - Branch colors and exact label formatting may vary by tree viewer; this example uses FigTree's visualization
 
@@ -826,10 +822,6 @@ pandecay --config my_analysis.ini
         *   Poor MCMC convergence (check convergence diagnostics)
         *   Marginal likelihood estimation problems
         *   Genuine lack of support for the clade
-*   **Bayes Factor (BF):**
-    *   The exponential of the Bayesian decay value (BF = e^BD)
-    *   Displayed with cap at 10^6 to avoid astronomical numbers
-    *   **Not recommended for interpretation in phylogenetics**: Use BD values instead, as traditional BF interpretation scales are misleading for topology testing
 
 **Site-Specific Analysis Interpretation:**
 * **Negative delta lnL values** indicate sites that support the branch (they become less likely when the branch is constrained to be absent).
@@ -858,16 +850,15 @@ Generally, clades with large positive `ΔlnL` values, low `AU_p-value`s, high bo
     *   No Bayesian output: Check the debug log for specific errors. Ensure your alignment is compatible with MrBayes (e.g., taxon names without special characters).
 *   **Bayesian analysis takes too long**: Reduce the number of generations (`--bayes-ngen 50000`) or increase sampling frequency (`--bayes-sample-freq 500`) for testing. Production runs typically need at least 1 million generations.
 
-## Understanding Bayes Factors in Phylogenetic Topology Testing
+## Understanding Bayesian Decay Values in Phylogenetic Topology Testing
 
-Traditional Bayes factor interpretation guidelines were developed for comparing fundamentally different models (e.g., linear vs. polynomial regression) and do not apply well to phylogenetic topology testing. Here's why:
+In phylogenetic applications, Bayesian decay values tend to closely approximate ML log-likelihood differences. This occurs because:
 
-### Why Phylogenetic Bayes Factors Behave Differently
+### Why Bayesian Decay Values Behave Similarly to ML Differences
 
 1. **Minimal Model Complexity Differences**
    - In topology testing, we compare models that differ only by a single topological constraint
    - All other model parameters (substitution model, rates, frequencies) remain identical
-   - Traditional BF penalties for model complexity are largely irrelevant here
 
 2. **Likelihood Dominates Marginal Likelihood**
    - When data strongly support a topology, the posterior concentrates around the ML tree
@@ -875,7 +866,6 @@ Traditional Bayes factor interpretation guidelines were developed for comparing 
    - This explains why Bayesian decay values closely approximate ML log-likelihood differences
 
 3. **Different Prior Effects**
-   - Traditional BF applications involve priors over fundamentally different parameter spaces
    - In topology testing, the prior difference is only in tree space
    - When data signal is strong, this prior difference has minimal impact
 
@@ -887,23 +877,21 @@ Traditional Bayes factor interpretation guidelines were developed for comparing 
 
 2. **Large BD Values Are Normal**: 
    - BD values of 30-50 or higher are common for well-supported clades
-   - These don't indicate "astronomical" support as traditional BF scales would suggest
    - They simply reflect strong data signal for the clade
 
 3. **Phylogenetic-Specific Interpretation**:
-   - Focus on BD values rather than Bayes factors
+   - Focus on BD values for Bayesian interpretation
    - Use phylogenetic-specific thresholds (BD: 0-2 weak, 2-5 moderate, 5-10 strong, >10 very strong)
    - Compare BD values across clades in your tree for relative support assessment
 
 ### Practical Implications
 
 When interpreting panDecay results:
-- **Don't be alarmed** by large Bayes factors or BD values
 - **Compare BD and ML differences** - similar values confirm proper analysis
-- **Use BD values** for interpretation, not traditional BF thresholds
+- **Use BD values** for interpretation with phylogenetic-appropriate thresholds
 - **Consider relative support** across branches rather than absolute thresholds
 
-This understanding helps avoid misinterpretation and provides more accurate assessment of phylogenetic support.
+This understanding helps provide accurate assessment of phylogenetic support.
 
 ## Citations
 
