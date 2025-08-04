@@ -73,49 +73,44 @@ output_style = unicode
 
 
 # ==============================================================================
-# MODEL SETTINGS (for ML and Bayesian analyses)
+# MODEL SPECIFICATION (REQUIRED - no defaults)
 # ==============================================================================
 
-# Base substitution model
-# DNA options: JC, K80, HKY, GTR
-# Protein options: JTT, WAG, LG, Dayhoff
-# Discrete options: Mk
-model = GTR
+# FOR DNA DATA (--data-type dna):
+# Number of substitution types (REQUIRED for DNA)
+# Options: 1 (JC-like), 2 (HKY-like), 6 (GTR-like)
+nst = 6
+
+# FOR PROTEIN DATA (--data-type protein):
+# Amino acid substitution model (REQUIRED for protein)
+# Options: jtt, wag, lg, dayhoff, mtrev, cprev, blosum62, hivb, hivw
+# protein = wag
+
+# FOR DISCRETE DATA (--data-type discrete):
+# No model specification needed - uses Mk model automatically
+
+# ==============================================================================
+# MODEL PARAMETERS (optional for all data types)
+# ==============================================================================
 
 # Add gamma rate heterogeneity (default: false)
 gamma = false
 
 # Fixed gamma shape parameter (optional)
-# If not specified, will be estimated
+# If not specified, will be estimated when gamma=true
 # gamma_shape = 0.5
 
 # Add proportion of invariable sites (default: false)
 invariable = false
 
 # Fixed proportion of invariable sites (optional)
-# If not specified, will be estimated
+# If not specified, will be estimated when invariable=true
 # prop_invar = 0.2
 
-# Base frequencies (optional)
+# Base/amino acid frequencies (optional)
 # Options: equal, estimate, empirical
+# equal=uniform, estimate=ML estimation, empirical=observed
 base_freq = estimate
-
-# Number of substitution types for DNA (optional)
-# Options: 1, 2, 6
-nst = 6
-
-# Protein-specific model (overrides base model for protein data)
-protein_model = WAG
-
-# Fixed gamma shape parameter (advanced)
-gamma_shape = 0.5
-
-# Fixed proportion of invariable sites (advanced)
-prop_invar = 0.2
-
-# Site rate variation (overrides gamma setting)
-# Options: equal, gamma
-rates = gamma
 
 # Parsimony model for discrete data (default: true for discrete)
 parsmodel = true
@@ -154,9 +149,8 @@ bayesian_software = mrbayes
 mrbayes_path = mb
 
 
-# Model for Bayesian analysis (optional)
-# If not specified, uses same as ML model
-bayes_model = GTR+G+I
+# Bayesian analysis uses the same model specification as ML analysis
+# (nst/protein + gamma + invariable parameters above)
 
 # Number of MCMC generations (default: 1000000)
 bayes_ngen = 1000000

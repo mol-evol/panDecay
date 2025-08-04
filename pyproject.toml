@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pandecay"
-version = "1.1.0"
+version = "1.1.1"
 description = "Phylogenetic Analysis using Decay Indices"
 readme = "README.md"
 license = {file = "LICENSE"}

@@ -76,14 +76,14 @@ class panDecayIndices:
     - Parsimony analysis with step differences
     """
 
-    def __init__(self, alignment_file, alignment_format="fasta", model="GTR+G",
+    def __init__(self, alignment_file, alignment_format="fasta", 
                  temp_dir: Path = None, paup_path="paup", threads="auto",
                  starting_tree: Path = None, data_type="dna",
                  debug=False, keep_files=False, gamma_shape=None, prop_invar=None,
-                 base_freq=None, rates=None, protein_model=None, nst=None,
+                 base_freq=None, nst=None, protein=None, gamma=False, invariable=False,
                  parsmodel=None, paup_block=None, analysis_mode="ml",
                  bayesian_software=None, mrbayes_path="mb",
-                 bayes_model=None, bayes_ngen=1000000, bayes_burnin=0.25,
+                 bayes_ngen=1000000, bayes_burnin=0.25,
                  bayes_chains=4, bayes_sample_freq=1000, marginal_likelihood="ss",
                  ss_alpha=0.4, ss_nsteps=50, use_mpi=False, mpi_processors=None,
                  mpirun_path="mpirun", use_beagle=False, beagle_device="auto",
@@ -94,8 +94,7 @@ class panDecayIndices:
                  mrbayes_parse_timeout=30.0, output_style="unicode"):
 
         self.alignment_file = Path(alignment_file)
-        self.alignment_format = alignment_format
-        self.model_str = model # Keep original model string for reference
+        self.alignment_format = alignment_format # Keep original model string for reference
         self.paup_path = paup_path
         self.starting_tree = starting_tree # Already a Path or None from main
         self.debug = debug
@@ -103,9 +102,10 @@ class panDecayIndices:
         self.gamma_shape_arg = gamma_shape
         self.prop_invar_arg = prop_invar
         self.base_freq_arg = base_freq
-        self.rates_arg = rates
-        self.protein_model_arg = protein_model
         self.nst_arg = nst
+        self.protein_arg = protein
+        self.gamma_arg = gamma
+        self.invariable_arg = invariable
         self.parsmodel_arg = parsmodel # For discrete data, used in _convert_model_to_paup
         self.user_paup_block = paup_block # Raw user block content
         self._files_to_cleanup = []
@@ -119,7 +119,7 @@ class panDecayIndices:
         # Bayesian analysis parameters
         self.bayesian_software = bayesian_software
         self.mrbayes_path = mrbayes_path
-        self.bayes_model = bayes_model or model  # Use ML model if not specified
+        # New system: Bayesian analysis uses same model specification as ML
         self.bayes_ngen = bayes_ngen
         self.bayes_burnin = bayes_burnin
         self.bayes_chains = bayes_chains
@@ -210,9 +210,9 @@ class panDecayIndices:
         self.parsmodel = False # Default, will be set by _convert_model_to_paup if discrete
         if self.user_paup_block is None:
             self.paup_model_cmds = self._convert_model_to_paup(
-                self.model_str, gamma_shape=self.gamma_shape_arg, prop_invar=self.prop_invar_arg,
-                base_freq=self.base_freq_arg, rates=self.rates_arg,
-                protein_model=self.protein_model_arg, nst=self.nst_arg,
+                gamma_shape=self.gamma_shape_arg, prop_invar=self.prop_invar_arg,
+                base_freq=self.base_freq_arg, nst=self.nst_arg, protein=self.protein_arg,
+                has_gamma=self.gamma_arg, has_invar=self.invariable_arg,
                 parsmodel_user_intent=self.parsmodel_arg # Pass user intent
             )
         else:
@@ -272,71 +272,73 @@ class panDecayIndices:
         elif hasattr(self, 'temp_path') and self.keep_files:
             logger.info(f"Keeping temporary directory: {self.temp_path}")
 
-    def _convert_model_to_paup(self, model_str, gamma_shape, prop_invar, base_freq, rates, protein_model, nst, parsmodel_user_intent):
-        """Converts model string and params to PAUP* 'lset' command part (without 'lset' itself)."""
+    def _convert_model_to_paup(self, gamma_shape, prop_invar, base_freq, parsmodel_user_intent, nst=None, protein=None, has_gamma=False, has_invar=False):
+        """Generate PAUP* lset commands from clean flag system."""
         cmd_parts = []
-        has_gamma = "+G" in model_str.upper()
-        has_invar = "+I" in model_str.upper()
-        base_model_name = model_str.split("+")[0].upper()
         
         if self.debug:
-            logger.debug(f"Model conversion debug - model_str: {model_str}, base_model_name: {base_model_name}, data_type: {self.data_type}")
+            logger.debug(f"Model conversion debug - nst: {nst}, protein: {protein}, data_type: {self.data_type}")
 
         if self.data_type == "dna":
-            if nst is not None: cmd_parts.append(f"nst={nst}")
-            elif base_model_name == "GTR": cmd_parts.append("nst=6")
-            elif base_model_name in ["HKY", "K2P", "K80", "TN93"]: cmd_parts.append("nst=2")
-            elif base_model_name in ["JC", "JC69", "F81"]: cmd_parts.append("nst=1")
-            else:
-                logger.warning(f"Unknown DNA model: {base_model_name}, defaulting to GTR (nst=6).")
-                cmd_parts.append("nst=6")
-
-            current_nst = next((p.split('=')[1] for p in cmd_parts if "nst=" in p), None)
-            if current_nst == '6' or (base_model_name == "GTR" and nst is None):
+            # NST is required for DNA data
+            if nst is None:
+                raise ValueError("NST is required for DNA data")
+            
+            cmd_parts.append(f"nst={nst}")
+            
+            # Add substitution rate parameters based on nst
+            if nst == 6:
                 cmd_parts.append("rmatrix=estimate")
-            elif current_nst == '2' or (base_model_name in ["HKY", "K2P"] and nst is None):
+            elif nst == 2: 
                 cmd_parts.append("tratio=estimate")
-
-            if base_freq: cmd_parts.append(f"basefreq={base_freq}")
-            elif base_model_name in ["JC", "K2P", "JC69", "K80"] : cmd_parts.append("basefreq=equal")
-            else: cmd_parts.append("basefreq=estimate") # GTR, HKY, F81, TN93 default to estimate
+            # nst=1 needs no additional rate parameters
+            
+            # Base frequencies - smart defaults
+            if base_freq:
+                cmd_parts.append(f"basefreq={base_freq}")
+            else:
+                if nst == 1:
+                    cmd_parts.append("basefreq=equal")  # JC assumption
+                else:
+                    cmd_parts.append("basefreq=estimate")  # HKY/GTR assumption
 
         elif self.data_type == "protein":
-            valid_protein_models = ["JTT", "WAG", "LG", "DAYHOFF", "MTREV", "CPREV", "BLOSUM62", "HIVB", "HIVW"]
-            if protein_model: cmd_parts.append(f"protein={protein_model.lower()}")
-            elif base_model_name.upper() in valid_protein_models: cmd_parts.append(f"protein={base_model_name.lower()}")
-            else:
-                logger.warning(f"Unknown protein model: {base_model_name}, defaulting to JTT.")
-                cmd_parts.append("protein=jtt")
+            # Protein model is required for protein data
+            if protein is None:
+                raise ValueError("Protein model is required for protein data")
+            
+            cmd_parts.append(f"protein={protein.lower()}")
+            
+            # Base frequencies for proteins
+            if base_freq:
+                cmd_parts.append(f"basefreq={base_freq}")
+            # Default: let PAUP* use model's built-in frequencies
 
-        elif self.data_type == "discrete": # Typically Mk model
-            cmd_parts.append("nst=1") # For standard Mk
-            if base_freq: cmd_parts.append(f"basefreq={base_freq}")
-            else: cmd_parts.append("basefreq=equal") # Default for Mk
-
+        elif self.data_type == "discrete": # Mk model
+            cmd_parts.append("nst=1")  # Standard for Mk
+            cmd_parts.append("basefreq=equal")  # Standard for Mk
+            
+            # Handle parsimony model setting
             if parsmodel_user_intent is None: # If user didn't specify, default to True for discrete
                 self.parsmodel = True
             else:
                 self.parsmodel = bool(parsmodel_user_intent)
 
 
-        # Common rate variation and invariable sites for all data types
-        if rates: cmd_parts.append(f"rates={rates}")
-        elif has_gamma: cmd_parts.append("rates=gamma")
-        else: cmd_parts.append("rates=equal")
-
-        current_rates = next((p.split('=')[1] for p in cmd_parts if "rates=" in p), "equal")
-        if gamma_shape is not None and (current_rates == "gamma" or has_gamma):
-            cmd_parts.append(f"shape={gamma_shape}")
-        elif current_rates == "gamma" or has_gamma:
-            cmd_parts.append("shape=estimate")
-
-        if prop_invar is not None:
-            cmd_parts.append(f"pinvar={prop_invar}")
-        elif has_invar:
-            cmd_parts.append("pinvar=estimate")
-        else: # No +I and no explicit prop_invar
-            cmd_parts.append("pinvar=0")
+        # Universal rate variation parameters
+        if has_gamma:
+            if gamma_shape is not None:
+                cmd_parts.append(f"rates=gamma shape={gamma_shape}")
+            else:
+                cmd_parts.append("rates=gamma shape=estimate")
+        else:
+            cmd_parts.append("rates=equal")
+        
+        if has_invar:
+            if prop_invar is not None:
+                cmd_parts.append(f"pinvar={prop_invar}")
+            else:
+                cmd_parts.append("pinvar=estimate")
 
         return "lset " + " ".join(cmd_parts) + ";"
 
@@ -862,45 +864,57 @@ class panDecayIndices:
         # Model settings based on data type
         if self.data_type == "dna":
             if self.debug:
-                logger.debug(f"MrBayes model debug - bayes_model: {self.bayes_model}, data_type: {self.data_type}")
+                logger.debug(f"MrBayes model debug - nst: {self.nst_arg}, gamma: {self.gamma_arg}, invariable: {self.invariable_arg}")
             
-            # Determine nst parameter
-            if "GTR" in self.bayes_model.upper():
-                nst_val = "6"
-            elif "HKY" in self.bayes_model.upper():
-                nst_val = "2"
-            elif "JC" in self.bayes_model.upper():
-                nst_val = "1"
+            # Direct nst translation from new flag system
+            if self.nst_arg is not None:
+                nst_val = str(self.nst_arg)
             else:
-                nst_val = "6"  # Default to GTR
+                raise ValueError("NST is required for DNA data in MrBayes analysis")
                 
-            # Determine rates parameter
-            if "+G" in self.bayes_model and "+I" in self.bayes_model:
+            # Rate variation translation from new flag system
+            if self.gamma_arg and self.invariable_arg:
                 rates_val = "invgamma"
-            elif "+G" in self.bayes_model:
+            elif self.gamma_arg:
                 rates_val = "gamma"
-            elif "+I" in self.bayes_model:
+            elif self.invariable_arg:
                 rates_val = "propinv"
             else:
                 rates_val = "equal"
                 
             # Combine into single lset command
             blocks.append(f"    lset nst={nst_val} rates={rates_val};")
+            
+            # Base frequency handling
+            if self.base_freq_arg == "equal":
+                blocks.append("    prset statefreqpr=fixed(equal);")
+            elif self.base_freq_arg == "empirical":
+                blocks.append("    prset statefreqpr=fixed(empirical);")
+            # "estimate" is MrBayes default, no command needed
                 
         elif self.data_type == "protein":
-            protein_models = {
-                "JTT": "jones", "WAG": "wag", "LG": "lg", 
-                "DAYHOFF": "dayhoff", "CPREV": "cprev", "MTREV": "mtrev"
-            }
-            model_name = "wag"  # default
-            for pm, mb_name in protein_models.items():
-                if pm in self.bayes_model.upper():
-                    model_name = mb_name
-                    break
-            blocks.append(f"    prset aamodelpr=fixed({model_name});")
+            # Direct protein model mapping from new flag system
+            if self.protein_arg is None:
+                raise ValueError("Protein model is required for protein data in MrBayes analysis")
             
-            if "+G" in self.bayes_model:
+            mb_protein_map = {
+                "jtt": "jones", "wag": "wag", "lg": "lg",
+                "dayhoff": "dayhoff", "mtrev": "mtrev", "cprev": "cprev",
+                "blosum62": "blosum", "hivb": "hivb", "hivw": "hivw"
+            }
+            mb_model = mb_protein_map.get(self.protein_arg.lower(), self.protein_arg.lower())
+            blocks.append(f"    prset aamodelpr=fixed({mb_model});")
+            
+            # Rate variation for proteins from new flag system
+            if self.gamma_arg and self.invariable_arg:
+                blocks.append("    lset rates=invgamma;")
+            elif self.gamma_arg:
                 blocks.append("    lset rates=gamma;")
+            elif self.invariable_arg:
+                blocks.append("    lset rates=propinv;")
+                
+        elif self.data_type == "discrete":
+            blocks.append("    lset rates=gamma;")  # Standard for morphology
         
         # BEAGLE settings if enabled
         if self.use_beagle:
@@ -4000,7 +4014,7 @@ class panDecayIndices:
                 # Bayesian parameters
                 if has_bayesian or self.do_bayesian:
                     f.write(f"- Bayesian software: `{self.bayesian_software}`\n")
-                    f.write(f"- Bayesian model: `{self.bayes_model}`\n")
+                    # Build Bayesian model display string\n                    if self.data_type == \"dna\":\n                        nst_names = {1: \"JC-type\", 2: \"HKY-type\", 6: \"GTR-type\"}\n                        bayes_model_str = nst_names.get(self.nst_arg, f\"nst={self.nst_arg}\")\n                    elif self.data_type == \"protein\":\n                        bayes_model_str = self.protein_arg.upper() if self.protein_arg else \"UNKNOWN\"\n                    else:\n                        bayes_model_str = \"Mk\"\n                    \n                    if self.gamma_arg:\n                        bayes_model_str += \"+G\"\n                    if self.invariable_arg:\n                        bayes_model_str += \"+I\"\n                        \n                    f.write(f\"- Bayesian model: `{bayes_model_str}`\n\")
                     f.write(f"- MCMC generations: `{self.bayes_ngen}`\n")
                     f.write(f"- Burnin fraction: `{self.bayes_burnin}`\n")
                     # Report the actual method being used

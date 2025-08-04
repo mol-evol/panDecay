@@ -15,7 +15,6 @@ from typing import Union
 from pandecay.core.constants import (
     VERSION,
     DEFAULT_ALIGNMENT_FORMAT,
-    DEFAULT_MODEL,
     DEFAULT_PAUP_PATH,
     DEFAULT_OUTPUT_FILE,
     DEFAULT_TREE_BASE,
@@ -189,6 +188,77 @@ def write_analysis_config(args, alignment_file: Path, config_output_path: Path):
         config_logger.warning(f"Failed to write analysis configuration: {e}")
 
 
+def normalize_data_type(data_type_input: str) -> str:
+    """Convert any case variation to lowercase standard."""
+    if not data_type_input:
+        return "dna"  # Default fallback
+    
+    normalized = data_type_input.lower().strip()
+    
+    # Handle common variations
+    type_mapping = {
+        'dna': 'dna',
+        'DNA': 'dna', 
+        'nucleotide': 'dna',
+        'nt': 'dna',
+        
+        'protein': 'protein',
+        'Protein': 'protein',
+        'PROTEIN': 'protein',
+        'amino': 'protein',
+        'aa': 'protein',
+        
+        'discrete': 'discrete',
+        'Discrete': 'discrete',
+        'DISCRETE': 'discrete',
+        'morphology': 'discrete',
+        'morph': 'discrete'
+    }
+    
+    result = type_mapping.get(data_type_input, normalized)  # Use original key for exact match
+    if result not in ['dna', 'protein', 'discrete']:
+        # Try the normalized version
+        result = type_mapping.get(normalized, normalized)
+    
+    return result
+
+
+def validate_model_flags(args: argparse.Namespace) -> None:
+    """Strict validation of model flags - no backward compatibility."""
+    logger = logging.getLogger(__name__)
+    
+    if args.data_type == "dna":
+        if not hasattr(args, 'nst') or args.nst is None:
+            raise ValueError("--nst is REQUIRED for DNA data. Choose: 1 (JC-like), 2 (HKY-like), or 6 (GTR-like)")
+        if hasattr(args, 'protein') and args.protein is not None:
+            raise ValueError("--protein flag cannot be used with DNA data. Use --nst instead.")
+    
+    elif args.data_type == "protein":
+        if not hasattr(args, 'protein') or args.protein is None:
+            raise ValueError("--protein is REQUIRED for protein data. Choose from: jtt, wag, lg, dayhoff, mtrev, cprev, blosum62, hivb, hivw")
+        if hasattr(args, 'nst') and args.nst is not None:
+            raise ValueError("--nst flag cannot be used with protein data. Use --protein instead.")
+    
+    elif args.data_type == "discrete":
+        if hasattr(args, 'nst') and args.nst is not None:
+            raise ValueError("--nst not needed for discrete data (automatically uses Mk model, nst=1)")
+        if hasattr(args, 'protein') and args.protein is not None:
+            raise ValueError("--protein not needed for discrete data (automatically uses Mk model)")
+    
+    else:
+        valid_types = "dna/DNA, protein/Protein, discrete"
+        raise ValueError(f"Invalid data type: '{args.data_type}'. Must be one of: {valid_types}")
+    
+    # Validate parameter ranges
+    if hasattr(args, 'gamma_shape') and args.gamma_shape is not None:
+        if args.gamma_shape <= 0:
+            raise ValueError("Gamma shape must be positive")
+    
+    if hasattr(args, 'prop_invar') and args.prop_invar is not None:
+        if not (0 <= args.prop_invar <= 1):
+            raise ValueError("Proportion invariable must be between 0 and 1")
+
+
 def setup_argument_parser() -> argparse.ArgumentParser:
     """Set up and configure the command-line argument parser."""
     parser = argparse.ArgumentParser(
@@ -199,7 +269,6 @@ def setup_argument_parser() -> argparse.ArgumentParser:
     # Basic arguments
     parser.add_argument("alignment", nargs='?', help="Input alignment file path (can be specified in config file).")
     parser.add_argument("--format", default=DEFAULT_ALIGNMENT_FORMAT, help="Alignment format.")
-    parser.add_argument("--model", default=DEFAULT_MODEL, help="Base substitution model (e.g., GTR, HKY, JC). Combine with --gamma and --invariable.")
     parser.add_argument("--gamma", action="store_true", help="Add Gamma rate heterogeneity (+G) to model.")
     parser.add_argument("--invariable", action="store_true", help="Add invariable sites (+I) to model.")
     
@@ -209,17 +278,28 @@ def setup_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output", default=DEFAULT_OUTPUT_FILE, help="[DEPRECATED] Use --output-dir and --project-name instead.")
     parser.add_argument("--tree", default=DEFAULT_TREE_BASE, help="[DEPRECATED] Tree naming now uses project name. Multiple trees with support measures (PD, LD, BD, BS, AU) will be generated.")
     parser.add_argument("--site-analysis", action="store_true", help="Perform site-specific likelihood analysis to identify supporting/conflicting sites for each branch.")
-    parser.add_argument("--data-type", default=DEFAULT_DATA_TYPE, choices=["dna", "protein", "discrete"], help="Type of sequence data.")
+    parser.add_argument("--data-type", default=DEFAULT_DATA_TYPE, help="Type of sequence data. Case insensitive. Choices: dna/DNA, protein/Protein, discrete.")
     
-    # Model parameter overrides
-    mparams = parser.add_argument_group('Model Parameter Overrides (optional)')
+    # Model specification (REQUIRED - no defaults)
+    model_group = parser.add_argument_group('Model Specification (REQUIRED)')
+    model_group.add_argument("--nst", type=int, choices=[1, 2, 6], 
+                            help="Substitution types for DNA data (REQUIRED for DNA). "
+                                 "1=JC-like (equal rates & frequencies), "
+                                 "2=HKY-like (ti/tv ratio, estimated frequencies), "
+                                 "6=GTR-like (all rates different, estimated frequencies)")
+    model_group.add_argument("--protein", 
+                            choices=["jtt", "wag", "lg", "dayhoff", "mtrev", "cprev", "blosum62", "hivb", "hivw"],
+                            help="Amino acid model for protein data (REQUIRED for protein). "
+                                 "Choices: jtt, wag, lg, dayhoff, mtrev, cprev, blosum62, hivb, hivw")
+    
+    # Model parameters (optional)
+    mparams = parser.add_argument_group('Model Parameters (optional)')
     mparams.add_argument("--gamma-shape", type=float, help="Fixed Gamma shape value (default: estimate if +G).")
     mparams.add_argument("--prop-invar", type=float, help="Fixed proportion of invariable sites (default: estimate if +I).")
-    mparams.add_argument("--base-freq", choices=["equal", "estimate", "empirical"], help="Base/state frequencies (default: model-dependent). 'empirical' uses observed frequencies.")
-    mparams.add_argument("--rates", choices=["equal", "gamma"], help="Site rate variation model (overrides --gamma flag if specified).")
-    mparams.add_argument("--protein-model", help="Specific protein model (e.g., JTT, WAG; overrides base --model for protein data).")
-    mparams.add_argument("--nst", type=int, choices=[1, 2, 6], help="Number of substitution types (DNA; overrides model-based nst).")
-    mparams.add_argument("--parsmodel", action=argparse.BooleanOptionalAction, default=None, help="Use parsimony-based branch lengths (discrete data; default: yes for discrete). Use --no-parsmodel to disable.")
+    mparams.add_argument("--base-freq", choices=["equal", "estimate", "empirical"], 
+                        help="Base/amino acid frequencies. equal=uniform, estimate=ML estimation, empirical=observed")
+    mparams.add_argument("--parsmodel", action=argparse.BooleanOptionalAction, default=None, 
+                        help="Use parsimony-based branch lengths (discrete data; default: yes for discrete). Use --no-parsmodel to disable.")
     
     # Runtime control
     run_ctrl = parser.add_argument_group('Runtime Control')
@@ -248,7 +328,6 @@ def setup_argument_parser() -> argparse.ArgumentParser:
     bayesian_opts.add_argument("--bayesian-software", choices=["mrbayes"], 
                               default="mrbayes", help="Bayesian software to use (default: mrbayes)")
     bayesian_opts.add_argument("--mrbayes-path", default=DEFAULT_MRBAYES_PATH, help="Path to MrBayes executable")
-    bayesian_opts.add_argument("--bayes-model", help="Model for Bayesian analysis (if different from ML model)")
     bayesian_opts.add_argument("--bayes-ngen", type=int, default=DEFAULT_BAYES_NGEN, help="Number of MCMC generations")
     bayesian_opts.add_argument("--bayes-burnin", type=float, default=DEFAULT_BAYES_BURNIN, help="Burnin fraction (0-1)")
     bayesian_opts.add_argument("--bayes-chains", type=int, default=DEFAULT_BAYES_CHAINS, help="Number of MCMC chains")
@@ -326,8 +405,11 @@ def validate_arguments(args: argparse.Namespace, parser: argparse.ArgumentParser
         parser.print_help()
         sys.exit(1)
     
-    # Convert data_type to lowercase
-    args.data_type = args.data_type.lower()
+    # Normalize and validate data type
+    args.data_type = normalize_data_type(args.data_type)
+    
+    # Validate model specification (strict - no backward compatibility)
+    validate_model_flags(args)
     
     # Validate Bayesian analysis arguments
     if args.analysis == "ml" and args.bayesian_software:
@@ -353,7 +435,7 @@ def configure_logging(args: argparse.Namespace) -> None:
         args.keep_files = True
 
 
-def run_analysis(args: argparse.Namespace, effective_model_str: str, paup_block_content: str) -> None:
+def run_analysis(args: argparse.Namespace, paup_block_content: str) -> None:
     """Run the main panDecay analysis."""
     logger = logging.getLogger(__name__)
     
@@ -369,7 +451,6 @@ def run_analysis(args: argparse.Namespace, effective_model_str: str, paup_block_
     decay_calc = panDecayIndices(
         alignment_file=args.alignment,
         alignment_format=args.format,
-        model=effective_model_str,
         temp_dir=temp_dir_path,
         paup_path=args.paup,
         threads=args.threads,
@@ -380,15 +461,15 @@ def run_analysis(args: argparse.Namespace, effective_model_str: str, paup_block_
         gamma_shape=args.gamma_shape, 
         prop_invar=args.prop_invar,
         base_freq=args.base_freq, 
-        rates=args.rates,
-        protein_model=args.protein_model, 
         nst=args.nst,
+        protein=args.protein,
+        gamma=args.gamma,
+        invariable=args.invariable,
         parsmodel=args.parsmodel,
         paup_block=paup_block_content,
         analysis_mode=args.analysis,
         bayesian_software=args.bayesian_software,
         mrbayes_path=args.mrbayes_path,
-        bayes_model=args.bayes_model,
         bayes_ngen=args.bayes_ngen,
         bayes_burnin=args.bayes_burnin,
         bayes_chains=args.bayes_chains,
@@ -520,21 +601,8 @@ def main():
     # Validate arguments and handle early exits
     validate_arguments(args, parser)
     
-    # Build accurate model display string that reflects all parameter overrides
+    # Build accurate model display string for the new flag system
     effective_model_display = build_effective_model_display(args)
-    
-    # Keep simple model string for analysis engine (it handles overrides internally)
-    effective_model_str = args.model
-    if args.gamma: 
-        effective_model_str += "+G"
-    if args.invariable: 
-        effective_model_str += "+I"
-    
-    # Handle protein/discrete model adjustments  
-    if args.data_type == "protein" and not args.protein_model and not any(pm in args.model.upper() for pm in ["JTT", "WAG", "LG", "DAYHOFF"]):
-        logger.info(f"Protein data with generic model '{args.model}'. Using JTT as effective protein model.")
-    elif args.data_type == "discrete" and "MK" not in args.model.upper():
-        logger.info(f"Discrete data detected. Using Mk model regardless of specified base model '{args.model}'.")
     
     # Read PAUP block if specified
     paup_block_content = None
@@ -552,7 +620,7 @@ def main():
     print_runtime_parameters(args, effective_model_display)
     
     try:
-        run_analysis(args, effective_model_str, paup_block_content)
+        run_analysis(args, paup_block_content)
     except (ConfigurationError, AnalysisEngineError) as e:
         logger.error(f"panDecay analysis failed: {e}")
         if args.debug:

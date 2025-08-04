@@ -7,7 +7,7 @@ to ensure exact preservation of behavior.
 """
 
 # Version
-VERSION = "1.1.0"
+VERSION = "1.1.1"
 
 # --- Constants for Filenames ---
 NEXUS_ALIGNMENT_FN = "alignment.nex"
@@ -52,7 +52,6 @@ ANNOTATED_TREE_COMPREHENSIVE = "_comprehensive.nwk"
 
 # Default values for analysis parameters
 DEFAULT_THREADS = "auto"
-DEFAULT_MODEL = "GTR"
 DEFAULT_DATA_TYPE = "dna"
 DEFAULT_ALIGNMENT_FORMAT = "fasta"
 DEFAULT_ANALYSIS_MODE = "ml"

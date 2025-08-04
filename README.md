@@ -103,7 +103,7 @@ panDecay can perform Bayesian analyses using:
 *   Performs the Approximately Unbiased (AU) test for statistical assessment of ML branch support
 *   Supports DNA, Protein, and binary discrete morphological data
 *   Optional site-specific likelihood analysis to identify which alignment positions support or conflict with each branch
-*   Flexible model specification (e.g., GTR, HKY, JTT, WAG, Mk) with options for gamma-distributed rate heterogeneity (+G) and proportion of invariable sites (+I)
+*   Clean model specification system: `--nst` for DNA (1/2/6 = JC/HKY/GTR-like), `--protein` for proteins (jtt, wag, lg, etc.), automatic Mk for discrete data, with options for gamma-distributed rate heterogeneity (+G) and proportion of invariable sites (+I)
 *   Allows fine-grained control over model parameters (gamma shape, pinvar, base frequencies, etc.)
 *   Option to provide a custom PAUP\* block for complex model or search strategy definitions
 *   Option to provide a starting tree for the initial ML search
@@ -208,35 +208,53 @@ This installs panDecay in "editable" mode, so changes to the source code are imm
 
 ### Basic Command
 
+**For DNA data:**
 ```bash
-pandecay <alignment_file> --model <model_name> [options...]
+pandecay <alignment_file> --nst <1|2|6> [options...]
+```
+
+**For protein data:**
+```bash
+pandecay <alignment_file> --data-type protein --protein <model_name> [options...]
+```
+
+**For discrete morphological data:**
+```bash
+pandecay <alignment_file> --data-type discrete [options...]
 ```
 
 ### Command-Line Arguments
 
 ```
-usage: pandecay [-h] [--format FORMAT] [--model MODEL] [--gamma] [--invariable] [--paup PAUP] [--output OUTPUT] [--tree TREE]
-                  [--data-type {dna,protein,discrete}] [--gamma-shape GAMMA_SHAPE] [--prop-invar PROP_INVAR] 
-                  [--base-freq {equal,estimate,empirical}] [--rates {equal,gamma}] [--protein-model PROTEIN_MODEL] 
-                  [--nst {1,2,6}] [--parsmodel | --no-parsmodel] [--threads THREADS] [--starting-tree STARTING_TREE] 
-                  [--paup-block PAUP_BLOCK] [--temp TEMP] [--keep-files] [--debug] [--site-analysis] 
-                  [--analysis {ml,bayesian,parsimony,ml+parsimony,bayesian+parsimony,ml+bayesian,all}] 
-                  [--bayesian-software {mrbayes}] [--mrbayes-path MRBAYES_PATH] [--bayes-model BAYES_MODEL]
-                  [--bayes-ngen BAYES_NGEN] [--bayes-burnin BAYES_BURNIN] [--bayes-chains BAYES_CHAINS]
-                  [--bayes-sample-freq BAYES_SAMPLE_FREQ] [--marginal-likelihood {ss,ps,hm}]
-                  [--ss-alpha SS_ALPHA] [--ss-nsteps SS_NSTEPS] [--use-mpi] [--mpi-processors MPI_PROCESSORS]
-                  [--mpirun-path MPIRUN_PATH] [--use-beagle] [--beagle-device {auto,cpu,gpu}]
-                  [--beagle-precision {single,double}] [--beagle-scaling {none,dynamic,always}]
-                  [--check-convergence | --no-check-convergence] [--min-ess MIN_ESS] [--max-psrf MAX_PSRF]
-                  [--max-asdsf MAX_ASDSF] [--convergence-strict] [--mrbayes-parse-timeout TIMEOUT]
-                  [--bootstrap] [--bootstrap-reps BOOTSTRAP_REPS] [--visualize] [--viz-format {png,pdf,svg}]
-                  [--annotation {au,lnl}] [--output-style {unicode,ascii,minimal}]
-                  [--config CONFIG] [--generate-config GENERATE_CONFIG]
-                  [--constraint-mode {all,specific,exclude}] [--test-branches TEST_BRANCHES] 
-                  [--constraint-file CONSTRAINT_FILE] [-v]
-                  [alignment]
+usage: pandecay [-h] [--format FORMAT] [--gamma] [--invariable] [--paup PAUP]
+          [--output-dir OUTPUT_DIR] [--project-name PROJECT_NAME]
+          [--output OUTPUT] [--tree TREE] [--site-analysis]
+          [--data-type DATA_TYPE] [--nst {1,2,6}]
+          [--protein {jtt,wag,lg,dayhoff,mtrev,cprev,blosum62,hivb,hivw}]
+          [--gamma-shape GAMMA_SHAPE] [--prop-invar PROP_INVAR]
+          [--base-freq {equal,estimate,empirical}]
+          [--parsmodel | --no-parsmodel] [--threads THREADS]
+          [--starting-tree STARTING_TREE] [--paup-block PAUP_BLOCK]
+          [--temp TEMP] [--keep-files] [--debug]
+          [--analysis {ml,bayesian,parsimony,ml+parsimony,bayesian+parsimony,ml+bayesian,all}]
+          [--bootstrap] [--bootstrap-reps BOOTSTRAP_REPS]
+          [--bayesian-software {mrbayes}] [--mrbayes-path MRBAYES_PATH]
+          [--bayes-ngen BAYES_NGEN] [--bayes-burnin BAYES_BURNIN]
+          [--bayes-chains BAYES_CHAINS] [--bayes-sample-freq BAYES_SAMPLE_FREQ]
+          [--marginal-likelihood {ss,ps,hm}] [--ss-alpha SS_ALPHA]
+          [--ss-nsteps SS_NSTEPS] [--use-mpi] [--mpi-processors MPI_PROCESSORS]
+          [--mpirun-path MPIRUN_PATH] [--use-beagle] [--beagle-device {cpu,gpu,auto}]
+          [--beagle-precision {single,double}] [--beagle-scaling {none,dynamic,always}]
+          [--check-convergence | --no-check-convergence] [--min-ess MIN_ESS]
+          [--max-psrf MAX_PSRF] [--max-asdsf MAX_ASDSF] [--convergence-strict]
+          [--mrbayes-parse-timeout MRBAYES_PARSE_TIMEOUT] [--visualize]
+          [--viz-format {png,pdf,svg}] [--annotation {au,lnl}]
+          [--output-style {unicode,ascii}] [--constraint-mode {all,specific,exclude}]
+          [--test-branches TEST_BRANCHES] [--constraint-file CONSTRAINT_FILE]
+          [--config CONFIG] [--generate-config GENERATE_CONFIG]
+          [alignment]
 
-panDecay v1.1.0: Calculate phylogenetic decay indices (ML, Bayesian, and parsimony).
+panDecay v1.1.1: Calculate phylogenetic decay indices (ML, Bayesian, and parsimony).
 
 positional arguments:
   alignment             Input alignment file path (can also be provided via config file).
@@ -244,7 +262,12 @@ positional arguments:
 options:
   -h, --help            show this help message and exit
   --format FORMAT       Alignment format. (default: fasta)
-  --model MODEL         Base substitution model (e.g., GTR, HKY, JC). Combine with --gamma and --invariable. (default: GTR)
+**Model Specification (REQUIRED - no defaults):**
+  --nst {1,2,6}         Substitution types for DNA data (REQUIRED for DNA).
+                        1=JC-like (equal rates & frequencies), 2=HKY-like (ti/tv ratio, estimated frequencies), 
+                        6=GTR-like (all rates different, estimated frequencies)
+  --protein {jtt,wag,lg,dayhoff,mtrev,cprev,blosum62,hivb,hivw}
+                        Amino acid model for protein data (REQUIRED for protein)
   --gamma               Add Gamma rate heterogeneity (+G) to model. (default: False)
   --invariable          Add invariable sites (+I) to model. (default: False)
   --paup PAUP           Path to PAUP* executable. (default: paup)
@@ -265,9 +288,11 @@ Model Parameter Overrides (optional):
                         Base/state frequencies (default: model-dependent). 'empirical' uses observed frequencies.
   --rates {equal,gamma}
                         Site rate variation model (overrides --gamma flag if specified).
-  --protein-model PROTEIN_MODEL
-                        Specific protein model (e.g., JTT, WAG; overrides base --model for protein data).
-  --nst {1,2,6}         Number of substitution types (DNA; overrides model-based nst).
+**Model Parameters (optional):**
+  --gamma-shape GAMMA_SHAPE     Fixed Gamma shape value (default: estimate if +G)
+  --prop-invar PROP_INVAR       Fixed proportion of invariable sites (default: estimate if +I)
+  --base-freq {equal,estimate,empirical}
+                        Base/amino acid frequencies. equal=uniform, estimate=ML estimation, empirical=observed
   --parsmodel, --no-parsmodel
                         Use parsimony-based branch lengths (discrete data; default: yes for discrete). Use --no-parsmodel to disable. (default: None)
 
@@ -292,8 +317,6 @@ Bayesian Analysis Options:
                         Bayesian software to use (default: mrbayes)
   --mrbayes-path MRBAYES_PATH
                         Path to MrBayes executable (default: mb)
-  --bayes-model BAYES_MODEL
-                        Model for Bayesian analysis (if different from ML model)
   --bayes-ngen BAYES_NGEN
                         Number of MCMC generations (default: 1000000)
   --bayes-burnin BAYES_BURNIN
@@ -395,7 +418,7 @@ A configuration file specified with `--config <path_to_config.ini>`.
 *   **Example:**
     ```ini
     alignment = my_data.fas
-    model = GTR
+    nst = 6
     gamma = true
     constraint_mode = specific
     
@@ -561,7 +584,7 @@ Let [alignment.fas](./alignment.fas) be a FASTA DNA alignment, [proteins.phy](./
 Analyze a DNA alignment with GTR+G+I model, automatically estimating parameters.
 
 ```bash
-pandecay alignment.fas --model GTR --gamma --invariable --data-type dna \
+pandecay alignment.fas --nst 6 --gamma --invariable --data-type dna \
     --output dna_decay.txt --tree dna_annotated
 ```
 
@@ -578,7 +601,7 @@ Analyze a protein alignment using the WAG model, fixed gamma shape, and estimati
 
 ```bash
 pandecay proteins.phy --format phylip --data-type protein \
-    --protein-model WAG --gamma --gamma-shape 0.85 --invariable \
+    --protein wag --gamma --gamma-shape 0.85 --invariable \
     --output protein_decay.txt --tree protein_annotated --threads 8
 ```
 
@@ -587,7 +610,7 @@ Analyze a binary (0/1) discrete morphological dataset (e.g., in NEXUS format `mo
 
 ```bash
 pandecay morpho.nex --format nexus --data-type discrete \
-    --model Mk --gamma \
+    --gamma \
     --output morpho_decay.txt --tree morpho_annotated
 ```
 *Note: For discrete data, ensure characters are '0' and '1'. `--parsmodel` (default for discrete) will use parsimony-like branch lengths.*
@@ -596,7 +619,7 @@ pandecay morpho.nex --format nexus --data-type discrete \
 Perform a GTR+G analysis, but provide PAUP* with a starting tree to potentially speed up or refine the initial ML search.
 
 ```bash
-pandecay alignment.fas --model GTR --gamma \
+pandecay alignment.fas --nst 6 --gamma \
     --starting-tree my_start_tree.nwk \
     --output results_with_start_tree.txt
 ```
@@ -618,7 +641,7 @@ pandecay alignment.fas --paup-block my_paup_commands.txt \
 Analyze which sites in the alignment support or conflict with each clade:
 
 ```bash
-pandecay alignment.fas --model GTR --gamma --site-analysis --visualize \
+pandecay alignment.fas --nst 6 --gamma --site-analysis --visualize \
     --output site_analysis_results.txt
 ```
 
@@ -628,14 +651,14 @@ This will generate site-specific likelihood analyses in addition to the standard
 Perform bootstrap analysis (100 replicates by default) alongside ML decay indices:
 
 ```bash
-pandecay alignment.fas --model GTR --gamma --bootstrap \
+pandecay alignment.fas --nst 6 --gamma --bootstrap \
     --output with_bootstrap.txt
 ```
 
 For more bootstrap replicates:
 
 ```bash
-pandecay alignment.fas --model GTR --gamma --bootstrap --bootstrap-reps 500 \
+pandecay alignment.fas --nst 6 --gamma --bootstrap --bootstrap-reps 500 \
     --output bootstrap500.txt
 ```
 
@@ -645,15 +668,15 @@ This will produce additional tree files with bootstrap values and a comprehensiv
 Perform only Bayesian decay analysis using MrBayes:
 
 ```bash
-pandecay alignment.fas --analysis bayesian --bayesian-software mrbayes \
-    --bayes-model GTR --bayes-ngen 500000 --output bayesian_only.txt
+pandecay alignment.fas --nst 6 --analysis bayesian --bayesian-software mrbayes \
+    --bayes-ngen 500000 --output bayesian_only.txt
 ```
 
 ### Example 10: Combined ML and Bayesian Analysis
 Run both ML and Bayesian analyses:
 
 ```bash
-pandecay alignment.fas --model GTR --gamma --analysis ml+bayesian --bayesian-software mrbayes \
+pandecay alignment.fas --nst 6 --gamma --analysis ml+bayesian --bayesian-software mrbayes \
     --bayes-ngen 1000000 --output combined_analysis.txt
 ```
 
@@ -661,7 +684,7 @@ pandecay alignment.fas --model GTR --gamma --analysis ml+bayesian --bayesian-sof
 Run both ML and parsimony analyses to compare modern and traditional support values:
 
 ```bash
-pandecay alignment.fas --model GTR --gamma --analysis ml+parsimony \
+pandecay alignment.fas --nst 6 --gamma --analysis ml+parsimony \
     --output ml_parsimony_analysis.txt
 ```
 
@@ -669,7 +692,7 @@ pandecay alignment.fas --model GTR --gamma --analysis ml+parsimony \
 Run ML, Bayesian, and parsimony analyses in a single run:
 
 ```bash
-pandecay alignment.fas --model GTR --gamma --analysis all \
+pandecay alignment.fas --nst 6 --gamma --analysis all \
     --bayesian-software mrbayes --bayes-ngen 1000000 --output complete_analysis.txt
 ```
 
@@ -777,7 +800,7 @@ Create a configuration file with constraint definitions:
 ```ini
 # my_analysis.ini
 alignment = vertebrates.fas
-model = GTR
+nst = 6
 gamma = true
 analysis = all
 constraint_mode = specific
