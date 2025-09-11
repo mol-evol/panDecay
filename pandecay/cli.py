@@ -287,9 +287,11 @@ def setup_argument_parser() -> argparse.ArgumentParser:
                                  "2=HKY-like (ti/tv ratio, estimated frequencies), "
                                  "6=GTR-like (all rates different, estimated frequencies)")
     model_group.add_argument("--protein", 
-                            choices=["jtt", "wag", "lg", "dayhoff", "mtrev", "cprev", "blosum62", "hivb", "hivw"],
+                            choices=["jtt", "wag", "lg", "dayhoff", "mtrev", "cprev", "blosum62", "hivb", "hivw", "jttpaml", "wagstar", "pam"],
                             help="Amino acid model for protein data (REQUIRED for protein). "
-                                 "Choices: jtt, wag, lg, dayhoff, mtrev, cprev, blosum62, hivb, hivw")
+                                 "Universal: jtt, wag, lg, dayhoff/pam, mtrev | "
+                                 "PAUP*-only: jttpaml*, wagstar* | "
+                                 "MrBayes-only: cprev^, blosum62^, hivb^, hivw^")
     
     # Model parameters (optional)
     mparams = parser.add_argument_group('Model Parameters (optional)')

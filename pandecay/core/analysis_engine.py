@@ -326,7 +326,27 @@ class panDecayIndices:
             if protein is None:
                 raise ValueError("Protein model is required for protein data")
             
-            cmd_parts.append(f"aaRMatrix={protein.upper()}")
+            # Map CLI args to PAUP* model names
+            paup_protein_map = {
+                "jtt": "JTT",
+                "jttpaml": "JTTPAML",  
+                "wag": "WAG", 
+                "wagstar": "WAGstar",  
+                "lg": "LG",
+                "dayhoff": "PAM",  
+                "pam": "PAM",  
+                "mtrev": "MTrev24",
+                # MrBayes-only models
+                "cprev": None,
+                "blosum62": None,
+                "hivb": None,
+                "hivw": None
+            }
+            paup_model = paup_protein_map.get(protein.lower())
+            if paup_model is None:
+                raise ValueError(f"Model '{protein}' is MrBayes-only (marked with ^ in help). "
+                                f"PAUP* supports: jtt, jttpaml*, wag, wagstar*, lg, dayhoff/pam, mtrev")
+            cmd_parts.append(f"aaRMatrix={paup_model}")
             
             # Base frequencies for proteins
             if base_freq:
@@ -919,7 +939,10 @@ class panDecayIndices:
             mb_protein_map = {
                 "jtt": "jones", "wag": "wag", "lg": "lg",
                 "dayhoff": "dayhoff", "mtrev": "mtrev", "cprev": "cprev",
-                "blosum62": "blosum", "hivb": "hivb", "hivw": "hivw"
+                "blosum62": "blosum", "hivb": "hivb", "hivw": "hivw",
+                "jttpaml": "jones",  # PAUP*-specific, map to closest
+                "wagstar": "wag",    # PAUP*-specific, map to closest 
+                "pam": "dayhoff"     # PAM is dayhoff in MrBayes
             }
             mb_model = mb_protein_map.get(self.protein_arg.lower(), self.protein_arg.lower())
             blocks.append(f"    prset aamodelpr=fixed({mb_model});")
