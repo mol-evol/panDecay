@@ -1,6 +1,6 @@
-# panDecay API Reference (v1.1.0)
+# panDecay API Reference (v1.1.1)
 
-This document provides API documentation for the panDecay v1.1.0 system, featuring a comprehensive monolithic architecture. Updated August 1, 2025.
+This document provides API documentation for the panDecay v1.1.1 system, featuring a comprehensive monolithic architecture. Updated August 1, 2025.
 
 ## Architecture Overview
 
@@ -72,7 +72,7 @@ Constants and configuration handled in `src/core/constants.py`:
 from src.core.constants import VERSION, DEFAULT_MODEL, DEFAULT_THREADS
 
 # Version information
-VERSION = "1.1.0"
+VERSION = "1.1.1"
 
 # Default parameters
 DEFAULT_MODEL = "GTR"
