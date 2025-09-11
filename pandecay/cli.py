@@ -290,8 +290,8 @@ def setup_argument_parser() -> argparse.ArgumentParser:
                             choices=["jtt", "wag", "lg", "dayhoff", "mtrev", "cprev", "blosum62", "hivb", "hivw", "jttpaml", "wagstar", "pam"],
                             help="Amino acid model for protein data (REQUIRED for protein). "
                                  "Universal: jtt, wag, lg, dayhoff/pam, mtrev | "
-                                 "PAUP*-only: jttpaml*, wagstar* | "
-                                 "MrBayes-only: cprev^, blosum62^, hivb^, hivw^")
+                                 "PAUP*-only: jttpaml, wagstar | "
+                                 "MrBayes-only: cprev, blosum62, hivb, hivw")
     
     # Model parameters (optional)
     mparams = parser.add_argument_group('Model Parameters (optional)')

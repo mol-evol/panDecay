@@ -344,8 +344,8 @@ class panDecayIndices:
             }
             paup_model = paup_protein_map.get(protein.lower())
             if paup_model is None:
-                raise ValueError(f"Model '{protein}' is MrBayes-only (marked with ^ in help). "
-                                f"PAUP* supports: jtt, jttpaml*, wag, wagstar*, lg, dayhoff/pam, mtrev")
+                raise ValueError(f"Model '{protein}' is MrBayes-only. "
+                                f"PAUP* supports: jtt, jttpaml, wag, wagstar, lg, dayhoff/pam, mtrev")
             cmd_parts.append(f"aaRMatrix={paup_model}")
             
             # Base frequencies for proteins
