@@ -45,7 +45,7 @@ from pandecay.core.constants import (
 )
 from pandecay.core.configuration import generate_config_template, parse_config, ConfigurationError
 from pandecay.core.analysis_engine import panDecayIndices, AnalysisEngineError
-from pandecay.core.utils import get_display_path, print_runtime_parameters, build_effective_model_display
+from pandecay.core.utils import get_display_path, print_runtime_parameters, build_effective_model_display, detect_format_from_extension
 
 
 def setup_output_structure(args, alignment_file: Path):
@@ -268,7 +268,7 @@ def setup_argument_parser() -> argparse.ArgumentParser:
     
     # Basic arguments
     parser.add_argument("alignment", nargs='?', help="Input alignment file path (can be specified in config file).")
-    parser.add_argument("--format", default=DEFAULT_ALIGNMENT_FORMAT, help="Alignment format.")
+    parser.add_argument("--format", default='auto', help="Alignment format. Use 'auto' for automatic detection from file extension and content, or specify: fasta, nexus, phylip, clustal, embl, genbank.")
     parser.add_argument("--gamma", action="store_true", help="Add Gamma rate heterogeneity (+G) to model.")
     parser.add_argument("--invariable", action="store_true", help="Add invariable sites (+I) to model.")
     
@@ -404,6 +404,17 @@ def validate_arguments(args: argparse.Namespace, parser: argparse.ArgumentParser
         logger.error("Error: Alignment file is required (either as positional argument or in config file)")
         parser.print_help()
         sys.exit(1)
+    
+    # Handle format auto-detection
+    if args.format == 'auto':
+        alignment_path = Path(args.alignment)
+        if alignment_path.exists():
+            detected_format = detect_format_from_extension(alignment_path)
+            logger.info(f"Auto-detected format: {detected_format} (from {alignment_path.name})")
+            args.format = detected_format
+        else:
+            logger.warning(f"Alignment file not found: {args.alignment}. Using default format: fasta")
+            args.format = 'fasta'
     
     # Normalize and validate data type
     args.data_type = normalize_data_type(args.data_type)

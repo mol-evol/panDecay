@@ -219,6 +219,9 @@ class panDecayIndices:
             logger.info("Using user-provided PAUP block for model specification.")
             self.paup_model_cmds = self.user_paup_block # This is the content of the block
 
+        # Build model string for display and internal use
+        self.model_str = self._build_model_string()
+        
         # --- Alignment Handling ---
         try:
             self.alignment = AlignIO.read(str(self.alignment_file), self.alignment_format)
@@ -271,6 +274,24 @@ class panDecayIndices:
             shutil.rmtree(self.temp_path)
         elif hasattr(self, 'temp_path') and self.keep_files:
             logger.info(f"Keeping temporary directory: {self.temp_path}")
+
+    def _build_model_string(self) -> str:
+        """Build display model string from parameters."""
+        if self.data_type == "dna":
+            nst_names = {1: "JC-type", 2: "HKY-type", 6: "GTR-type"}
+            base_name = nst_names.get(self.nst_arg, f"nst={self.nst_arg}")
+        elif self.data_type == "protein":
+            base_name = self.protein_arg.upper() if self.protein_arg else "UNKNOWN"
+        else:  # discrete
+            base_name = "Mk"
+        
+        # Add rate variation suffixes
+        if self.gamma_arg:
+            base_name += "+G"
+        if self.invariable_arg:
+            base_name += "+I"
+        
+        return base_name
 
     def _convert_model_to_paup(self, gamma_shape, prop_invar, base_freq, parsmodel_user_intent, nst=None, protein=None, has_gamma=False, has_invar=False):
         """Generate PAUP* lset commands from clean flag system."""

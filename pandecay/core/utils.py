@@ -448,6 +448,112 @@ class OverwritingProgress:
             self.finish("")
 
 
+def detect_format_from_extension(file_path: Union[str, Path]) -> str:
+    """
+    Auto-detect alignment format based on file extension.
+    
+    Args:
+        file_path: Path to alignment file
+        
+    Returns:
+        Format string suitable for PAUP* and other phylogenetic software
+    """
+    path_obj = Path(file_path)
+    extension = path_obj.suffix.lower()
+    
+    # Map common extensions to PAUP* format names
+    extension_mapping = {
+        '.nex': 'nexus',
+        '.nexus': 'nexus',
+        '.nxs': 'nexus',
+        '.fas': 'fasta',
+        '.fasta': 'fasta',
+        '.fa': 'fasta',
+        '.fna': 'fasta',
+        '.ffn': 'fasta',
+        '.faa': 'fasta',
+        '.frn': 'fasta',
+        '.phy': 'phylip',
+        '.phylip': 'phylip',
+        '.phyl': 'phylip',
+        '.aln': 'clustal',
+        '.clustal': 'clustal',
+        '.clustalw': 'clustal',
+        '.embl': 'embl',
+        '.genbank': 'genbank',
+        '.gb': 'genbank',
+        '.gbk': 'genbank'
+    }
+    
+    detected_format = extension_mapping.get(extension)
+    
+    if detected_format:
+        return detected_format
+    else:
+        # Fallback: try to peek at file content to make an educated guess
+        return _detect_format_from_content(path_obj)
+
+
+def _detect_format_from_content(file_path: Path) -> str:
+    """
+    Attempt to detect format from file content when extension is unclear.
+    
+    Args:
+        file_path: Path to alignment file
+        
+    Returns:
+        Best guess format string, defaults to 'fasta'
+    """
+    try:
+        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+            # Read first few lines to determine format
+            first_lines = []
+            for i, line in enumerate(f):
+                if i >= 10:  # Only check first 10 lines
+                    break
+                first_lines.append(line.strip())
+        
+        content = '\n'.join(first_lines).upper()
+        
+        # Check for NEXUS format
+        if '#NEXUS' in content or 'BEGIN DATA' in content or 'BEGIN TAXA' in content:
+            return 'nexus'
+        
+        # Check for PHYLIP format (numbers at start of first line)
+        if first_lines and len(first_lines[0].split()) == 2:
+            try:
+                # PHYLIP format starts with: ntax nchar
+                parts = first_lines[0].split()
+                int(parts[0])  # number of taxa
+                int(parts[1])  # number of characters
+                return 'phylip'
+            except (ValueError, IndexError):
+                pass
+        
+        # Check for CLUSTAL format
+        if any('CLUSTAL' in line for line in first_lines):
+            return 'clustal'
+        
+        # Check for EMBL format
+        if any(line.startswith('ID   ') for line in first_lines):
+            return 'embl'
+        
+        # Check for GenBank format
+        if any(line.startswith('LOCUS ') for line in first_lines):
+            return 'genbank'
+        
+        # Default to FASTA if we find > symbols or if nothing else matches
+        if any(line.startswith('>') for line in first_lines) or not content:
+            return 'fasta'
+        
+        # Final fallback
+        return 'fasta'
+        
+    except (IOError, OSError):
+        # If we can't read the file, default to fasta
+        return 'fasta'
+
+
 def show_progress(message: str, style: str = "unicode"):
     """
     Convenience function to show progress with spinner.

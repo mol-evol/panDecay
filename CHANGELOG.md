@@ -5,6 +5,23 @@ All notable changes to panDecay will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.2] - 2025-09-11
+
+### Added
+- **Automatic Format Detection**: panDecay now automatically detects alignment format from file extensions
+  - Supports common extensions: .fas/.fasta (FASTA), .nex/.nexus (NEXUS), .phy/.phylip (PHYLIP), .aln/.clustal (Clustal), .embl (EMBL), .gb/.genbank (GenBank)
+  - Falls back to content inspection when extension is unclear
+  - Default `--format` changed from 'fasta' to 'auto'
+  - Manual override still available with `--format <format>`
+
+### Fixed
+- **Missing model_str attribute**: Fixed runtime error where `model_str` attribute was referenced but not initialized
+- **Enhanced usability**: No longer need to specify `--format` for common file types
+
+### Changed
+- **Simplified command-line usage**: Most examples no longer require explicit `--format` specification
+- **Updated documentation**: README examples updated to show streamlined usage
+
 ## [1.1.1] - 2025-08-04
 
 ### Breaking Changes

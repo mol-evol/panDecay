@@ -261,7 +261,7 @@ positional arguments:
 
 options:
   -h, --help            show this help message and exit
-  --format FORMAT       Alignment format. (default: fasta)
+  --format FORMAT       Alignment format. Use 'auto' for automatic detection from file extension and content, or specify: fasta, nexus, phylip, clustal, embl, genbank. (default: auto)
 **Model Specification (REQUIRED - no defaults):**
   --nst {1,2,6}         Substitution types for DNA data (REQUIRED for DNA).
                         1=JC-like (equal rates & frequencies), 2=HKY-like (ti/tv ratio, estimated frequencies), 
@@ -385,7 +385,15 @@ Configuration and Constraint Options:
 
 ### Sequence Alignment
 A multiple sequence alignment file.
-*   **Formats:** FASTA, NEXUS, PHYLIP, Clustal, etc. (any format BioPython's `AlignIO` can read). Use the `--format` option if not FASTA.
+*   **Formats:** FASTA, NEXUS, PHYLIP, Clustal, EMBL, GenBank, etc. (any format BioPython's `AlignIO` can read).
+*   **Automatic Format Detection:** panDecay automatically detects the format from file extensions:
+    *   `.fas`, `.fasta`, `.fa`, `.fna`, `.ffn`, `.faa`, `.frn` → FASTA
+    *   `.nex`, `.nexus`, `.nxs` → NEXUS
+    *   `.phy`, `.phylip`, `.phyl` → PHYLIP
+    *   `.aln`, `.clustal`, `.clustalw` → Clustal
+    *   `.embl` → EMBL
+    *   `.gb`, `.gbk`, `.genbank` → GenBank
+*   **Manual Override:** Use `--format <format>` to specify format explicitly if needed.
 *   **Content:** DNA, protein, or binary (0/1) discrete morphological characters. Use `--data-type` to specify.
     *   For discrete data, characters should be '0' or '1'. Missing data as '?' and gaps as '-' are also recognized.
 
@@ -597,10 +605,10 @@ pandecay alignment.fas --analysis parsimony \
 ```
 
 ### Example 3: Protein Data with Specific Model
-Analyze a protein alignment using the WAG model, fixed gamma shape, and estimating proportion of invariable sites.
+Analyze a protein alignment using the WAG model, fixed gamma shape, and estimating proportion of invariable sites. The PHYLIP format is auto-detected from the .phy extension.
 
 ```bash
-pandecay proteins.phy --format phylip --data-type protein \
+pandecay proteins.phy --data-type protein \
     --protein wag --gamma --gamma-shape 0.85 --invariable \
     --output protein_decay.txt --tree protein_annotated --threads 8
 ```
@@ -609,7 +617,7 @@ pandecay proteins.phy --format phylip --data-type protein \
 Analyze a binary (0/1) discrete morphological dataset (e.g., in NEXUS format `morpho.nex`) using the Mk+G model.
 
 ```bash
-pandecay morpho.nex --format nexus --data-type discrete \
+pandecay morpho.nex --data-type discrete \
     --gamma \
     --output morpho_decay.txt --tree morpho_annotated
 ```
