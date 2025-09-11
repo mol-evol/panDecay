@@ -157,7 +157,7 @@ def write_analysis_config(args, alignment_file: Path, config_output_path: Path):
             f.write("Analysis Parameters:\n")
             f.write("-" * 20 + "\n")
             f.write(f"Analysis mode: {args.analysis}\n")
-            f.write(f"Base model: {args.model}\n")
+            f.write(f"Model: {build_effective_model_display(args)}\n")
             f.write(f"Gamma rate variation: {args.gamma}\n")
             f.write(f"Invariable sites: {args.invariable}\n")
             f.write(f"Threads: {args.threads}\n\n")
