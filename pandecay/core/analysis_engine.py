@@ -326,7 +326,7 @@ class panDecayIndices:
             if protein is None:
                 raise ValueError("Protein model is required for protein data")
             
-            cmd_parts.append(f"protein={protein.lower()}")
+            cmd_parts.append(f"aaRMatrix={protein.upper()}")
             
             # Base frequencies for proteins
             if base_freq:
