@@ -325,9 +325,7 @@ def setup_argument_parser() -> argparse.ArgumentParser:
     
     # Bayesian-specific options
     bayesian_opts = parser.add_argument_group('Bayesian Analysis Options')
-    bayesian_opts.add_argument("--bayesian-software", choices=["mrbayes"], 
-                              default="mrbayes", help="Bayesian software to use (default: mrbayes)")
-    bayesian_opts.add_argument("--mrbayes-path", default=DEFAULT_MRBAYES_PATH, help="Path to MrBayes executable")
+    bayesian_opts.add_argument("--mrbayes-path", default=DEFAULT_MRBAYES_PATH, help="Path to MrBayes executable (default: mb)")
     bayesian_opts.add_argument("--bayes-ngen", type=int, default=DEFAULT_BAYES_NGEN, help="Number of MCMC generations")
     bayesian_opts.add_argument("--bayes-burnin", type=float, default=DEFAULT_BAYES_BURNIN, help="Burnin fraction (0-1)")
     bayesian_opts.add_argument("--bayes-chains", type=int, default=DEFAULT_BAYES_CHAINS, help="Number of MCMC chains")
@@ -422,9 +420,7 @@ def validate_arguments(args: argparse.Namespace, parser: argparse.ArgumentParser
     # Validate model specification (strict - no backward compatibility)
     validate_model_flags(args)
     
-    # Validate Bayesian analysis arguments
-    if args.analysis == "ml" and args.bayesian_software:
-        logger.warning("Bayesian software specified but analysis mode is ML-only. Bayesian options will be ignored.")
+    # Note: Bayesian options are only relevant when Bayesian analysis is included in analysis mode
 
 
 def configure_logging(args: argparse.Namespace) -> None:
@@ -479,7 +475,6 @@ def run_analysis(args: argparse.Namespace, paup_block_content: str) -> None:
         parsmodel=args.parsmodel,
         paup_block=paup_block_content,
         analysis_mode=args.analysis,
-        bayesian_software=args.bayesian_software,
         mrbayes_path=args.mrbayes_path,
         bayes_ngen=args.bayes_ngen,
         bayes_burnin=args.bayes_burnin,

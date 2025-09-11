@@ -82,7 +82,7 @@ class panDecayIndices:
                  debug=False, keep_files=False, gamma_shape=None, prop_invar=None,
                  base_freq=None, nst=None, protein=None, gamma=False, invariable=False,
                  parsmodel=None, paup_block=None, analysis_mode="ml",
-                 bayesian_software=None, mrbayes_path="mb",
+                 mrbayes_path="mb",
                  bayes_ngen=1000000, bayes_burnin=0.25,
                  bayes_chains=4, bayes_sample_freq=1000, marginal_likelihood="ss",
                  ss_alpha=0.4, ss_nsteps=50, use_mpi=False, mpi_processors=None,
@@ -117,7 +117,6 @@ class panDecayIndices:
         self.do_parsimony = "parsimony" in analysis_mode or analysis_mode == "all"
         
         # Bayesian analysis parameters
-        self.bayesian_software = bayesian_software
         self.mrbayes_path = mrbayes_path
         # New system: Bayesian analysis uses same model specification as ML
         self.bayes_ngen = bayes_ngen
@@ -1085,9 +1084,7 @@ class panDecayIndices:
             logger.error("No ML tree available. Build ML tree first to identify clades.")
             return {}
             
-        if not self.bayesian_software:
-            logger.error("No Bayesian software specified.")
-            return {}
+        # MrBayes is the only supported Bayesian software
             
         progress = ProgressIndicator()
         progress.start(f"Running Bayesian analysis ({self.bayes_ngen:,} gen, {self.bayes_chains} chains)...")
@@ -3792,7 +3789,7 @@ class panDecayIndices:
             if self.do_ml:
                 analysis_types.append("Maximum Likelihood")
             if self.do_bayesian:
-                analysis_types.append(f"Bayesian ({self.bayesian_software})")
+                analysis_types.append("Bayesian (MrBayes)")
             if self.do_parsimony:
                 analysis_types.append("Parsimony")
             
@@ -3870,7 +3867,7 @@ class panDecayIndices:
             if self.do_ml:
                 analysis_types.append("Maximum Likelihood")
             if self.do_bayesian:
-                analysis_types.append(f"Bayesian ({self.bayesian_software})")
+                analysis_types.append("Bayesian (MrBayes)")
             if self.do_parsimony:
                 analysis_types.append("Parsimony")
             
@@ -4034,7 +4031,7 @@ class panDecayIndices:
             
                 # Bayesian parameters
                 if has_bayesian or self.do_bayesian:
-                    f.write(f"- Bayesian software: `{self.bayesian_software}`\n")
+                    f.write("- Bayesian software: `MrBayes`\n")
                     # Build Bayesian model display string\n                    if self.data_type == \"dna\":\n                        nst_names = {1: \"JC-type\", 2: \"HKY-type\", 6: \"GTR-type\"}\n                        bayes_model_str = nst_names.get(self.nst_arg, f\"nst={self.nst_arg}\")\n                    elif self.data_type == \"protein\":\n                        bayes_model_str = self.protein_arg.upper() if self.protein_arg else \"UNKNOWN\"\n                    else:\n                        bayes_model_str = \"Mk\"\n                    \n                    if self.gamma_arg:\n                        bayes_model_str += \"+G\"\n                    if self.invariable_arg:\n                        bayes_model_str += \"+I\"\n                        \n                    f.write(f\"- Bayesian model: `{bayes_model_str}`\n\")
                     f.write(f"- MCMC generations: `{self.bayes_ngen}`\n")
                     f.write(f"- Burnin fraction: `{self.bayes_burnin}`\n")

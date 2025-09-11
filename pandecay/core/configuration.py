@@ -108,7 +108,6 @@ def parse_config(config_file: Union[str, Path], args: argparse.Namespace) -> arg
                 'analysis': 'analysis',
                 'bootstrap': 'bootstrap',
                 'bootstrap_reps': 'bootstrap_reps',
-                'bayesian_software': 'bayesian_software',
                 'mrbayes_path': 'mrbayes_path',
                 'bayes_ngen': 'bayes_ngen',
                 'bayes_burnin': 'bayes_burnin',
