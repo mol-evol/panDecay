@@ -195,10 +195,6 @@ max_asdsf = 0.01
 # If false, warnings are issued but analysis continues
 convergence_strict = false
 
-# Timeout for parsing MrBayes consensus trees in seconds (default: 30.0)
-# Set to 0 to disable timeout
-mrbayes_parse_timeout = 30.0
-
 # ==============================================================================
 # PARALLEL PROCESSING (MrBayes only)
 # ==============================================================================

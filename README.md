@@ -247,7 +247,7 @@ usage: pandecay [-h] [--format FORMAT] [--gamma] [--invariable] [--paup PAUP]
           [--beagle-precision {single,double}] [--beagle-scaling {none,dynamic,always}]
           [--check-convergence | --no-check-convergence] [--min-ess MIN_ESS]
           [--max-psrf MAX_PSRF] [--max-asdsf MAX_ASDSF] [--convergence-strict]
-          [--mrbayes-parse-timeout MRBAYES_PARSE_TIMEOUT] [--visualize]
+          [--visualize]
           [--viz-format {png,pdf,svg}] [--annotation {au,lnl}]
           [--output-style {unicode,ascii}] [--constraint-mode {all,specific,exclude}]
           [--test-branches TEST_BRANCHES] [--constraint-file CONSTRAINT_FILE]
@@ -351,8 +351,6 @@ Convergence Checking Options (MrBayes):
   --max-psrf MAX_PSRF   Maximum PSRF (Potential Scale Reduction Factor) threshold (default: 1.01)
   --max-asdsf MAX_ASDSF Maximum ASDSF (Average Standard Deviation of Split Frequencies) threshold (default: 0.01)
   --convergence-strict  Fail analysis if convergence criteria not met (default: warn only)
-  --mrbayes-parse-timeout TIMEOUT
-                        Timeout for parsing MrBayes output files in seconds (default: 30.0)
 
 Bootstrap Analysis (optional):
   --bootstrap           Perform bootstrap analysis to calculate support values. (default: False)

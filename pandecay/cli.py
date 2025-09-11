@@ -37,7 +37,6 @@ from pandecay.core.constants import (
     DEFAULT_MIN_ESS,
     DEFAULT_MAX_PSRF,
     DEFAULT_MAX_ASDSF,
-    DEFAULT_MRBAYES_PARSE_TIMEOUT,
     DEFAULT_VIZ_FORMAT,
     DEFAULT_ANNOTATION,
     DEFAULT_OUTPUT_STYLE,
@@ -360,8 +359,6 @@ def setup_argument_parser() -> argparse.ArgumentParser:
                                  help=f"Maximum ASDSF (Average Standard Deviation of Split Frequencies) threshold (default: {DEFAULT_MAX_ASDSF})")
     convergence_opts.add_argument("--convergence-strict", action="store_true",
                                  help="Fail analysis if convergence criteria not met (default: warn only)")
-    convergence_opts.add_argument("--mrbayes-parse-timeout", type=float, default=DEFAULT_MRBAYES_PARSE_TIMEOUT,
-                                 help=f"Timeout for parsing MrBayes consensus trees in seconds (0 to disable, default: {DEFAULT_MRBAYES_PARSE_TIMEOUT})")
 
     # Visualization options
     viz_opts = parser.add_argument_group('Visualization Output (optional)')
@@ -499,7 +496,6 @@ def run_analysis(args: argparse.Namespace, paup_block_content: str) -> None:
         max_psrf=args.max_psrf,
         max_asdsf=args.max_asdsf,
         convergence_strict=args.convergence_strict,
-        mrbayes_parse_timeout=args.mrbayes_parse_timeout,
         output_style=args.output_style
     )
     

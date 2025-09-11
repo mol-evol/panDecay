@@ -91,7 +91,7 @@ class panDecayIndices:
                  constraint_mode="all", test_branches=None, constraint_file=None,
                  config_constraints=None, check_convergence=True, min_ess=200,
                  max_psrf=1.01, max_asdsf=0.01, convergence_strict=False,
-                 mrbayes_parse_timeout=30.0, output_style="unicode"):
+                 output_style="unicode"):
 
         self.alignment_file = Path(alignment_file)
         self.alignment_format = alignment_format # Keep original model string for reference
@@ -149,8 +149,7 @@ class panDecayIndices:
         self.max_asdsf = max_asdsf
         self.convergence_strict = convergence_strict
         
-        # Output and parsing parameters
-        self.mrbayes_parse_timeout = mrbayes_parse_timeout
+        # Output parameters
         self.output_style = output_style
 
         self.data_type = data_type.lower()
@@ -1800,10 +1799,6 @@ class panDecayIndices:
         posterior_probs = {}
         
         try:
-            # Add timeout protection
-            import time
-            start_time = time.time()
-            max_time = self.mrbayes_parse_timeout if self.mrbayes_parse_timeout > 0 else float('inf')
             
             # Check if this is a large tree and warn
             if len(newick_str) > 1_000_000:  # 1MB
@@ -1838,15 +1833,9 @@ class panDecayIndices:
             
             i = 0
             while i < len(newick_str):
-                # Check timeout
-                if time.time() - start_time > max_time:
-                    logger.warning(f"Posterior probability extraction timed out after {max_time}s")
-                    break
-                
                 # Progress logging
                 if nodes_processed > 0 and nodes_processed % 1000 == 0:
-                    elapsed = time.time() - start_time
-                    logger.info(f"  Processed {nodes_processed} nodes in {elapsed:.1f}s...")
+                    logger.info(f"  Processed {nodes_processed} nodes...")
                     
                 char = newick_str[i]
                 
