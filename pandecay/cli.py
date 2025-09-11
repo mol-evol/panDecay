@@ -610,7 +610,30 @@ def main():
             sys.exit(1)
     
     # Validate arguments and handle early exits
-    validate_arguments(args, parser)
+    try:
+        validate_arguments(args, parser)
+    except ValueError as e:
+        # Provide user-friendly error messages for missing model specifications
+        error_msg = str(e)
+        print(f"\nError: {error_msg}", file=sys.stderr)
+        
+        if "--nst is REQUIRED for DNA data" in error_msg:
+            print("\nPlease specify a substitution model with --nst:", file=sys.stderr)
+            print("  --nst 1  for JC-like model (simplest)", file=sys.stderr)
+            print("  --nst 2  for HKY-like model (medium complexity)", file=sys.stderr)  
+            print("  --nst 6  for GTR-like model (most complex)", file=sys.stderr)
+            print("\nExample commands:", file=sys.stderr)
+            print(f"  pandecay {args.alignment} --nst 6 --gamma", file=sys.stderr)
+            print(f"  pandecay {args.alignment} --nst 2 --invariable", file=sys.stderr)
+        elif "--protein is REQUIRED for protein data" in error_msg:
+            print("\nPlease specify a protein substitution model with --protein:", file=sys.stderr)
+            print("  Common models: jtt, wag, lg, dayhoff", file=sys.stderr)
+            print("\nExample commands:", file=sys.stderr)
+            print(f"  pandecay {args.alignment} --data-type protein --protein wag", file=sys.stderr)
+            print(f"  pandecay {args.alignment} --data-type protein --protein lg --gamma", file=sys.stderr)
+        
+        print("\nFor more help: pandecay --help", file=sys.stderr)
+        sys.exit(1)
     
     # Build accurate model display string for the new flag system
     effective_model_display = build_effective_model_display(args)
