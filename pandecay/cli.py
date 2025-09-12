@@ -44,7 +44,7 @@ from pandecay.core.constants import (
 )
 from pandecay.core.configuration import generate_config_template, parse_config, ConfigurationError
 from pandecay.core.analysis_engine import panDecayIndices, AnalysisEngineError
-from pandecay.core.utils import get_display_path, print_runtime_parameters, build_effective_model_display, detect_format_from_extension
+from pandecay.core.utils import get_display_path, print_runtime_parameters, build_effective_model_display, detect_format_from_extension, detect_sequence_type
 
 
 def setup_output_structure(args, alignment_file: Path):
@@ -277,7 +277,7 @@ def setup_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output", default=DEFAULT_OUTPUT_FILE, help="[DEPRECATED] Use --output-dir and --project-name instead.")
     parser.add_argument("--tree", default=DEFAULT_TREE_BASE, help="[DEPRECATED] Tree naming now uses project name. Multiple trees with support measures (PD, LD, BD, BS, AU) will be generated.")
     parser.add_argument("--site-analysis", action="store_true", help="Perform site-specific likelihood analysis to identify supporting/conflicting sites for each branch.")
-    parser.add_argument("--data-type", default=DEFAULT_DATA_TYPE, help="Type of sequence data. Case insensitive. Choices: dna/DNA, protein/Protein, discrete.")
+    parser.add_argument("--data-type", default=None, help="Type of sequence data. Case insensitive. Choices: dna/DNA, protein/Protein, discrete. (default: auto-detect, fallback to dna)")
     
     # Model specification (REQUIRED - no defaults)
     model_group = parser.add_argument_group('Model Specification (REQUIRED)')
@@ -413,7 +413,29 @@ def validate_arguments(args: argparse.Namespace, parser: argparse.ArgumentParser
             logger.warning(f"Alignment file not found: {args.alignment}. Using default format: fasta")
             args.format = 'fasta'
     
-    # Normalize and validate data type
+    # Handle data type: auto-detect if not specified, otherwise normalize
+    data_type_explicitly_set = args.data_type is not None
+    
+    if not data_type_explicitly_set:
+        # Auto-detect sequence type if file exists, otherwise use default
+        if args.alignment:
+            alignment_path = Path(args.alignment)
+            if alignment_path.exists():
+                detected_type = detect_sequence_type(alignment_path, args.format)
+                if detected_type == 'protein':
+                    logger.info(f"Auto-detected sequence type: protein")
+                    args.data_type = 'protein'
+                elif detected_type == 'ambiguous':
+                    logger.warning("Sequence type ambiguous, assuming DNA. Use --data-type to specify.")
+                    args.data_type = DEFAULT_DATA_TYPE
+                else:
+                    args.data_type = DEFAULT_DATA_TYPE  # DNA or None/failed detection
+            else:
+                args.data_type = DEFAULT_DATA_TYPE
+        else:
+            args.data_type = DEFAULT_DATA_TYPE
+    
+    # Normalize data type (for explicit cases)
     args.data_type = normalize_data_type(args.data_type)
     
     # Validate model specification (strict - no backward compatibility)
@@ -618,6 +640,7 @@ def main():
             print("\nExample commands:", file=sys.stderr)
             print(f"  pandecay {args.alignment} --nst 6 --gamma", file=sys.stderr)
             print(f"  pandecay {args.alignment} --nst 2 --invariable", file=sys.stderr)
+            print("\nNote: If your file contains protein sequences, use --data-type protein", file=sys.stderr)
         elif "--protein is REQUIRED for protein data" in error_msg:
             print("\nPlease specify a protein substitution model with --protein:", file=sys.stderr)
             print("  Common models: jtt, wag, lg, dayhoff", file=sys.stderr)

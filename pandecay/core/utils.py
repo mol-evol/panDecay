@@ -568,3 +568,54 @@ def show_progress(message: str, style: str = "unicode"):
     indicator = ProgressIndicator(style)
     indicator.start(message)
     return indicator
+
+
+def detect_sequence_type(alignment_file, format_type):
+    """
+    Detect if sequences are DNA, protein, or ambiguous based on character content.
+    
+    Args:
+        alignment_file: Path to alignment file
+        format_type: Format string for BioPython AlignIO
+        
+    Returns:
+        'dna', 'protein', 'ambiguous', or None (if detection fails)
+    """
+    try:
+        from Bio import AlignIO
+        from pathlib import Path
+        
+        alignment = AlignIO.read(str(alignment_file), format_type)
+        
+        # Sample first few sequences (up to 3) to detect type
+        sample_seqs = []
+        for i, record in enumerate(alignment):
+            if i >= 3:  # Sample first 3 sequences
+                break
+            # Get sequence string, remove gaps and convert to upper
+            seq_str = str(record.seq).replace('-', '').replace('.', '').upper()
+            sample_seqs.append(seq_str[:100])  # First 100 chars
+        
+        if not sample_seqs:
+            return None
+            
+        combined = ''.join(sample_seqs)
+        
+        # Count character frequencies
+        dna_chars = set('ACGTN')
+        protein_only_chars = set('DEFHIKLMPQRSVWY')  # Amino acids not in DNA
+        
+        has_protein_only = any(c in protein_only_chars for c in combined)
+        all_dna_compatible = all(c in dna_chars or c == 'X' for c in combined)
+        
+        if has_protein_only:
+            return 'protein'
+        elif all_dna_compatible:
+            return 'dna'
+        else:
+            # Could be protein with only ACGT amino acids or truly ambiguous
+            # Check composition - DNA usually has more uniform ACGT distribution
+            # Proteins with only ACGT amino acids are rare
+            return 'ambiguous'
+    except Exception:
+        return None  # Can't detect
