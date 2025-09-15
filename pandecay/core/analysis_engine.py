@@ -965,22 +965,25 @@ class panDecayIndices:
             beagle_cmd += f"beaglescaling={self.beagle_scaling};"
             blocks.append(beagle_cmd)
         
-        # MCMC settings
-        blocks.append(f"    mcmc ngen={self.bayes_ngen} samplefreq={self.bayes_sample_freq} "
-                     f"nchains={self.bayes_chains} savebrlens=yes printfreq=1000 diagnfreq=5000;")
-        
-        # Summary commands first
+        # Calculate burnin samples first (needed for both MCMC and SS)
         burnin_samples = int(self.bayes_ngen / self.bayes_sample_freq * self.bayes_burnin)
-        blocks.append(f"    sump burnin={burnin_samples};")
-        blocks.append(f"    sumt burnin={burnin_samples};")
         
-        # Add stepping-stone sampling if requested
+        # MCMC or stepping-stone sampling
         if self.marginal_likelihood == "ss":
-            # Stepping-stone sampling parameters
+            # Stepping-stone sampling replaces standard MCMC
             # alpha: shape parameter for Beta distribution (default 0.4)
             # nsteps: number of steps between prior and posterior (default 50)
-            blocks.append(f"    ss alpha={self.ss_alpha} nsteps={self.ss_nsteps} "
-                         f"burnin={burnin_samples};")
+            blocks.append(f"    ss ngen={self.bayes_ngen} samplefreq={self.bayes_sample_freq} "
+                         f"nchains={self.bayes_chains} alpha={self.ss_alpha} nsteps={self.ss_nsteps} "
+                         f"burnin={burnin_samples} printfreq=1000 diagnfreq=5000;")
+        else:
+            # Standard MCMC for harmonic mean or path sampling
+            blocks.append(f"    mcmc ngen={self.bayes_ngen} samplefreq={self.bayes_sample_freq} "
+                         f"nchains={self.bayes_chains} savebrlens=yes printfreq=1000 diagnfreq=5000;")
+        
+        # Summary commands (work for both MCMC and SS)
+        blocks.append(f"    sump burnin={burnin_samples};")
+        blocks.append(f"    sumt burnin={burnin_samples};")
         
         blocks.append("end;")
         blocks.append("")  # Empty line
@@ -1106,6 +1109,12 @@ class panDecayIndices:
             logger.error("No ML tree available. Build ML tree first to identify clades.")
             return {}
             
+        # Validate stepping-stone parameters if using ss
+        if self.marginal_likelihood == "ss":
+            total_samples = self.bayes_ngen / self.bayes_sample_freq
+            if total_samples < self.ss_nsteps:
+                raise ValueError(f"Stepping-stone sampling requires at least {self.ss_nsteps} samples (1 per step), but current settings yield only {int(total_samples)} samples. Increase --bayes-ngen or decrease --bayes-sample-freq.")
+        
         # MrBayes is the only supported Bayesian software
             
         progress = ProgressIndicator()

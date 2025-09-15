@@ -642,11 +642,10 @@ def main():
             print(f"  pandecay {args.alignment} --nst 2 --invariable", file=sys.stderr)
             print("\nNote: If your file contains protein sequences, use --data-type protein", file=sys.stderr)
         elif "--protein is REQUIRED for protein data" in error_msg:
-            print("\nPlease specify a protein substitution model with --protein:", file=sys.stderr)
-            print("  Common models: jtt, wag, lg, dayhoff", file=sys.stderr)
             print("\nExample commands:", file=sys.stderr)
-            print(f"  pandecay {args.alignment} --data-type protein --protein wag", file=sys.stderr)
-            print(f"  pandecay {args.alignment} --data-type protein --protein lg --gamma", file=sys.stderr)
+            print(f"  pandecay {args.alignment} --protein wag", file=sys.stderr)
+            print(f"  pandecay {args.alignment} --protein lg --gamma", file=sys.stderr)
+            print("\nNote: Some models are software-specific. Use --help to see compatibility.", file=sys.stderr)
         
         print("\nFor more help: pandecay --help", file=sys.stderr)
         sys.exit(1)
