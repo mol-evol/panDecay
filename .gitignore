@@ -108,12 +108,10 @@ MLDecay/
 # Documentation files (private)
 activeContext.md
 progress.md
-pytest.ini
 REPOSITORY_CLEANUP.md
 INTERPRETATION_GUIDE.md
 RELEASE_WORKFLOW.md
 dev/
-tests/
 
 # PyPI publishing files
 .pypirc_template
